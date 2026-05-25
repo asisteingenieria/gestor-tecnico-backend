@@ -10,7 +10,8 @@ const pool = mysql.createPool({
   database: process.env.DB_DATABASE,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  timezone: '+00:00'  // Leer/escribir DATETIME siempre como UTC
 });
 
 // Exportamos la promesa del pool para poder usar async/await
