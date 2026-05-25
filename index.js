@@ -52,6 +52,8 @@ app.use('/api/activos-tecnico', require('./routes/activosTecnico'));
 app.use('/api/inventario-directivo', require('./routes/inventarioDirectivo'));
 app.use('/api/auto-activos', require('./routes/autoActivos'));
 app.use('/api/script-parser', require('./routes/scriptParser'));
+app.use('/api/agentes', require('./routes/agentes'));
+app.use('/api/disenos', require('./routes/disenos'));
 
 app.get('/', (req, res) => {
   res.send('API del Call Center Support está funcionando!');
