@@ -1,14 +1,23 @@
 const db = require('../config/db');
 
+function calcularTipo(valor) {
+    if (valor === null || valor === undefined || valor === '') return null;
+    return parseFloat(valor) >= 400000 ? 'activo' : 'gasto';
+}
+
 class Activo {
     static async getAll() {
         try {
             const [rows] = await db.query(`
-                SELECT 
+                SELECT
                     a.*,
-                    u.full_name as created_by_name
+                    u.full_name as created_by_name,
+                    ag.nombres   AS agente_nombres,
+                    ag.apellidos AS agente_apellidos,
+                    ag.campana   AS agente_campana
                 FROM activos a
-                LEFT JOIN users u ON a.created_by_id = u.id
+                LEFT JOIN users   u  ON a.created_by_id = u.id
+                LEFT JOIN agentes ag ON a.agente_id      = ag.id
                 ORDER BY a.created_at DESC
             `);
             return rows;
@@ -20,11 +29,15 @@ class Activo {
     static async getById(id) {
         try {
             const [rows] = await db.query(`
-                SELECT 
+                SELECT
                     a.*,
-                    u.full_name as created_by_name
+                    u.full_name as created_by_name,
+                    ag.nombres   AS agente_nombres,
+                    ag.apellidos AS agente_apellidos,
+                    ag.campana   AS agente_campana
                 FROM activos a
-                LEFT JOIN users u ON a.created_by_id = u.id
+                LEFT JOIN users   u  ON a.created_by_id = u.id
+                LEFT JOIN agentes ag ON a.agente_id      = ag.id
                 WHERE a.id = ?
             `, [id]);
             return rows[0];
@@ -52,13 +65,9 @@ class Activo {
                 clasificacion,
                 clasificacion_activo_fijo,
                 adjunto_archivo,
-                // Campo Site
                 site,
-                // Campo Puesto
                 puesto,
-                // Campo Asignado
                 asignado,
-                // Nuevos campos dinámicos
                 marca_modelo,
                 numero_serie_fabricante,
                 cpu_procesador,
@@ -66,7 +75,8 @@ class Activo {
                 almacenamiento,
                 sistema_operativo,
                 pulgadas,
-                estado
+                estado,
+                agente_id
             } = activoData;
 
             // Validar que el número de placa no existe
@@ -107,22 +117,24 @@ class Activo {
                 else if (placa.startsWith('ECC-TV') || placa.startsWith("ECC'TV")) tipo_activo = 'ECC-TV';
             }
 
+            const tipo = calcularTipo(valor);
+
             const [result] = await db.query(`
                 INSERT INTO activos (
                     numero_placa, centro_costes, ubicacion, empresa, responsable,
-                    proveedor, valor, fecha_compra, numero_social, poliza, aseguradora,
+                    proveedor, valor, tipo, agente_id, fecha_compra, numero_social, poliza, aseguradora,
                     garantia, fecha_vencimiento_garantia, orden_compra, clasificacion,
                     clasificacion_activo_fijo, adjunto_archivo, created_by_id, tipo_activo,
                     site, puesto, asignado, marca_modelo, numero_serie_fabricante, cpu_procesador, memoria_ram,
                     almacenamiento, sistema_operativo, pulgadas, estado
-                ) VALUES (?, ?, ?, 'Asiste', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, 'Asiste', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 numero_placa, centro_costes, ubicacion, responsable,
-                proveedor, valor || null, fecha_compra, numero_social, poliza, aseguradora,
+                proveedor, valor || null, tipo, agente_id || null, fecha_compra, numero_social, poliza, aseguradora,
                 garantia, fecha_vencimiento_garantia || null, orden_compra, clasificacion,
                 clasificacion_activo_fijo, adjunto_archivo, createdById, tipo_activo,
-                site || null, puesto || null, asignado || null, marca_modelo || null, numero_serie_fabricante || null, cpu_procesador || null, 
-                memoria_ram || null, almacenamiento || null, sistema_operativo || null, 
+                site || null, puesto || null, asignado || null, marca_modelo || null, numero_serie_fabricante || null, cpu_procesador || null,
+                memoria_ram || null, almacenamiento || null, sistema_operativo || null,
                 pulgadas || null, estado || 'funcional'
             ]);
 
@@ -151,13 +163,9 @@ class Activo {
                 clasificacion,
                 clasificacion_activo_fijo,
                 adjunto_archivo,
-                // Campo Site
                 site,
-                // Campo Puesto
                 puesto,
-                // Campo Asignado
                 asignado,
-                // Nuevos campos dinámicos
                 marca_modelo,
                 numero_serie_fabricante,
                 cpu_procesador,
@@ -165,7 +173,8 @@ class Activo {
                 almacenamiento,
                 sistema_operativo,
                 pulgadas,
-                estado
+                estado,
+                agente_id
             } = activoData;
 
             // Validar que el número de placa no existe en otro activo
@@ -206,11 +215,13 @@ class Activo {
                 else if (placa.startsWith('ECC-TV') || placa.startsWith("ECC'TV")) tipo_activo = 'ECC-TV';
             }
 
+            const tipo = calcularTipo(valor);
+
             const [result] = await db.query(`
                 UPDATE activos SET
                     numero_placa = ?, centro_costes = ?, ubicacion = ?, responsable = ?,
-                    proveedor = ?, valor = ?, fecha_compra = ?, numero_social = ?, poliza = ?, 
-                    aseguradora = ?, garantia = ?, fecha_vencimiento_garantia = ?, 
+                    proveedor = ?, valor = ?, tipo = ?, agente_id = ?, fecha_compra = ?, numero_social = ?, poliza = ?,
+                    aseguradora = ?, garantia = ?, fecha_vencimiento_garantia = ?,
                     orden_compra = ?, clasificacion = ?, clasificacion_activo_fijo = ?,
                     adjunto_archivo = ?, tipo_activo = ?, site = ?, puesto = ?, asignado = ?, marca_modelo = ?, numero_serie_fabricante = ?,
                     cpu_procesador = ?, memoria_ram = ?, almacenamiento = ?, sistema_operativo = ?,
@@ -218,8 +229,8 @@ class Activo {
                 WHERE id = ?
             `, [
                 numero_placa, centro_costes, ubicacion, responsable,
-                proveedor, valor || null, fecha_compra, numero_social, poliza, aseguradora,
-                garantia, fecha_vencimiento_garantia || null, orden_compra, 
+                proveedor, valor || null, tipo, agente_id || null, fecha_compra, numero_social, poliza, aseguradora,
+                garantia, fecha_vencimiento_garantia || null, orden_compra,
                 clasificacion, clasificacion_activo_fijo, adjunto_archivo, tipo_activo,
                 site || null, puesto || null, asignado || null, marca_modelo || null, numero_serie_fabricante || null, cpu_procesador || null,
                 memoria_ram || null, almacenamiento || null, sistema_operativo || null,
@@ -317,6 +328,12 @@ class Activo {
             const [conGarantiaRows] = await db.query('SELECT COUNT(*) as total FROM activos WHERE garantia = "Si"');
             const [valorTotalRows] = await db.query('SELECT COALESCE(ROUND(SUM(valor), 0), 0) as valor_total FROM activos WHERE valor IS NOT NULL AND valor > 0');
             const [valorPromedioRows] = await db.query('SELECT COALESCE(ROUND(AVG(valor), 0), 0) as valor_promedio FROM activos WHERE valor IS NOT NULL AND valor > 0');
+            const [tipoRows] = await db.query(`
+                SELECT
+                    SUM(CASE WHEN tipo = 'activo' THEN 1 ELSE 0 END) AS total_activos_contables,
+                    SUM(CASE WHEN tipo = 'gasto'  THEN 1 ELSE 0 END) AS total_gastos
+                FROM activos
+            `);
 
             return {
                 total: totalRows[0].total,
@@ -324,7 +341,9 @@ class Activo {
                 activos_no_productivos: noProductivoRows[0].total,
                 con_garantia: conGarantiaRows[0].total,
                 valor_total: parseInt(valorTotalRows[0].valor_total),
-                valor_promedio: parseInt(valorPromedioRows[0].valor_promedio)
+                valor_promedio: parseInt(valorPromedioRows[0].valor_promedio),
+                total_activos_contables: parseInt(tipoRows[0].total_activos_contables || 0),
+                total_gastos: parseInt(tipoRows[0].total_gastos || 0)
             };
         } catch (error) {
             throw error;

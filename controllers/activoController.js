@@ -100,6 +100,18 @@ const activoController = {
                 activoData.valor = valorNum;
             }
 
+            // Validar agente_id si se proporciona
+            if (activoData.agente_id !== undefined && activoData.agente_id !== null && activoData.agente_id !== '') {
+                const agenteId = parseInt(activoData.agente_id);
+                if (isNaN(agenteId) || agenteId < 1) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'El agente_id debe ser un número entero positivo'
+                    });
+                }
+                activoData.agente_id = agenteId;
+            }
+
             // Solo admin puede crear activos con estado 'dado_de_baja'
             if (activoData.estado === 'dado_de_baja' && req.user.role !== 'admin') {
                 return res.status(403).json({
@@ -223,6 +235,18 @@ const activoController = {
                 }
                 // Actualizar el valor parseado
                 activoData.valor = valorNum;
+            }
+
+            // Validar agente_id si se proporciona
+            if (activoData.agente_id !== undefined && activoData.agente_id !== null && activoData.agente_id !== '') {
+                const agenteId = parseInt(activoData.agente_id);
+                if (isNaN(agenteId) || agenteId < 1) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'El agente_id debe ser un número entero positivo'
+                    });
+                }
+                activoData.agente_id = agenteId;
             }
 
             // Solo admin puede establecer estado 'dado_de_baja' vía edición directa

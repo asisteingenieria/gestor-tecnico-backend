@@ -60,6 +60,10 @@ const canEditHardwareComponents = verifyRole(['tecnicoInventario', 'gestorActivo
 // Middleware para directivoFinanciero
 const isDirectivoFinanciero = verifyRole(['directivoFinanciero', 'admin']);
 
+// Middlewares para diseños
+const isDisenador = verifyRole(['disenador', 'admin']);
+const canManageDisenos = verifyRole(['admin', 'coordinador', 'disenador']);
+
 module.exports = {
     verifyToken,
     verifyRole,
@@ -82,5 +86,8 @@ module.exports = {
     canViewAssetHistory,
     canEditHardwareComponents,
     // Middleware para directivoFinanciero
-    isDirectivoFinanciero
+    isDirectivoFinanciero,
+    // Middlewares para diseños
+    isDisenador,
+    canManageDisenos
 };
