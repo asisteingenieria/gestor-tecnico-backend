@@ -113,9 +113,12 @@ class Diseno {
     }
 
     static async setFechaEstimada(id, fecha_estimada) {
+        const fechaMysql = fecha_estimada
+            ? new Date(fecha_estimada).toISOString().slice(0, 19).replace('T', ' ')
+            : null;
         await pool.query(
             'UPDATE disenos SET fecha_estimada = ?, updated_at = NOW() WHERE id = ?',
-            [fecha_estimada || null, id]
+            [fechaMysql, id]
         );
     }
 
