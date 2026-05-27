@@ -91,7 +91,7 @@ class Diseno {
 
     static async create({ nombre, descripcion, solicitante_id }) {
         const [result] = await pool.query(
-            'INSERT INTO disenos (nombre, descripcion, solicitante_id) VALUES (?, ?, ?)',
+            'INSERT INTO disenos (nombre, descripcion, solicitante_id, created_at, updated_at) VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())',
             [nombre, descripcion, solicitante_id]
         );
         return result.insertId;
@@ -112,7 +112,7 @@ class Diseno {
 
     static async assign(id, disenador_id) {
         await pool.query(
-            "UPDATE disenos SET disenador_id = ?, estado = 'en_progreso', updated_at = NOW() WHERE id = ?",
+            "UPDATE disenos SET disenador_id = ?, estado = 'en_progreso', updated_at = UTC_TIMESTAMP() WHERE id = ?",
             [disenador_id, id]
         );
     }
@@ -122,14 +122,14 @@ class Diseno {
             ? new Date(fecha_estimada).toISOString().slice(0, 19).replace('T', ' ')
             : null;
         await pool.query(
-            'UPDATE disenos SET fecha_estimada = ?, updated_at = NOW() WHERE id = ?',
+            'UPDATE disenos SET fecha_estimada = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
             [fechaMysql, id]
         );
     }
 
     static async markCompleted(id) {
         await pool.query(
-            "UPDATE disenos SET estado = 'completado', devolucion_nota = NULL, devuelto_at = NULL, updated_at = NOW() WHERE id = ?",
+            "UPDATE disenos SET estado = 'completado', devolucion_nota = NULL, devuelto_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?",
             [id]
         );
     }
@@ -137,7 +137,7 @@ class Diseno {
     static async toggleEspera(id, currentEstado) {
         const newEstado = currentEstado === 'en_espera' ? 'en_progreso' : 'en_espera';
         await pool.query(
-            'UPDATE disenos SET estado = ?, updated_at = NOW() WHERE id = ?',
+            'UPDATE disenos SET estado = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
             [newEstado, id]
         );
         return newEstado;
@@ -145,7 +145,7 @@ class Diseno {
 
     static async returnDiseno(id, nota) {
         await pool.query(
-            "UPDATE disenos SET estado = 'devuelto', devolucion_nota = ?, devuelto_at = NOW(), updated_at = NOW() WHERE id = ?",
+            "UPDATE disenos SET estado = 'devuelto', devolucion_nota = ?, devuelto_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP() WHERE id = ?",
             [nota, id]
         );
     }
@@ -203,7 +203,7 @@ class Diseno {
 
     static async update(id, { nombre, descripcion }) {
         await pool.query(
-            'UPDATE disenos SET nombre = ?, descripcion = ?, updated_at = NOW() WHERE id = ?',
+            'UPDATE disenos SET nombre = ?, descripcion = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?',
             [nombre, descripcion, id]
         );
     }
