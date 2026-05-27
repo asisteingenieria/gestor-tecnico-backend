@@ -109,6 +109,46 @@ const agenteController = {
             console.error('Error al obtener activos del agente:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
+    },
+
+    async assignActivo(req, res) {
+        try {
+            const { id, activoId } = req.params;
+
+            const agente = await Agente.getById(id);
+            if (!agente) {
+                return res.status(404).json({ success: false, message: 'Agente no encontrado' });
+            }
+
+            const ok = await Agente.assignActivo(id, activoId);
+            if (!ok) {
+                return res.status(404).json({ success: false, message: 'Activo no encontrado' });
+            }
+            res.json({ success: true, message: 'Activo asignado exitosamente' });
+        } catch (error) {
+            console.error('Error al asignar activo:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async unassignActivo(req, res) {
+        try {
+            const { id, activoId } = req.params;
+
+            const agente = await Agente.getById(id);
+            if (!agente) {
+                return res.status(404).json({ success: false, message: 'Agente no encontrado' });
+            }
+
+            const ok = await Agente.unassignActivo(activoId);
+            if (!ok) {
+                return res.status(404).json({ success: false, message: 'Activo no encontrado' });
+            }
+            res.json({ success: true, message: 'Activo desasignado exitosamente' });
+        } catch (error) {
+            console.error('Error al desasignar activo:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
     }
 };
 

@@ -5,6 +5,7 @@ class Diseno {
         let query = `
             SELECT d.*,
                    us.full_name AS solicitante_nombre,
+                   us.role AS solicitante_role,
                    ud.full_name AS disenador_nombre,
                    JSON_ARRAYAGG(
                        IF(di.filename IS NOT NULL,
@@ -40,6 +41,9 @@ class Diseno {
             conditions.push('DATE(d.created_at) <= ?');
             params.push(filters.fecha_hasta);
         }
+        if (filters.exclude_disenador_solicitudes) {
+            conditions.push("us.role != 'disenador'");
+        }
 
         if (conditions.length > 0) {
             query += ' WHERE ' + conditions.join(' AND ');
@@ -58,6 +62,7 @@ class Diseno {
         const [rows] = await pool.query(
             `SELECT d.*,
                     us.full_name AS solicitante_nombre,
+                    us.role AS solicitante_role,
                     ud.full_name AS disenador_nombre,
                     JSON_ARRAYAGG(
                         IF(di.filename IS NOT NULL,
@@ -211,7 +216,10 @@ class Diseno {
 
     static async getForEntregasDownload(id) {
         const [[row]] = await pool.query(
-            'SELECT id, nombre, solicitante_id, disenador_id FROM disenos WHERE id = ?',
+            `SELECT d.id, d.nombre, d.solicitante_id, d.disenador_id, u.role AS solicitante_role
+             FROM disenos d
+             LEFT JOIN users u ON d.solicitante_id = u.id
+             WHERE d.id = ?`,
             [id]
         );
         if (!row) return null;
@@ -224,7 +232,10 @@ class Diseno {
 
     static async getForDownload(id) {
         const [[row]] = await pool.query(
-            'SELECT id, nombre, solicitante_id, disenador_id FROM disenos WHERE id = ?',
+            `SELECT d.id, d.nombre, d.solicitante_id, d.disenador_id, u.role AS solicitante_role
+             FROM disenos d
+             LEFT JOIN users u ON d.solicitante_id = u.id
+             WHERE d.id = ?`,
             [id]
         );
         if (!row) return null;

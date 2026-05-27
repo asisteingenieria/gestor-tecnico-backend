@@ -12,10 +12,14 @@ const getDisenos = async (req, res) => {
         if (fecha_desde) filters.fecha_desde = fecha_desde;
         if (fecha_hasta) filters.fecha_hasta = fecha_hasta;
 
-        // Diseñador solo ve los suyos; cliente solo ve los suyos; admin/coordinador ven todos
         if (req.user.role === 'disenador') {
+            // El diseñador solo ve los asignados a él (incluyendo los que creó para sí mismo)
             filters.disenador_id = req.user.id;
-        } else if (!['admin', 'coordinador', 'jefe_operaciones'].includes(req.user.role)) {
+        } else if (req.user.role === 'admin') {
+            // Admin ve todo excepto los que un diseñador creó para sí mismo
+            filters.exclude_disenador_solicitudes = true;
+        } else {
+            // Coordinador, jefe_operaciones y cualquier otro rol: solo ve sus propias solicitudes
             filters.solicitante_id = req.user.id;
         }
 
@@ -35,12 +39,7 @@ const getDisenoById = async (req, res) => {
         }
 
         const { role, id: userId } = req.user;
-        const canView =
-            ['admin', 'coordinador', 'jefe_operaciones'].includes(role) ||
-            diseno.solicitante_id === userId ||
-            diseno.disenador_id === userId;
-
-        if (!canView) {
+        if (!_canViewDiseno(diseno, role, userId)) {
             return res.status(403).json({ success: false, message: 'Sin permisos para ver este diseño' });
         }
 
@@ -67,19 +66,23 @@ const createDiseno = async (req, res) => {
             await Diseno.addImagenes(id, uploadedFiles);
         }
 
-        // Auto-asignar si solo hay un diseñador registrado
-        const disenadores = await Diseno.getDisenadores();
-        if (disenadores.length === 1) {
-            await Diseno.assign(id, disenadores[0].id);
+        let autoAsignadoMsg = null;
+
+        if (req.user.role === 'disenador') {
+            await Diseno.assign(id, req.user.id);
+            autoAsignadoMsg = 'Diseño creado y asignado a ti';
+        } else {
+            const disenadores = await Diseno.getDisenadores();
+            if (disenadores.length === 1) {
+                await Diseno.assign(id, disenadores[0].id);
+                autoAsignadoMsg = `Diseño creado y asignado automáticamente a ${disenadores[0].full_name}`;
+            }
         }
 
         const diseno = await Diseno.getById(id);
-        const autoAsignado = disenadores.length === 1;
         res.status(201).json({
             success: true,
-            message: autoAsignado
-                ? `Diseño creado y asignado automáticamente a ${disenadores[0].full_name}`
-                : 'Diseño creado correctamente',
+            message: autoAsignadoMsg || 'Diseño creado correctamente',
             data: diseno
         });
     } catch (err) {
@@ -100,7 +103,7 @@ const updateDiseno = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canEdit =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.solicitante_id === userId;
 
         if (!canEdit) {
@@ -172,12 +175,7 @@ const downloadEntregas = async (req, res) => {
         }
 
         const { role, id: userId } = req.user;
-        const canView =
-            ['admin', 'coordinador', 'jefe_operaciones'].includes(role) ||
-            diseno.solicitante_id === userId ||
-            diseno.disenador_id === userId;
-
-        if (!canView) {
+        if (!_canViewDiseno(diseno, role, userId)) {
             return res.status(403).json({ success: false, message: 'Sin permisos' });
         }
 
@@ -252,7 +250,7 @@ const markCompleted = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canComplete =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.disenador_id === userId;
 
         if (!canComplete) {
@@ -298,7 +296,7 @@ const returnDiseno = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canReturn =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.solicitante_id === userId;
 
         if (!canReturn) {
@@ -360,12 +358,7 @@ const getDevoluciones = async (req, res) => {
         }
 
         const { role, id: userId } = req.user;
-        const canView =
-            ['admin', 'coordinador', 'jefe_operaciones'].includes(role) ||
-            diseno.solicitante_id === userId ||
-            diseno.disenador_id === userId;
-
-        if (!canView) {
+        if (!_canViewDiseno(diseno, role, userId)) {
             return res.status(403).json({ success: false, message: 'Sin permisos para ver este diseño' });
         }
 
@@ -392,7 +385,7 @@ const replaceEntregas = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canUpload =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.disenador_id === userId;
 
         if (!canUpload) {
@@ -458,7 +451,7 @@ const uploadEntrega = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canUpload =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.disenador_id === userId;
 
         if (!canUpload) {
@@ -496,7 +489,7 @@ const deleteEntrega = async (req, res) => {
 
         const { role, id: userId } = req.user;
         const canDelete =
-            ['admin', 'coordinador'].includes(role) ||
+            role === 'admin' ||
             diseno.disenador_id === userId;
 
         if (!canDelete) {
@@ -524,12 +517,7 @@ const downloadImagenes = async (req, res) => {
         }
 
         const { role, id: userId } = req.user;
-        const canView =
-            ['admin', 'coordinador', 'jefe_operaciones'].includes(role) ||
-            diseno.solicitante_id === userId ||
-            diseno.disenador_id === userId;
-
-        if (!canView) {
+        if (!_canViewDiseno(diseno, role, userId)) {
             return res.status(403).json({ success: false, message: 'Sin permisos' });
         }
 
@@ -584,6 +572,19 @@ const getDisenadores = async (req, res) => {
         res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 };
+
+function _canViewDiseno(diseno, role, userId) {
+    // Diseños creados por un diseñador para sí mismo: solo él puede verlos
+    if (diseno.solicitante_role === 'disenador') {
+        return diseno.disenador_id === userId;
+    }
+    // Admin ve cualquier diseño; los demás solo los suyos (como solicitante o diseñador asignado)
+    return (
+        role === 'admin' ||
+        diseno.solicitante_id === userId ||
+        diseno.disenador_id === userId
+    );
+}
 
 function _deleteFile(folder, filename) {
     const filePath = path.join(__dirname, '..', 'uploads', folder, filename);

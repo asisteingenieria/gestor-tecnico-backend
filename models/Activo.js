@@ -297,6 +297,10 @@ class Activo {
                 params.push(filters.garantia);
             }
 
+            if (filters.sin_agente === 'true') {
+                query += ' AND a.agente_id IS NULL';
+            }
+
             query += ' ORDER BY a.created_at DESC';
 
             const [rows] = await db.query(query, params);

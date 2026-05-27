@@ -75,6 +75,22 @@ class Agente {
         `, [agenteId]);
         return rows;
     }
+
+    static async assignActivo(agenteId, activoId) {
+        const [result] = await db.query(
+            'UPDATE activos SET agente_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [agenteId, activoId]
+        );
+        return result.affectedRows > 0;
+    }
+
+    static async unassignActivo(activoId) {
+        const [result] = await db.query(
+            'UPDATE activos SET agente_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [activoId]
+        );
+        return result.affectedRows > 0;
+    }
 }
 
 module.exports = Agente;
