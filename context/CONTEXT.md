@@ -20,10 +20,12 @@ gestor-tecnico-backend/
 ├── controllers/                      # Lógica de negocio
 │   ├── activoController.js
 │   ├── activoTecnicoController.js
+│   ├── agenteController.js
 │   ├── analyticsController.js
 │   ├── authController.js
 │   ├── autoActivoController.js
 │   ├── chatController.js
+│   ├── disenoController.js
 │   ├── incidentController.js
 │   ├── inventarioDirectivoController.js
 │   ├── scriptParserController.js
@@ -32,10 +34,14 @@ gestor-tecnico-backend/
 ├── middleware/
 │   ├── auth.js                       # JWT + RBAC
 │   ├── upload.js                     # Multer para incidentes
-│   └── uploadActivos.js              # Multer para activos
+│   ├── uploadActivos.js              # Multer para activos
+│   ├── uploadDisenos.js              # Multer para imágenes de diseños (max 20MB, 60 archivos)
+│   └── uploadEntregas.js             # Multer para entregas de diseños (max 100MB, 10 archivos)
 ├── models/                           # Acceso a datos
 │   ├── Activo.js
 │   ├── ActivoHistorial.js
+│   ├── Agente.js
+│   ├── Diseno.js
 │   ├── Incident.js
 │   ├── InventarioObservacion.js
 │   ├── User.js
@@ -45,7 +51,10 @@ gestor-tecnico-backend/
 ├── scripts/                          # 27 scripts de migración y setup de datos
 ├── uploads/
 │   ├── incidents/                    # Archivos adjuntos de incidentes
-│   └── activos/                      # Imágenes/docs de activos
+│   ├── activos/                      # Imágenes/docs de activos
+│   └── disenos/
+│       ├── (raíz)                    # Imágenes de referencia de diseños
+│       └── entregas/                 # Archivos de entrega de diseños
 └── index.js                          # Entry point: Express + Socket.IO
 ```
 
@@ -79,6 +88,7 @@ NODE_ENV=development | production
 | `gestorActivos`      | Gestión completa del inventario de activos         |
 | `tecnicoInventario`  | Edición de componentes de activos                  |
 | `directivoFinanciero`| Vista financiera/ejecutiva del inventario          |
+| `diseñador`          | Atiende solicitudes de diseño, sube entregas       |
 | `anonimo`            | Usuario de chat anónimo (Hanny)                    |
 
 **Jerarquía:** `admin` > `jefe_operaciones` > `supervisor/coordinador` > `technician/tecnicoInventario` > `administrativo` > `anonimo`
@@ -205,6 +215,48 @@ ASIGNACIÓN a técnico (en_proceso)
 | PUT    | `/:id/componente`            | Actualizar componente de hardware        | tecnicoInv, gestorActivos, admin|
 | PUT    | `/:id/dar-de-baja`           | Aprobar baja del activo                  | admin                           |
 
+### Diseños — `/api/disenos`
+
+**Flujo de estados:**
+```
+PENDIENTE → (asignar diseñador) → EN_PROGRESO ⇄ EN_ESPERA → COMPLETADO → DEVUELTO → EN_PROGRESO ...
+```
+- Autoasignación: si solo hay 1 diseñador, se asigna automáticamente al crear.
+- Visibilidad: admin/coordinador/jefe_op ven todo; diseñador ve solo los suyos; otros usuarios ven solo sus solicitudes.
+
+| Método | Ruta                          | Descripción                                          | Roles                                      |
+|--------|-------------------------------|------------------------------------------------------|--------------------------------------------|
+| GET    | `/disenadores`                | Listar usuarios con rol diseñador                    | admin, coordinador                         |
+| GET    | `/`                           | Listar diseños (filtros: estado, fecha)              | Autenticado (visibilidad por rol)          |
+| GET    | `/:id`                        | Detalle de diseño                                    | Autenticado (propio o admin/coord)         |
+| GET    | `/:id/imagenes/download`      | Descargar imágenes de referencia como ZIP            | Autenticado                                |
+| GET    | `/:id/entregas/download`      | Descargar archivos de entrega como ZIP               | Autenticado                                |
+| GET    | `/:id/devoluciones`           | Historial de devoluciones                            | Autenticado                                |
+| POST   | `/`                           | Crear solicitud de diseño (con imágenes opcionales)  | Autenticado                                |
+| POST   | `/:id/entregas`               | Subir archivos de entrega                            | diseñador asignado, admin, coordinador     |
+| PUT    | `/:id`                        | Actualizar nombre/descripción/imágenes               | admin, coordinador, solicitante            |
+| PUT    | `/:id/assign`                 | Asignar diseñador → estado pasa a en_progreso        | admin, coordinador                         |
+| PUT    | `/:id/complete`               | Marcar como completado                               | diseñador asignado, admin, coordinador     |
+| PUT    | `/:id/espera`                 | Toggle pausa: en_progreso ↔ en_espera                | diseñador asignado                         |
+| PUT    | `/:id/return`                 | Devolver con nota (desde completado)                 | admin, coordinador, solicitante            |
+| PUT    | `/:id/fecha-estimada`         | Establecer fecha estimada de entrega                 | diseñador asignado                         |
+| PUT    | `/:id/entregas/replace`       | Reemplazar TODOS los archivos de entrega             | diseñador asignado, admin, coordinador     |
+| DELETE | `/:id`                        | Eliminar diseño                                      | admin, coordinador                         |
+| DELETE | `/:id/imagenes/:imagenId`     | Eliminar imagen de referencia                        | admin, coordinador, solicitante            |
+| DELETE | `/:id/entregas/:archivoId`    | Eliminar archivo de entrega                          | diseñador, admin, coordinador              |
+
+### Agentes — `/api/agentes`
+| Método | Ruta                          | Descripción                              | Roles                    |
+|--------|-------------------------------|------------------------------------------|--------------------------|
+| GET    | `/`                           | Listar agentes (con total de activos)    | gestorActivos, admin     |
+| GET    | `/:id`                        | Agente por ID                            | gestorActivos, admin     |
+| GET    | `/:id/activos`                | Activos asignados al agente              | gestorActivos, admin     |
+| POST   | `/`                           | Crear agente                             | gestorActivos, admin     |
+| PUT    | `/:id`                        | Actualizar agente                        | gestorActivos, admin     |
+| PUT    | `/:id/activos/:activoId`      | Asignar activo a agente                  | gestorActivos, admin     |
+| DELETE | `/:id`                        | Eliminar agente (activos quedan libres)  | gestorActivos, admin     |
+| DELETE | `/:id/activos/:activoId`      | Desasignar activo del agente             | gestorActivos, admin     |
+
 ### Inventario Directivo — `/api/inventario-directivo`
 | Método | Ruta      | Descripción                    | Roles                        |
 |--------|-----------|--------------------------------|------------------------------|
@@ -257,12 +309,38 @@ ASIGNACIÓN a técnico (en_proceso)
 - `id`, `station_code`, `location_details`, `sede`, `departamento`
 - `anydesk_address`, `advisor_cedula` (para trabajo remoto Barranquilla)
 
+### Diseno
+- `id`, `nombre`, `descripcion` (LONGTEXT), `estado` (`pendiente` | `en_progreso` | `en_espera` | `completado` | `devuelto`)
+- `solicitante_id` (FK users), `disenador_id` (FK users, nullable)
+- `fecha_estimada` (DATETIME), `devolucion_nota` (TEXT), `devuelto_at` (DATETIME)
+- `created_at`, `updated_at`
+
+### diseno_imagenes
+- `id`, `diseno_id` (FK), `filename`, `created_at`
+- Archivos en `uploads/disenos/` — max 20 MB c/u, hasta 60 por diseño
+
+### diseno_entregas
+- `id`, `diseno_id` (FK), `filename`, `original_name`, `mimetype`, `size` (BIGINT), `uploaded_at`
+- Archivos en `uploads/disenos/entregas/` — max 100 MB c/u, hasta 10 por diseño
+
+### diseno_devoluciones
+- `id`, `diseno_id` (FK), `nota` (TEXT), `numero_devolucion` (INT secuencial), `solicitante_id` (FK), `created_at`
+- Se crea un registro por cada devolución; el número se incrementa automáticamente
+
+### Agente
+- `id`, `cedula` (único), `nombres`, `apellidos`, `campana`
+- `created_at`, `updated_at`
+- Al eliminar un agente, los activos asociados quedan con `agente_id = NULL` (ON DELETE SET NULL)
+- El listado incluye `total_activos` (COUNT de activos asignados)
+
 ### Activo (Asset)
 - **Básicos:** `numero_placa`, `ubicacion`, `responsable`, `proveedor`, `clasificacion`
 - **Financieros:** `valor`, `fecha_compra`, `poliza`, `aseguradora`, `garantia`
 - **Hardware:** `marca_modelo`, `cpu_procesador`, `memoria_ram`, `almacenamiento`, `sistema_operativo`
 - **Ubicación:** `site`, `puesto`, `asignado`, `centro_costes`
 - **Estado:** `estado` (`funcional` | `en_mantenimiento` | `bodega` | `dado_de_baja`)
+- **Agente:** `agente_id` (FK → agentes, nullable) — activo sin agente cuando es NULL
+- **Filtro de listado:** `?sin_agente=true` retorna solo activos sin agente asignado
 
 **Detección automática de tipo por número de placa:**
 | Patrón            | Tipo       |
@@ -285,10 +363,12 @@ ASIGNACIÓN a técnico (en_proceso)
 
 ## Carga de Archivos
 
-| Contexto   | Ruta de guardado       | Tamaño máx. | Archivos máx. | Tipos permitidos          |
-|------------|------------------------|-------------|---------------|---------------------------|
-| Incidentes | `/uploads/incidents/`  | 10 MB       | 5 por request | JPEG, PNG, GIF, WebP, PDF |
-| Activos    | `/uploads/activos/`    | 15 MB       | 1 por activo  | JPEG, PNG, GIF, WebP, PDF |
+| Contexto           | Ruta de guardado              | Tamaño máx. | Archivos máx.  | Tipos permitidos          |
+|--------------------|-------------------------------|-------------|----------------|---------------------------|
+| Incidentes         | `/uploads/incidents/`         | 10 MB       | 5 por request  | JPEG, PNG, GIF, WebP, PDF |
+| Activos            | `/uploads/activos/`           | 15 MB       | 1 por activo   | JPEG, PNG, GIF, WebP, PDF |
+| Diseños (imágs.)   | `/uploads/disenos/`           | 20 MB       | 60 por diseño  | JPEG, PNG, GIF, WebP, PDF |
+| Diseños (entregas) | `/uploads/disenos/entregas/`  | 100 MB      | 10 por entrega | Cualquier tipo            |
 
 **Naming:** `{timestamp}_{randomId}_{originalname}`
 
@@ -333,15 +413,20 @@ npm run dev    # nodemon index.js (desarrollo)
 
 ## Migraciones
 
-26 archivos de migración SQL que evolucionan el schema:
+33 archivos de migración SQL que evolucionan el schema:
 - Sistema de calificación de técnicos
 - Alertas de supervisión
 - Rol de usuario anónimo (Hanny)
 - Sistema de gestión de activos
 - Historial de cambios en activos
 - Sistema de observaciones de inventario
-- Expansión de campos de activos
+- Expansión de campos de activos (valor, site, puesto, asignado)
 - Estados de bodega y baja de activos
+- **029** — Tabla `disenos` + `diseno_imagenes`
+- **030** — Tabla `diseno_entregas`
+- **031** — Campo `fecha_estimada` en diseños
+- **032** — Tabla `diseno_devoluciones`
+- **033** — Estado `en_espera` en enum de diseños
 
 ---
 

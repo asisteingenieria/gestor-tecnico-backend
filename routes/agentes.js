@@ -16,11 +16,13 @@ const verificarGestorActivos = (req, res, next) => {
 router.use(verifyToken);
 router.use(verificarGestorActivos);
 
-router.get('/',             agenteController.getAgentes);
-router.get('/:id',          agenteController.getAgenteById);
-router.get('/:id/activos',  agenteController.getActivosDeAgente);
-router.post('/',            agenteController.createAgente);
-router.put('/:id',          agenteController.updateAgente);
-router.delete('/:id',       agenteController.deleteAgente);
+router.get('/',                               agenteController.getAgentes);
+router.get('/:id',                            agenteController.getAgenteById);
+router.get('/:id/activos',                    agenteController.getActivosDeAgente);
+router.post('/',                              agenteController.createAgente);
+router.put('/:id',                            agenteController.updateAgente);
+router.put('/:id/activos/:activoId',          agenteController.assignActivo);
+router.delete('/:id',                         agenteController.deleteAgente);
+router.delete('/:id/activos/:activoId',       agenteController.unassignActivo);
 
 module.exports = router;
