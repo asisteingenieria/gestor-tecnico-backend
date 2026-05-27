@@ -11,8 +11,12 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  timezone: '+00:00'  // Leer/escribir DATETIME siempre como UTC
+  timezone: '+00:00'
 });
 
-// Exportamos la promesa del pool para poder usar async/await
+// Forzar UTC en cada conexión para que NOW() y CURRENT_TIMESTAMP devuelvan UTC
+pool.on('connection', (connection) => {
+    connection.query("SET time_zone = '+00:00'");
+});
+
 module.exports = pool.promise();
