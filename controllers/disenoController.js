@@ -265,7 +265,8 @@ const markCompleted = async (req, res) => {
             return res.status(400).json({ success: false, message: 'El diseño debe estar en progreso o devuelto para poder completarlo' });
         }
 
-        await Diseno.markCompleted(req.params.id);
+        const { nota_completado } = req.body;
+        await Diseno.markCompleted(req.params.id, nota_completado);
         const updated = await Diseno.getById(req.params.id);
         res.json({ success: true, message: 'Diseño marcado como completado', data: updated });
     } catch (err) {

@@ -127,10 +127,10 @@ class Diseno {
         );
     }
 
-    static async markCompleted(id) {
+    static async markCompleted(id, nota) {
         await pool.query(
-            "UPDATE disenos SET estado = 'completado', devolucion_nota = NULL, devuelto_at = NULL, updated_at = UTC_TIMESTAMP() WHERE id = ?",
-            [id]
+            "UPDATE disenos SET estado = 'completado', devolucion_nota = NULL, devuelto_at = NULL, nota_completado = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?",
+            [nota || null, id]
         );
     }
 
