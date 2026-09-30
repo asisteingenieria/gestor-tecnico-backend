@@ -5,7 +5,7 @@ class User {
     static async getAll() {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, created_at FROM users WHERE role != ? ORDER BY full_name',
+                'SELECT id, username, full_name, role, sede, departamento, users_company_id, created_at FROM users WHERE role != ? ORDER BY full_name',
                 ['anonimo']
             );
             return rows;
@@ -17,7 +17,7 @@ class User {
     static async getById(id) {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, created_at FROM users WHERE id = ?', 
+                'SELECT id, username, full_name, role, sede, departamento, users_company_id, created_at FROM users WHERE id = ?',
                 [id]
             );
             return rows[0];
@@ -30,6 +30,23 @@ class User {
         try {
             const [rows] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
             return rows[0];
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    // Usuario (login) ya vinculado a una ficha de RRHH, si existe. `excludeUserId` permite
+    // ignorar al propio usuario al editar (no chocar consigo mismo).
+    static async getByUsersCompanyId(usersCompanyId, excludeUserId = null) {
+        try {
+            const params = [usersCompanyId];
+            let query = 'SELECT id, username, full_name FROM users WHERE users_company_id = ?';
+            if (excludeUserId) {
+                query += ' AND id != ?';
+                params.push(excludeUserId);
+            }
+            const [rows] = await db.query(query, params);
+            return rows[0] || null;
         } catch (error) {
             throw error;
         }
@@ -96,33 +113,39 @@ class User {
 
     static async create(userData) {
         try {
-            const { username, password, full_name, role, sede, departamento } = userData;
-            
+            const { username, password, full_name, role, sede, departamento, users_company_id } = userData;
+
             // Hash de la contraseña
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash(password, salt);
-            
+
             // Construir query dinámicamente según los campos presentes
             let fields = ['username', 'password', 'full_name', 'role'];
             let values = [username, hashedPassword, full_name, role];
             let placeholders = ['?', '?', '?', '?'];
-            
+
             if (sede) {
                 fields.push('sede');
                 values.push(sede);
                 placeholders.push('?');
             }
-            
+
             if (departamento) {
                 fields.push('departamento');
                 values.push(departamento);
                 placeholders.push('?');
             }
-            
+
+            if (users_company_id) {
+                fields.push('users_company_id');
+                values.push(users_company_id);
+                placeholders.push('?');
+            }
+
             const query = `INSERT INTO users (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
             const [result] = await db.query(query, values);
-            
-            return { id: result.insertId, username, full_name, role, sede, departamento };
+
+            return { id: result.insertId, username, full_name, role, sede, departamento, users_company_id };
         } catch (error) {
             throw error;
         }
@@ -130,27 +153,32 @@ class User {
 
     static async update(id, userData) {
         try {
-            const { username, full_name, role, sede, departamento } = userData;
-            
+            const { username, full_name, role, sede, departamento, users_company_id } = userData;
+
             // Construir query dinámicamente según los campos presentes
             let updates = ['username = ?', 'full_name = ?', 'role = ?'];
             let values = [username, full_name, role];
-            
+
             if (sede) {
                 updates.push('sede = ?');
                 values.push(sede);
             }
-            
+
             if (departamento !== undefined) { // Permitir actualizar incluso si es null
                 updates.push('departamento = ?');
                 values.push(departamento);
             }
-            
+
+            if (users_company_id !== undefined) { // Permitir desvincular (null)
+                updates.push('users_company_id = ?');
+                values.push(users_company_id);
+            }
+
             values.push(id); // ID va al final para la cláusula WHERE
-            
+
             const query = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
             const [result] = await db.query(query, values);
-            
+
             return result.affectedRows > 0;
         } catch (error) {
             throw error;

@@ -2,13 +2,19 @@ const UserCompany = require('../models/UserCompany');
 const NovedadRrhh = require('../models/NovedadRrhh');
 const Traspaso = require('../models/Traspaso');
 const Vacaciones = require('../models/Vacaciones');
+const Retiro = require('../models/Retiro');
+const importEmpleadosExcel = require('../utils/importEmpleadosExcel');
+const importEmpleadosService = require('../services/importEmpleadosService');
 
 const CAMPOS_PERSONALES = [
-    'numero_identificacion', 'tipo_identificacion_id', 'fecha_expedicion', 'ciudad_expedicion_id',
+    'numero_identificacion', 'tipo_identificacion_id',
+    'numero_identificacion_secundaria', 'tipo_identificacion_secundaria_id',
+    'fecha_expedicion', 'ciudad_expedicion_id',
     'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido',
     'fecha_nacimiento', 'ciudad_nacimiento_id', 'numero_hijos',
     'estado_civil_id', 'grupo_sanguineo_id', 'genero_id',
-    'email', 'telefono', 'usuario_ssff'
+    'email', 'telefono', 'usuario_ssff', 'rut',
+    'declarante_renta', 'libreta_militar_numero'
 ];
 
 const CAMPOS_CONTRATO_OBLIGATORIOS = {
@@ -34,6 +40,9 @@ function extraerCampos(body) {
     data.cuenta_bancaria = body.cuenta_bancaria || {};
     data.direccion = body.direccion || {};
     data.contacto_emergencia = body.contacto_emergencia || {};
+    data.vacunacion = body.vacunacion || null;
+    data.dotacion = body.dotacion || null;
+    data.recursos = body.recursos || null;
     return data;
 }
 
@@ -65,7 +74,8 @@ function validarObligatorios(data) {
 const userCompanyController = {
     async getAll(req, res) {
         try {
-            const empleados = await UserCompany.getAll();
+            const soloSinUsuario = req.query.sin_usuario === 'true';
+            const empleados = await UserCompany.getAll({ soloSinUsuario });
             res.json({ empleados });
         } catch (error) {
             console.error('Error al obtener empleados:', error);
@@ -99,6 +109,9 @@ const userCompanyController = {
     async create(req, res) {
         try {
             const data = extraerCampos(req.body);
+            // Analista encargado = quien registra el empleado, tomado del login (no del
+            // formulario) — por eso se pisa aquí sin importar lo que traiga el body.
+            data.contrato.analista_encargado_id = req.user.users_company_id || null;
 
             const errorValidacion = validarObligatorios(data);
             if (errorValidacion) {
@@ -158,6 +171,36 @@ const userCompanyController = {
             res.json({ success: true, message: 'Empleado eliminado exitosamente. Los activos asignados quedaron sin empleado.' });
         } catch (error) {
             console.error('Error al eliminar empleado:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ==================== IMPORT MASIVO DESDE EXCEL ====================
+
+    async previewImportExcel(req, res) {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'No se recibió ningún archivo' });
+            }
+            const { filas, errores_parseo } = importEmpleadosExcel.parsearArchivo(req.file.buffer);
+            const reporte = await importEmpleadosService.previsualizar(filas);
+            res.json({ success: true, errores_parseo, ...reporte });
+        } catch (error) {
+            console.error('Error al previsualizar import de empleados:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async commitImportExcel(req, res) {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'No se recibió ningún archivo' });
+            }
+            const { filas, errores_parseo } = importEmpleadosExcel.parsearArchivo(req.file.buffer);
+            const reporte = await importEmpleadosService.confirmar(filas);
+            res.json({ success: true, message: 'Importación completada', errores_parseo, ...reporte });
+        } catch (error) {
+            console.error('Error al confirmar import de empleados:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -435,6 +478,77 @@ const userCompanyController = {
             res.json({ success: true, message: 'Registro de vacaciones eliminado exitosamente' });
         } catch (error) {
             console.error('Error al eliminar vacaciones:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ==================== RETIRO ====================
+
+    async getRetiro(req, res) {
+        try {
+            const { id } = req.params;
+            const existe = await UserCompany.getById(id);
+            if (!existe) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            const retiro = await Retiro.getByUserCompanyId(id);
+            res.json({ retiro });
+        } catch (error) {
+            console.error('Error al obtener retiro:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async registrarRetiro(req, res) {
+        try {
+            const { id } = req.params;
+            const { fecha_retiro, tipo_retiro_id } = req.body;
+            if (!fecha_retiro || !tipo_retiro_id) {
+                return res.status(400).json({ success: false, message: 'La fecha de retiro y el tipo de retiro son obligatorios' });
+            }
+            const existe = await UserCompany.getById(id);
+            if (!existe) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            await Retiro.registrar(id, req.body);
+            res.status(201).json({ success: true, message: 'Retiro registrado exitosamente' });
+        } catch (error) {
+            console.error('Error al registrar retiro:', error);
+            if (error.message.includes('ya tiene un retiro') || error.message.includes('no tiene contrato')) {
+                return res.status(409).json({ success: false, message: error.message });
+            }
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async actualizarRetiro(req, res) {
+        try {
+            const { id } = req.params;
+            const { fecha_retiro, tipo_retiro_id } = req.body;
+            if (!fecha_retiro || !tipo_retiro_id) {
+                return res.status(400).json({ success: false, message: 'La fecha de retiro y el tipo de retiro son obligatorios' });
+            }
+            await Retiro.actualizar(id, req.body);
+            res.json({ success: true, message: 'Retiro actualizado exitosamente' });
+        } catch (error) {
+            console.error('Error al actualizar retiro:', error);
+            if (error.message.includes('no tiene un retiro')) {
+                return res.status(404).json({ success: false, message: error.message });
+            }
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async reactivarEmpleado(req, res) {
+        try {
+            const { id } = req.params;
+            await Retiro.reactivar(id);
+            res.json({ success: true, message: 'Empleado reactivado exitosamente' });
+        } catch (error) {
+            console.error('Error al reactivar empleado:', error);
+            if (error.message.includes('no tiene un retiro') || error.message.includes('no tiene contrato')) {
+                return res.status(404).json({ success: false, message: error.message });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     }
