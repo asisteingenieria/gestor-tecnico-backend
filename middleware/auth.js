@@ -64,6 +64,11 @@ const isDirectivoFinanciero = verifyRole(['directivoFinanciero', 'admin']);
 const isDisenador = verifyRole(['disenador', 'admin']);
 const canManageDisenos = verifyRole(['admin', 'coordinador', 'disenador']);
 
+// Middlewares para asistencia
+const isDirectorOperaciones = verifyRole(['director_operaciones', 'admin']);
+const isEmpleado = verifyRole(['empleado', 'admin']);
+const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'admin']);
+
 module.exports = {
     verifyToken,
     verifyRole,
@@ -89,5 +94,9 @@ module.exports = {
     isDirectivoFinanciero,
     // Middlewares para diseños
     isDisenador,
-    canManageDisenos
+    canManageDisenos,
+    // Middlewares para asistencia
+    isDirectorOperaciones,
+    isEmpleado,
+    canRegistrarAsistencia
 };

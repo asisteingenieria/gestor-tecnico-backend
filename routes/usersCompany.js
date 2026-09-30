@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const userCompanyController = require('../controllers/userCompanyController');
 const { verifyToken } = require('../middleware/auth');
+const asyncHandler = require('../middleware/asyncHandler');
+const uploadEmpleados = require('../middleware/uploadEmpleados');
 
 // Gestión completa del módulo de empleados: exclusiva de Recursos Humanos (y admin).
 const verificarRecursosHumanos = (req, res, next) => {
@@ -32,6 +34,10 @@ router.get('/',                          verificarLecturaEmpleados, userCompanyC
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
 router.get('/gasto-total',               verificarRecursosHumanos, userCompanyController.getGastoTotal);
 
+// Import masivo de empleados desde Excel
+router.post('/import-excel/preview',     verificarRecursosHumanos, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.previewImportExcel));
+router.post('/import-excel/commit',      verificarRecursosHumanos, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.commitImportExcel));
+
 // Novedades RRHH (deben ir antes de '/:id' para no colisionar con ella)
 router.get('/novedades',                 verificarRecursosHumanos, userCompanyController.getNovedades);
 router.post('/novedades',                verificarRecursosHumanos, userCompanyController.createNovedad);
@@ -55,10 +61,14 @@ router.delete('/vacaciones/:vacacionesId', verificarRecursosHumanos, userCompany
 
 router.get('/:id',                       verificarRecursosHumanos, userCompanyController.getById);
 router.get('/:id/activos',               verificarRecursosHumanos, userCompanyController.getActivos);
+router.get('/:id/retiro',                verificarRecursosHumanos, userCompanyController.getRetiro);
 router.post('/',                         verificarRecursosHumanos, userCompanyController.create);
+router.post('/:id/retiro',               verificarRecursosHumanos, userCompanyController.registrarRetiro);
 router.put('/:id',                       verificarRecursosHumanos, userCompanyController.update);
 router.put('/:id/activos/:activoId',     verificarRecursosHumanos, userCompanyController.assignActivo);
+router.put('/:id/retiro',                verificarRecursosHumanos, userCompanyController.actualizarRetiro);
 router.delete('/:id',                    verificarRecursosHumanos, userCompanyController.delete);
 router.delete('/:id/activos/:activoId',  verificarRecursosHumanos, userCompanyController.unassignActivo);
+router.delete('/:id/retiro',             verificarRecursosHumanos, userCompanyController.reactivarEmpleado);
 
 module.exports = router;

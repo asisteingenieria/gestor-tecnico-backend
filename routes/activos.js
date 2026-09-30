@@ -7,9 +7,9 @@ const uploadActivos = require('../middleware/uploadActivos');
 // Middleware para verificar rol de gestorActivos
 const verificarGestorActivos = (req, res, next) => {
     if (!['gestorActivos', 'admin'].includes(req.user.role)) {
-        return res.status(403).json({ 
-            success: false, 
-            message: 'Acceso denegado. Solo los gestores de activos pueden acceder a esta funcionalidad.' 
+        return res.status(403).json({
+            success: false,
+            message: 'Acceso denegado. Solo los gestores de activos pueden acceder a esta funcionalidad.'
         });
     }
     next();

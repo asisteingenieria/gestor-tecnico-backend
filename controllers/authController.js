@@ -34,7 +34,8 @@ exports.login = async (req, res) => {
                 role: user.role,
                 sede: user.sede,
                 departamento: user.departamento,
-                full_name: user.full_name
+                full_name: user.full_name,
+                users_company_id: user.users_company_id
             }
         };
 

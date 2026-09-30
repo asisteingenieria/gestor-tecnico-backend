@@ -54,10 +54,14 @@ app.use('/api/auto-activos', require('./routes/autoActivos'));
 app.use('/api/script-parser', require('./routes/scriptParser'));
 app.use('/api/users-company', require('./routes/usersCompany'));
 app.use('/api/disenos', require('./routes/disenos'));
+app.use('/api/asistencia', require('./routes/asistencia'));
 
 app.get('/', (req, res) => {
   res.send('API del Call Center Support está funcionando!');
 });
+
+// Manejador central de errores del módulo de asistencia (debe ir después de todas las rutas)
+app.use(require('./middleware/errorHandler'));
 
 // Configuración de Socket.IO
 const authenticatedUsers = new Map(); // userId -> socketId
