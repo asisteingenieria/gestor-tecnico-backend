@@ -1,9 +1,11 @@
 const db = require('../../config/db');
 
-// `ocurridoEn` solo lo usa el cierre automático (origen='sistema'), para registrar el
-// instante programado de salida en vez de "ahora". Ningún endpoint HTTP lo expone: el
-// cliente nunca envía una hora (ver regla de zona horaria en asistencia.md §2.1). Todo lo
-// demás sigue usando NOW(3) del servidor de base de datos, nunca el reloj de Node.
+// `ocurridoEn` solo lo usan el cierre automático (origen='sistema'), para registrar el
+// instante programado de salida en vez de "ahora", y la integración con AsisLock
+// (origen='asislock'), que reporta la hora real del login/logout biométrico (§18). Ningún
+// endpoint de usuario lo expone: el empleado o el director nunca envían una hora (ver regla
+// de zona horaria en asistencia.md §2.1). Todo lo demás sigue usando NOW(3) del servidor de
+// base de datos, nunca el reloj de Node.
 async function insertar({ jornadaId, tipo, origen = 'empleado', registradoPorUserId = null, nota = null, ip = null, userAgent = null, ocurridoEn = null }, conn = db) {
     const columnaFecha = ocurridoEn ? '?' : 'NOW(3)';
     const valores = [jornadaId, tipo];

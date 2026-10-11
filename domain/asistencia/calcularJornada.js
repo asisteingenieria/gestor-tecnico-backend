@@ -13,7 +13,9 @@ const ESTADO_SIN_ENTRADA = {
     minutosTrabajados: 0,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
+    minutosDesconexion: 0,
     pausaActiva: null,
+    desconexionActiva: null,
     minutosTarde: 0,
     minutosExtra: 0,
     minutosSalidaAnticipada: 0,
@@ -49,13 +51,24 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     let pausaActiva = null;
     const duracionesBano = [];
     let pendiente = null;
+    // Desconexión de AsisLock (logout antes del fin de turno): corre aparte de las pausas
+    // de baño/almuerzo y tampoco cuenta como tiempo laborado.
+    let minutosDesconexion = 0;
+    let desconexionDesde = null;
 
     for (const evento of ordenados) {
         // Un evento posterior a `fin` (p. ej. una corrección manual registrada después de que
         // la jornada ya se cerró con `salida`) no pertenece a la ventana de esta jornada.
         if (evento.ocurrido_en > fin) continue;
 
-        if (evento.tipo === 'inicio_bano' || evento.tipo === 'inicio_almuerzo') {
+        if (evento.tipo === 'inicio_desconexion') {
+            if (desconexionDesde === null) desconexionDesde = evento.ocurrido_en;
+        } else if (evento.tipo === 'fin_desconexion') {
+            if (desconexionDesde !== null) {
+                minutosDesconexion += Math.max(0, minutosEntre(desconexionDesde, evento.ocurrido_en));
+                desconexionDesde = null;
+            }
+        } else if (evento.tipo === 'inicio_bano' || evento.tipo === 'inicio_almuerzo') {
             const tipo = evento.tipo === 'inicio_bano' ? 'bano' : 'almuerzo';
             pendiente = { tipo, desde: evento.ocurrido_en };
             if (tipo === 'almuerzo' && inicioAlmuerzoReal === null) inicioAlmuerzoReal = evento.ocurrido_en;
@@ -78,8 +91,15 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         if (!salida) pausaActiva = { tipo: pendiente.tipo, desde: pendiente.desde, minutosTranscurridos: Math.round(duracion) };
     }
 
+    let desconexionActiva = null;
+    if (desconexionDesde !== null) {
+        const duracion = Math.max(0, minutosEntre(desconexionDesde, fin));
+        minutosDesconexion += duracion;
+        if (!salida) desconexionActiva = { desde: desconexionDesde, minutosTranscurridos: Math.round(duracion) };
+    }
+
     const bruto = minutosEntre(entrada.ocurrido_en, fin);
-    const minutosTrabajados = Math.max(0, bruto - minutosPausaBano - minutosPausaAlmuerzo);
+    const minutosTrabajados = Math.max(0, bruto - minutosPausaBano - minutosPausaAlmuerzo - minutosDesconexion);
 
     let minutosTarde = 0;
     let minutosExtra = 0;
@@ -135,14 +155,16 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     }
     if (salida && salida.origen === 'sistema') alertas.push('sin_marcar_salida');
 
-    const estado = salida ? 'finalizada' : (pausaActiva ? 'en_pausa' : 'en_curso');
+    const estado = salida ? 'finalizada' : (pausaActiva || desconexionActiva ? 'en_pausa' : 'en_curso');
 
     return {
         estado,
         minutosTrabajados: Math.round(minutosTrabajados),
         minutosPausaBano: Math.round(minutosPausaBano),
         minutosPausaAlmuerzo: Math.round(minutosPausaAlmuerzo),
+        minutosDesconexion: Math.round(minutosDesconexion),
         pausaActiva,
+        desconexionActiva,
         minutosTarde: Math.round(minutosTarde),
         minutosExtra: Math.round(minutosExtra),
         minutosSalidaAnticipada: Math.round(minutosSalidaAnticipada),

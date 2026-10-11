@@ -10,6 +10,9 @@ function assertPuedeIniciarPausa(estadoCalculado, tipo) {
     if (estadoCalculado.pausaActiva) {
         throw new ReglaAsistenciaError(`Ya hay una pausa de ${estadoCalculado.pausaActiva.tipo} activa`);
     }
+    if (estadoCalculado.desconexionActiva) {
+        throw new ReglaAsistenciaError('Estás desconectado de AsisLock: vuelve a iniciar sesión allí para continuar la jornada');
+    }
 }
 
 function assertPuedeFinalizarPausa(estadoCalculado, tipo) {

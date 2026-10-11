@@ -39,6 +39,9 @@ app.use(cors({
 // Integración con Hydra (máquina a máquina): va ANTES de express.json() porque verifica la
 // firma HMAC sobre el cuerpo crudo y lo parsea por su cuenta. Ver conexionhydra.md §5.3.
 app.use('/api/integraciones/hydra/v1', require('./routes/integracionHydra'));
+// Integración con AsisLock (login biométrico → asistencia). También antes de express.json():
+// autentica primero y parsea con su propio límite de tamaño. Ver asistencia.md §18.
+app.use('/api/integraciones/asislock/v1', require('./routes/integracionAsislock'));
 
 app.use(express.json()); // Para parsear el body de las peticiones como JSON
 

@@ -1223,3 +1223,70 @@ repetir la carga de la página varias veces seguidas.
 **No se tocó:** el backend corría con `node index.js` suelto (sin autorecarga); se reinició con
 `npm run dev` (nodemon) para poder iterar, y quedó así corriendo — session-only, no es un cambio
 de archivo.
+
+---
+
+## 18. Sesión 2026-10-11 — Integración con AsisLock (login biométrico → jornada)
+
+**Pedido:** que el login/logout en AsisLock (app de escritorio PyQt5 de acceso a las
+aplicaciones del call center, repo `Desktop\AsislockBack\asislock`, base MySQL `asislock`)
+alimente el tiempo laborado. AsisLock tiene la tabla `login_biometrico` (`id, usuario, fecha,
+hora_login, hora_logout, estado_conexion, ip_local, ip_publica, aplicativo,
+conectado_biometrico`). Ojo: el repo de AsisLock que se revisó **no** escribe esa tabla (usa
+`login`/`registro_login`); la llena otro componente.
+
+**Decisiones del usuario:**
+- `usuario` = **cédula** → `users_company.numero_identificacion` (se ignoran puntos/espacios/guiones).
+- Logout antes de la ventana de salida = **desconexión no laborada**; el siguiente login la cierra.
+  Logout dentro de la ventana de salida (`minutos_habilitar_salida`, 10 min) o después = **salida**.
+- Vale la **hora que reporta AsisLock** (hora de Bogotá), no la de llegada. Excepción documentada
+  a la regla "el servidor pone la hora" (§2.1): solo para `origen='asislock'`.
+- Baño y almuerzo **siguen en Gestor**; mientras está desconectado no puede iniciarlas (422).
+
+**Contrato:** `POST /api/integraciones/asislock/v1/registros` con `{ registros: [filas de
+login_biometrico] }` (máx. 500) y `GET /salud`; cabecera `x-api-key`. Documento para el equipo de
+AsisLock, con script de envío de ejemplo: [`docs/asislock/API_AsisLock.md`](docs/asislock/API_AsisLock.md).
+Respuesta 200 con un resultado por registro y por evento (`registrado | duplicado | ignorado |
+rechazado` + `accion`/`motivo`). Idempotente por `(asislock_id, evento)`; un `rechazado` sí se
+reprocesa al reenviarlo (p. ej. tras crear la ficha que faltaba).
+
+**Migración `062_asistencia_asislock.sql`** (aplicada en local, **no en producción**):
+`jornada_evento.tipo` + `inicio_desconexion`/`fin_desconexion`, `jornada_evento.origen` + `asislock`
+(ENUMs reescritos completos), `jornada.minutos_desconexion`, tabla `asislock_registro`
+(bitácora/idempotencia) y parámetros `asislock_tolerancia_futuro_min` (5) y
+`asislock_max_horas_atraso` (72). No es idempotente: correr una sola vez.
+
+**Archivos (mismas 4 capas):**
+- `domain/asistencia/asislock.js` — puro: normaliza fecha/hora/cédula, `instantesDelRegistro`
+  (logout < login ⇒ día siguiente), `motivoRechazoHora`, `decidirLogin`/`decidirLogout`,
+  `desconexionAbierta`. `calcularJornada` ahora descuenta `minutosDesconexion` y expone
+  `desconexionActiva` (estado `en_pausa`); `assertPuedeIniciarPausa` bloquea si está desconectado.
+- `repositories/asistencia/asislockRegistroRepository.js`, `empleadoRepository.js` (cédula → id).
+- `services/asistencia/asislockService.js` — un login/logout = una transacción (`FOR UPDATE` sobre
+  el registro y la jornada), eventos aplicados en orden cronológico, reintento ante
+  `ER_DUP_ENTRY`/`ER_LOCK_DEADLOCK`. Si hay pausa de baño/almuerzo abierta al logout, la cierra
+  antes de la desconexión.
+- `cierreService.normalizarJornada`: si la jornada termina con una desconexión abierta, la salida
+  se registra **a la hora de ese logout** (`origen='asislock'`, sin alerta `sin_marcar_salida`), no
+  en la hora programada.
+- `controllers/asistencia/asislockController.js`, `routes/integracionAsislock.js` (montada en
+  `index.js` antes de `express.json()`, con su propio límite de 1 MB),
+  `middleware/autenticarAsislock.js`, `config/integracionAsislock.js`,
+  `validators/asislockSchemas.js`.
+- `.env`: `ASISLOCK_API_KEY` (obligatoria; sin ella 503), `ASISLOCK_API_KEY_ANTERIOR` (rotación),
+  `ASISLOCK_IPS_PERMITIDAS` (opcional, lista blanca).
+- Frontend: etiquetas de los eventos nuevos y origen "AsisLock" en la trazabilidad, hueco en la
+  barra durante la desconexión, aviso en Mi Jornada (se ocultan baño/almuerzo) y badge
+  "Desconectado de AsisLock" en Equipo.
+
+**Seguridad:** la clave **no** debe ir en el `.exe` de AsisLock (extraíble en cada PC); el envío lo
+hace un proceso en servidor. El tráfico va por HTTP a la IP pública de Gestor (mismo caveat que
+Hydra). Se vio además que el repo de AsisLock tiene credenciales de MySQL en el código y arma SQL
+con `.format()` — fuera de este alcance, avisado al usuario.
+
+**Verificado:** `npm test` 130/130 (24 nuevos en `tests/asistencia/asislock.test.js`). En vivo
+contra el servidor local: 401 sin clave, 400 por forma, entrada → desconexión → reconexión →
+salida (218 min = 233 brutos − 15 desconectado, 5 min de salida anticipada), duplicados,
+`empleado_no_encontrado`, `hora_futura`, cierre del día con desconexión abierta (salida a la hora
+del logout), y en Chrome la trazabilidad y el aviso de Mi Jornada. El script de ejemplo del
+documento se ejecutó contra la API local.
