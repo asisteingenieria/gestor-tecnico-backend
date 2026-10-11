@@ -50,7 +50,7 @@ No apliques el patrón de dos capas ahí, ni el de cuatro capas en los módulos 
   y `028`. Antes de crear una migración, revisa `ls migrations/` y toma el siguiente número
   realmente libre.
 - **`026_add_directivo_financiero_role.sql` es obsoleta — no la ejecutes.**
-- La BD local va aplicada hasta la **061** (módulo de asistencia + campos/catálogos de RRHH —
+- La BD local va aplicada hasta la **062** (062 = integración AsisLock → asistencia, ver `asistencia.md` §18; **no aplicada en producción**). Antes iba hasta la **061** (módulo de asistencia + campos/catálogos de RRHH —
   ver `claude/modulo recursoshumanos.md`; 059-061 son el staging de la conexión con Hydra, ver
   [`conexionhydra.md`](conexionhydra.md), **todavía no aplicadas en producción**). **Producción, desde el 2026-10-01, también tiene
   043-058 aplicadas** (043-048, 050-053, 055, 056, 058 corridas tal cual + un `CREATE TABLE

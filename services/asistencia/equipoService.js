@@ -33,6 +33,7 @@ async function equipo(directorUsersCompanyId) {
             estado: estadoCalculado.estado,
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             pausa_activa: estadoCalculado.pausaActiva,
+            desconexion_activa: estadoCalculado.desconexionActiva,
             alertas: estadoCalculado.alertas
         };
     }));

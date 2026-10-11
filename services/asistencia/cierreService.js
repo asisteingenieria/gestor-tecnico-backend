@@ -3,6 +3,7 @@ const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
 const horarioRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
+const { asislock } = require('../../domain/asistencia');
 const { fechaLaboral, combinarFechaHora } = require('../../utils/fechaBogota');
 
 const ESTADOS_ABIERTOS = ['en_curso', 'en_pausa'];
@@ -15,6 +16,7 @@ const TOTALES_AUSENTE = {
     minutosTrabajados: 0,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
+    minutosDesconexion: 0,
     minutosExtra: 0,
     minutosSalidaAnticipada: 0,
     desviacionAlmuerzoMin: 0
@@ -48,8 +50,19 @@ async function normalizarJornada(usersCompanyId, fecha, ahora, conn = db) {
 
     if (!ESTADOS_ABIERTOS.includes(jornada.estado)) return null;
 
-    const corte = horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59');
-    await eventoRepo.insertar({ jornadaId: jornada.idjornada, tipo: 'salida', origen: 'sistema', ocurridoEn: corte }, conn);
+    // Si el último movimiento fue un logout de AsisLock que nunca se reconectó, el empleado
+    // se fue a esa hora: la salida se registra ahí (origen asislock), no en la hora programada,
+    // y no levanta la alerta sin_marcar_salida porque sí hubo un logout real.
+    const desconexionDesde = asislock.desconexionAbierta(await eventoRepo.findByJornada(jornada.idjornada, conn));
+    const corte = desconexionDesde
+        ?? (horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59'));
+    await eventoRepo.insertar({
+        jornadaId: jornada.idjornada,
+        tipo: 'salida',
+        origen: desconexionDesde ? 'asislock' : 'sistema',
+        nota: desconexionDesde ? 'Cierre del día: último logout de AsisLock sin reconexión' : null,
+        ocurridoEn: corte
+    }, conn);
 
     const { estadoCalculado, eventos } = await calcularEstadoConDatos(usersCompanyId, fecha, jornada.idjornada, corte, conn);
     await jornadaRepo.actualizarTotales(jornada.idjornada, construirTotales(estadoCalculado, eventos), conn);

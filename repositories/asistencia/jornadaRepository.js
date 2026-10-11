@@ -49,6 +49,7 @@ async function actualizarTotales(idjornada, totales, conn) {
             minutos_trabajados = ?,
             minutos_pausa_bano = ?,
             minutos_pausa_almuerzo = ?,
+            minutos_desconexion = ?,
             minutos_extra = ?,
             minutos_salida_anticipada = ?,
             desviacion_almuerzo_min = ?
@@ -61,6 +62,7 @@ async function actualizarTotales(idjornada, totales, conn) {
             totales.minutosTrabajados,
             totales.minutosPausaBano,
             totales.minutosPausaAlmuerzo,
+            totales.minutosDesconexion ?? 0,
             totales.minutosExtra,
             totales.minutosSalidaAnticipada,
             totales.desviacionAlmuerzoMin,
