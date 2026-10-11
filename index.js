@@ -35,6 +35,11 @@ app.use(cors({
     origin: corsOrigins,
     credentials: true
 })); // Permite peticiones desde el frontend
+
+// Integración con Hydra (máquina a máquina): va ANTES de express.json() porque verifica la
+// firma HMAC sobre el cuerpo crudo y lo parsea por su cuenta. Ver conexionhydra.md §5.3.
+app.use('/api/integraciones/hydra/v1', require('./routes/integracionHydra'));
+
 app.use(express.json()); // Para parsear el body de las peticiones como JSON
 
 // Servir archivos estáticos (archivos adjuntos)
@@ -55,6 +60,7 @@ app.use('/api/script-parser', require('./routes/scriptParser'));
 app.use('/api/users-company', require('./routes/usersCompany'));
 app.use('/api/disenos', require('./routes/disenos'));
 app.use('/api/asistencia', require('./routes/asistencia'));
+app.use('/api/contratacion-hydra', require('./routes/contratacionHydra'));
 
 app.get('/', (req, res) => {
   res.send('API del Call Center Support está funcionando!');

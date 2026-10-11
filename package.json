@@ -13,6 +13,8 @@
     "create-gestor-activos": "node scripts/createGestorActivosUser.js",
     "cerrar-jornadas": "node scripts/cerrarJornadasDelDia.js",
     "recalcular-jornadas": "node scripts/recalcularJornadas.js",
+    "despachar-hydra": "node scripts/despacharEnviosHydra.js",
+    "verificar-hydra": "node scripts/verificarConexionHydra.js",
     "test": "node --test tests/**/*.test.js"
   },
   "keywords": [],
