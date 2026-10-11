@@ -15,8 +15,9 @@ npm run dev     # nodemon, NODE_ENV=development
 npm start       # NODE_ENV=production
 ```
 
-`npm test` corre `node --test tests/**/*.test.js` — hoy solo cubre el dominio puro del módulo
-de asistencia (26 tests, sin servidor ni base de datos). El resto del repo sigue sin pruebas.
+`npm test` corre `node --test tests/**/*.test.js` — hoy cubre el dominio puro del módulo de
+asistencia y de la conexión con Hydra (106 tests, sin servidor ni base de datos). El resto del repo
+sigue sin pruebas.
 
 ## Arquitectura
 
@@ -49,9 +50,17 @@ No apliques el patrón de dos capas ahí, ni el de cuatro capas en los módulos 
   y `028`. Antes de crear una migración, revisa `ls migrations/` y toma el siguiente número
   realmente libre.
 - **`026_add_directivo_financiero_role.sql` es obsoleta — no la ejecutes.**
-- La BD local va aplicada hasta la **058** (módulo de asistencia + campos/catálogos de RRHH —
-  ver `claude/modulo recursoshumanos.md`). Ninguna migración desde la 043 está aplicada en
-  producción todavía.
+- La BD local va aplicada hasta la **061** (módulo de asistencia + campos/catálogos de RRHH —
+  ver `claude/modulo recursoshumanos.md`; 059-061 son el staging de la conexión con Hydra, ver
+  [`conexionhydra.md`](conexionhydra.md), **todavía no aplicadas en producción**). **Producción, desde el 2026-10-01, también tiene
+  043-058 aplicadas** (043-048, 050-053, 055, 056, 058 corridas tal cual + un `CREATE TABLE
+  salario_referencia` vacío agregado a mano porque `getCatalogos()` la consulta sin try/catch —
+  ver `claude/modulo recursoshumanos.md` §29.3) — **excepto 049, 054 y 057**, que tienen IDs
+  quemados contra el estado de la BD local y siguen pendientes de resembrar contra los IDs reales
+  de producción. Producción también recibió los 389 empleados reales vía un `.sql` generado
+  aparte (nunca commiteado, PII real — ver §29.5-29.6), así que sus catálogos (`cliente`,
+  `campania`, `cargo`, `centro_costo`, `oleada`, `ciudad`, `entidad_seguridad_social`) ya no son
+  solo el seed genérico de 035/036.
 
 ### Roles
 
@@ -147,6 +156,7 @@ nombres** (está pensado para el formulario de edición). Para mostrarlos hay qu
 | Archivo | Contenido |
 |---|---|
 | [`asistencia.md`](asistencia.md) | Plan del módulo de asistencia — **implementado** (backend Fases 0-4 y 6, frontend Fase 5) |
+| [`conexionhydra.md`](conexionhydra.md) | Plan de la conexión Hydra → RRHH (contratación) — **implementado y probado en local, sin desplegar** (Fases 1-8.5: backends de Gestor e Hydra, pantallas de RRHH en `src/components/contratacionHydra/` con la ruta `/recursos-humanos/contratacion-hydra`, y la pantalla "Contratación" en el frontend de Hydra; falta el despliegue, Fase 9, cuya guía está en §14; antes de activar en un servidor: `npm run verificar-hydra`). Las reglas de catálogos de `AgentForm.jsx` están copiadas en `src/utils/catalogosRRHH.js` del frontend: si cambia una, hay que cambiar la otra. Las pruebas entre las dos apps se hacen primero en local con ambos backends corriendo (§13.6). API de RRHH en `/api/contratacion-hydra`; API máquina-a-máquina en `/api/integraciones/hydra/v1`, montada antes de `express.json()`; requiere `HYDRA_API_KEY`/`HYDRA_HMAC_SECRET` en `.env` (sin ellas responde 503). Avisos a Hydra por outbox: `node scripts/despacharEnviosHydra.js` (cron cada minuto; usa `HYDRA_CALLBACK_URL`/`_API_KEY`/`_HMAC_SECRET`). `UserCompany.create` ahora envuelve `crearEnConexion(conn, data)` y `validarObligatorios` vive en `utils/validarEmpleado.js`. Prueba local de Gestor solo: `node scripts/simularEnvioHydra.js` |
 | [`claude/contextoriginal.md`](claude/contextoriginal.md) | Contexto completo de ambos repos, módulos, despliegue |
 | [`claude/modulo recursoshumanos.md`](claude/modulo%20recursoshumanos.md) | Detalle del módulo de empleados/RRHH |
 | `context/CONTEXT.md` | Detalle estable de incidentes, activos y analíticas (algo desactualizado) |

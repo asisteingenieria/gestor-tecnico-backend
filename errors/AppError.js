@@ -30,6 +30,12 @@ class ReglaAsistenciaError extends AppError {
     }
 }
 
+class ReglaContratacionError extends AppError {
+    constructor(message = 'Regla de contratación violada') {
+        super(message, 422, 'REGLA_CONTRATACION');
+    }
+}
+
 class ValidacionError extends AppError {
     constructor(message = 'Datos inválidos', detalles = []) {
         super(message, 400, 'VALIDACION');
@@ -43,5 +49,6 @@ module.exports = {
     NoEncontradoError,
     ConflictoJornadaError,
     ReglaAsistenciaError,
+    ReglaContratacionError,
     ValidacionError
 };

@@ -69,6 +69,9 @@ const isDirectorOperaciones = verifyRole(['director_operaciones', 'admin']);
 const isEmpleado = verifyRole(['empleado', 'admin']);
 const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'admin']);
 
+// Middleware para contratación desde Hydra (conexionhydra.md §8)
+const isRecursosHumanos = verifyRole(['recursosHumanos', 'admin']);
+
 module.exports = {
     verifyToken,
     verifyRole,
@@ -98,5 +101,7 @@ module.exports = {
     // Middlewares para asistencia
     isDirectorOperaciones,
     isEmpleado,
-    canRegistrarAsistencia
+    canRegistrarAsistencia,
+    // Middleware para contratación desde Hydra
+    isRecursosHumanos
 };

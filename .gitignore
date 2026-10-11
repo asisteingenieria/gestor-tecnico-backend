@@ -4,6 +4,10 @@
 .env.production
 .env.development
 
+# Volcados con datos personales reales (PII de empleados) -- nunca a git
+empleados_produccion_NO_COMMITEAR.sql
+*_NO_COMMITEAR.sql
+
 # Logs
 logs
 *.log

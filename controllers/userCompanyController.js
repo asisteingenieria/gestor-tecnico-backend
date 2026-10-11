@@ -5,6 +5,7 @@ const Vacaciones = require('../models/Vacaciones');
 const Retiro = require('../models/Retiro');
 const importEmpleadosExcel = require('../utils/importEmpleadosExcel');
 const importEmpleadosService = require('../services/importEmpleadosService');
+const { validarObligatorios } = require('../utils/validarEmpleado');
 
 const CAMPOS_PERSONALES = [
     'numero_identificacion', 'tipo_identificacion_id',
@@ -16,18 +17,6 @@ const CAMPOS_PERSONALES = [
     'email', 'telefono', 'usuario_ssff', 'rut',
     'declarante_renta', 'libreta_militar_numero'
 ];
-
-const CAMPOS_CONTRATO_OBLIGATORIOS = {
-    campania_id: 'campaña',
-    area_id: 'área',
-    centro_costo_id: 'centro de costo',
-    cargo_id: 'cargo',
-    tipo_contrato_id: 'tipo de contrato',
-    modalidad_id: 'modalidad',
-    oleada_id: 'oleada',
-    ciudad_id: 'ciudad del contrato',
-    fecha_ingreso: 'fecha de ingreso'
-};
 
 function extraerCampos(body) {
     const data = {};
@@ -44,31 +33,6 @@ function extraerCampos(body) {
     data.dotacion = body.dotacion || null;
     data.recursos = body.recursos || null;
     return data;
-}
-
-function validarObligatorios(data) {
-    if (!data.numero_identificacion || !data.tipo_identificacion_id || !data.primer_nombre || !data.primer_apellido) {
-        return 'Los campos tipo de identificación, número de identificación, primer nombre y primer apellido son obligatorios';
-    }
-
-    const faltantes = Object.entries(CAMPOS_CONTRATO_OBLIGATORIOS)
-        .filter(([campo]) => !data.contrato[campo])
-        .map(([, nombre]) => nombre);
-    if (faltantes.length > 0) {
-        return `Faltan campos obligatorios del contrato: ${faltantes.join(', ')}`;
-    }
-
-    if (!data.salario.salario || Number(data.salario.salario) <= 0) {
-        return 'El salario es obligatorio y debe ser mayor a cero';
-    }
-
-    const tarifaArl = data.seguridad_social?.tarifa_arl;
-    if (tarifaArl !== undefined && tarifaArl !== null && tarifaArl !== '' &&
-        (isNaN(Number(tarifaArl)) || Number(tarifaArl) < 0 || Number(tarifaArl) > 100)) {
-        return 'La tarifa ARL debe ser un porcentaje entre 0 y 100';
-    }
-
-    return null;
 }
 
 const userCompanyController = {

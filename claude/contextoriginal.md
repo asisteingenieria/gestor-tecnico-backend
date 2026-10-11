@@ -463,3 +463,49 @@ como nuevo — todos ya existían y se modificaron.
 development` en frontend sin errores nuevos (`dist/` restaurado tras el build, como exige
 `CLAUDE.md`). **No probado en Chrome contra el backend real** — pendiente crear un `empleado`
 de prueba end-to-end y confirmar que el error original ya no aparece.
+
+## 11. Sesión 2026-10-01 — Conexión con Hydra (contratación desde selección)
+
+Hydra (app de selección y reclutamiento, repos `ReclutamientoBackend/hidrabackend` y
+`ReclutamientoFronted/hidrafrontend`) envía por API los candidatos aprobados a RRHH:
+1. RRHH completa sus datos de contratación por secciones, con un checkbox de verificación en cada
+   una.
+2. RRHH registra el lote completo como empleados (todo o nada).
+3. Gestor avisa a Hydra, que pasa a esos candidatos a `contratado`.
+
+Las dos apps se comunican solo por la red interna. **Fuente de verdad: [`conexionhydra.md`](../conexionhydra.md)**,
+que tiene el plan, el contrato de la API, las notas de implementación por fase (§13) y la guía de
+despliegue (§14). Los diagramas están en `docs/diagramas/conexion-hydra/`.
+
+**Qué se agregó, en resumen:**
+
+- **Backend de Gestor:**
+  - Módulo `contratacionHydra` en cuatro capas, como asistencia.
+  - Migraciones 059-061 (staging `hydra_*`).
+  - Dos APIs:
+    - `/api/integraciones/hydra/v1`: máquina a máquina, firma HMAC, montada antes de
+      `express.json()`.
+    - `/api/contratacion-hydra`: para RRHH.
+  - Scripts:
+    - `despacharEnviosHydra.js`: cron de avisos.
+    - `simularEnvioHydra.js`.
+    - `verificarConexionHydra.js`: chequeo previo al despliegue.
+  - `UserCompany.create` ahora envuelve `crearEnConexion(conn, data)`.
+  - `validarObligatorios` se movió a `utils/validarEmpleado.js`.
+- **Frontend de Gestor:**
+  - RRHH → "Contratación Hydra", en `src/components/contratacionHydra/`.
+  - `src/utils/catalogosRRHH.js` copia las reglas de catálogos de `AgentForm.jsx`: si cambia una,
+    hay que cambiar la otra.
+- **Hydra:**
+  - Migración 018.
+  - Módulo `contratacion` con su outbox.
+  - Endpoint de avisos `/api/integraciones/gestor/v1`.
+  - Pantalla Selección → "Contratación".
+
+**Verificado:**
+- 106 tests en Gestor y 35 en Hydra.
+- Prueba de punta a punta en local con los dos backends.
+- Prueba en Chrome de las dos apps.
+
+**Estado:** implementado y probado solo en local; nada commiteado ni desplegado. Falta que
+RRHH/Selección confirmen las decisiones de §11 del plan y ejecutar el despliegue de §14.

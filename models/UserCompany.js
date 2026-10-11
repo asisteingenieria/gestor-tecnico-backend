@@ -443,42 +443,10 @@ class UserCompany {
     }
 
     static async create(data) {
-        const [existing] = await db.query(
-            'SELECT id FROM users_company WHERE tipo_identificacion_idtipo_identificacion = ? AND numero_identificacion = ?',
-            [data.tipo_identificacion_id, data.numero_identificacion]
-        );
-        if (existing.length > 0) {
-            throw new Error(`Ya existe un empleado con la identificación '${data.numero_identificacion}'`);
-        }
-
         const conn = await db.getConnection();
         try {
             await conn.beginTransaction();
-
-            const [result] = await conn.query(
-                `INSERT INTO users_company (
-                    numero_identificacion, tipo_identificacion_idtipo_identificacion,
-                    numero_identificacion_secundaria, tipo_identificacion_secundaria_id,
-                    fecha_expedicion, ciudad_expedicion_id,
-                    primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, nombre_propio,
-                    fecha_nacimiento, ciudad_nacimiento_id, numero_hijos,
-                    estado_civil_idestado_civil, grupo_sanguineo_idgrupo_sanguineo, genero_idgenero,
-                    email, telefono, usuario_ssff, rut, declarante_renta, libreta_militar_numero
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                camposPersonales(data)
-            );
-            const ucId = result.insertId;
-
-            const contratoId = await insertarContrato(conn, ucId, data.contrato);
-            await insertarSalario(conn, contratoId, data.salario, data.contrato.fecha_ingreso);
-            await guardarSeguridadSocial(conn, ucId, data.seguridad_social, data.contrato.fecha_ingreso);
-            await guardarCuentaBancaria(conn, ucId, data.cuenta_bancaria);
-            await guardarDireccion(conn, ucId, data.direccion);
-            await guardarContactoEmergencia(conn, ucId, data.contacto_emergencia);
-            await guardarVacunacion(conn, ucId, data.vacunacion);
-            await guardarDotacion(conn, ucId, data.dotacion);
-            await guardarRecursos(conn, ucId, data.recursos);
-
+            const ucId = await this.crearEnConexion(conn, data);
             await conn.commit();
             return { id: ucId, ...data };
         } catch (error) {
@@ -487,6 +455,46 @@ class UserCompany {
         } finally {
             conn.release();
         }
+    }
+
+    // Alta completa del empleado usando una conexión con transacción ya abierta por quien
+    // llama (no hace begin/commit/rollback). La usa create() y el registro de lotes de
+    // Hydra (services/contratacionHydra/registroService.js), que crea varios empleados en
+    // una sola transacción todo-o-nada. Devuelve el id de users_company.
+    static async crearEnConexion(conn, data) {
+        const [existing] = await conn.query(
+            'SELECT id FROM users_company WHERE tipo_identificacion_idtipo_identificacion = ? AND numero_identificacion = ?',
+            [data.tipo_identificacion_id, data.numero_identificacion]
+        );
+        if (existing.length > 0) {
+            throw new Error(`Ya existe un empleado con la identificación '${data.numero_identificacion}'`);
+        }
+
+        const [result] = await conn.query(
+            `INSERT INTO users_company (
+                numero_identificacion, tipo_identificacion_idtipo_identificacion,
+                numero_identificacion_secundaria, tipo_identificacion_secundaria_id,
+                fecha_expedicion, ciudad_expedicion_id,
+                primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, nombre_propio,
+                fecha_nacimiento, ciudad_nacimiento_id, numero_hijos,
+                estado_civil_idestado_civil, grupo_sanguineo_idgrupo_sanguineo, genero_idgenero,
+                email, telefono, usuario_ssff, rut, declarante_renta, libreta_militar_numero
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            camposPersonales(data)
+        );
+        const ucId = result.insertId;
+
+        const contratoId = await insertarContrato(conn, ucId, data.contrato);
+        await insertarSalario(conn, contratoId, data.salario, data.contrato.fecha_ingreso);
+        await guardarSeguridadSocial(conn, ucId, data.seguridad_social, data.contrato.fecha_ingreso);
+        await guardarCuentaBancaria(conn, ucId, data.cuenta_bancaria);
+        await guardarDireccion(conn, ucId, data.direccion);
+        await guardarContactoEmergencia(conn, ucId, data.contacto_emergencia);
+        await guardarVacunacion(conn, ucId, data.vacunacion);
+        await guardarDotacion(conn, ucId, data.dotacion);
+        await guardarRecursos(conn, ucId, data.recursos);
+
+        return ucId;
     }
 
     static async update(id, data) {

@@ -1667,3 +1667,237 @@ pendiente que el usuario confirme/complete el texto si quiere el detalle complet
 
 **Sin cambios de BD en 28.1–28.6 y 28.8** (todo frontend); la única migración de esta sesión es la
 `058` (28.7).
+
+---
+
+## 29. Sesión 2026-09-30/10-01 — Filtro de jefatura real, deploy de esquema a producción, carga de
+los 389 empleados reales y un bug encontrado en el camino
+
+Sesión larga que cerró el ciclo completo: filtro nuevo en el formulario → deploy del esquema
+pendiente (043-058) a producción → bloqueo real al crear el primer usuario `recursosHumanos` en
+producción (sin empleados) → carga de los 389 empleados reales vía `.sql` generado → bug
+encontrado y corregido en el camino. Commit backend `6d2b858` ("Agregar módulo de Asistencia y
+ampliar módulo de Recursos Humanos", `sebas-branch`, sin push por pedido explícito del usuario).
+Commits frontend `69f39ab` (mismo alcance) y `ab8a39d` ("ajuste error", el fix de §29.7) — estos
+dos **ya están pusheados** a `origin/sebas-branch` (el usuario los maneja directo, fuera de esta
+sesión).
+
+### 29.1 Mapeo exacto de columnas Jefe inmediato/Jefe de área/Director de área
+
+Leído directo del header real de la hoja **"Nuevo Epleado"** de `Descargas/DATOS (1) (1).xlsx`
+(`xlsx` contra el archivo, no por memoria): las tres columnas están contiguas, índices 31-33:
+
+| Campo del formulario | Columna (índice 0-based) | Encabezado real |
+|---|---|---|
+| Director de área | 31 | `Director de Área` |
+| Jefe de área | 32 | `Jefe de Área` |
+| Jefe inmediato | 33 | `Jefe Inmediato` |
+
+### 29.2 Filtro de Jefe inmediato/Jefe de área/Director de área por Campaña (+Cargo)
+
+Pedido del usuario: que esos 3 selectores de `AgentForm.jsx` se filtren según la Campaña y el
+Cargo ya elegidos del empleado que se está registrando (antes mostraban los 34/8/4 candidatos
+reales sin importar a qué campaña pertenecían, ver §27). Antes de tocar código se verificó contra
+la BD real (consultas SQL directas, no supuestos) cuál es la granularidad correcta:
+
+- **Jefe inmediato** varía por **Campaña + Cargo** del subordinado (ej. T&T + Agente call center
+  → 7 candidatos reales distintos; T&T + Coordinador Call → solo 1).
+- **Jefe de área** y **Director de área** varían casi siempre solo por **Campaña** — una sola
+  persona cubre toda la campaña sin importar el cargo del subordinado.
+
+**Backend** (`models/UserCompany.js::getCatalogos()`): `empleadosPorRol()` ahora trae una fila por
+cada `(persona, campaña)` real en la que figura como jefe/director (y para jefe inmediato, también
+el `cargo_idcargo` de esa fila) — antes era una fila por persona, sin contexto. `jefes_inmediatos`
+gana `campania_id`+`cargo_id`; `jefes_area`/`directores_area` ganan solo `campania_id`.
+
+**Frontend** (`AgentForm.jsx`): nuevos helpers `dedupePorId()`, `filtrarPorCampania()` (jefe de
+área/director) y `filtrarJefesInmediatos()` (jefe inmediato, por campaña+cargo con fallback a solo
+campaña si esa combinación exacta no tiene candidatos). Sin Campaña elegida, o si la combinación no
+tiene ningún candidato real, cae a mostrar la lista completa sin filtrar — mismo criterio que el
+filtro de Cargo por Cliente (§26): mejor no bloquear el alta que dejar el selector vacío.
+
+**Verificado con el caso real Claro+T&T+Agente call center**: Jefe inmediato → 7 opciones (Danny
+Morales, Jesus Romero, Kevin Buitrago, Laura Acero, Maria Alarcon, Nicole Corredor, Yanira
+Vasquez); Jefe de área → 2 (Kevin Buitrago, Nelson Acero); Director de área → 1 (Nelson Acero) —
+coincide exacto con la consulta SQL directa contra la BD real. `node -c`, `eslint` sin errores.
+**No probado en el navegador** (sesión verificó solo por consulta directa + lectura de código).
+
+### 29.3 Deploy del esquema pendiente (043-058) a producción
+
+Producción estaba aplicada solo hasta la **042** (ver CLAUDE.md). Se armó un archivo consolidado
+(`migrations/059_ultima_migracion_pendiente_produccion.sql`, **no commiteado, solo de trabajo**,
+borrado del working tree al terminar) con las migraciones realmente seguras para correr tal cual:
+**043-048, 050-053, 055, 056, 058** (13 de 16).
+
+**Excluidas a propósito — 049, 054 y 057**: las tres tienen IDs quemados (`idciudad` /
+`Cliente_idCliente` / `cargo_idcargo`) resueltos contra el estado de la BD LOCAL, que ya tenía los
+389 empleados importados y los catálogos que ese import generó (OBAMACARE, BEEMO, 61 cargos
+reales, etc.). Producción nunca había corrido ese import — sus catálogos antes de esta sesión eran
+literalmente solo el seed original de las migraciones 035/036 (3 clientes: Claro/Obama/Asiste, 3
+campañas, 8 cargos, 20 ciudades, confirmado leyendo esos dos archivos). Correr 049/054/057 tal cual
+ahí habría fallado por FK o, peor, tocado una fila que por coincidencia tuviera el mismo ID pero
+fuera otra cosa. Quedan pendientes de resembrar a mano contra los IDs reales de producción (parte
+de eso ya dejó de hacer falta, ver §29.6).
+
+**Bug real encontrado en el camino — `salario_referencia` inexistente rompía TODO RRHH, no solo
+el sueldo sugerido:** `UserCompany.js::getCatalogos()` hace `SELECT ... FROM salario_referencia`
+**sin try/catch propio**, y ese único endpoint (`GET /users-company/catalogos`) alimenta 6
+componentes del frontend (`AgentForm`, `EmpleadoDrawer`, `NovedadForm`, `TraspasoForm`,
+`RetiroModal`, `ImportEmpleadosModal`). Sin la tabla, el endpoint completo devolvía 500 y dejaba
+**todo** RRHH inoperable (no solo el autocompletado de sueldo). Fix: se agregó al archivo
+consolidado el `CREATE TABLE salario_referencia` **vacío** (mismo esquema que la 054, sin su
+`INSERT` de 59 filas con IDs locales) — el frontend ya maneja "sin coincidencias" sin romperse
+(`salarioSugerido()` retorna `null`).
+
+**Primer intento de correr el consolidado — error 1175 (MySQL Workbench "safe update mode")**:
+se detuvo justo en `DELETE FROM tipo_novedad` (bloque 053) — ajuste del cliente Workbench, no un
+problema del script (el `DELETE` sin `WHERE` es intencional, reemplaza el catálogo completo, sigue
+protegido por `FK RESTRICT` si hubiera `novedad_rrhh` real apuntando a un tipo viejo). Como el
+usuario confirmó que la ejecución se detuvo ahí (no siguió con el resto), **043-052 ya habían
+quedado aplicados completos**. Se generó `migrations/059b_continuacion_desde_053.sql` (también de
+trabajo, no commiteado) retomando exactamente desde el `DELETE` que falló, con
+`SET SQL_SAFE_UPDATES=0` al inicio y restaurado al final — corrió limpio en el segundo intento.
+
+**Estado final de producción tras esta sesión**: esquema completo hasta la 058 + el `CREATE TABLE
+salario_referencia` vacío. **Pendiente**: 049 (ciudades DIVIPOLA), 054 (datos reales de
+`salario_referencia`) y 057 (campaña OBAMACARE-LV) — las tres necesitan regenerarse contra los
+catálogos reales de producción, que después de §29.6 ya existen (cliente/campaña/cargo ya no son
+solo el seed de 035/036).
+
+### 29.4 Bloqueo real al crear el primer usuario `recursosHumanos` en producción
+
+El usuario intentó crear `Prueba.RRH` (rol `recursosHumanos`) desde `/users` en producción — el
+selector "Empleado (ficha de RRHH)" (obligatorio para este rol desde §15, vía
+`ROLES_VINCULADOS_A_EMPLEADO`) salió vacío: *"No hay fichas de RRHH sin vincular"*. Esperado:
+producción tenía 0 empleados en `users_company` en ese momento.
+
+**Hallazgo de paso, no resuelto esta sesión**: `RecursosHumanosRoute` en `App.jsx` (frontend) solo
+deja pasar `isRecursosHumanos` — un `admin` no puede llegar a `/recursos-humanos` en el navegador
+para usar "Cargar Excel" aunque el backend sí lo permite
+(`verificarRecursosHumanos` en `routes/usersCompany.js` acepta `['recursosHumanos', 'admin']`).
+Inconsistencia frontend/backend real, no se corrigió — se evitó con el camino de §29.6.
+
+### 29.5 Decisión de alcance: cargar los 389 empleados reales a producción vía `.sql`, no vía la app
+
+El usuario pidió explícitamente un archivo `.sql` para correr "como migración", no usar el botón
+"Cargar Excel" (que hubiera sido la vía más simple pero exigía resolver primero el bloqueo de
+§29.4, o pasar por la API directo con un script aparte — ambas opciones se ofrecieron y se
+descartaron). Se advirtió del riesgo de dejar PII de 389 personas en un archivo — el usuario lo
+asumió, pidiendo que el archivo **no se commiteara**.
+
+### 29.6 Generación del `.sql` con los 389 empleados reales — metodología y validación
+
+Dado que copiar los datos de local tal cual **no habría funcionado** (los IDs de cliente/campaña/
+cargo de local ya incluyen todo lo creado por el import real, que no existía en producción antes
+de esta sesión — exactamente el mismo problema de 049/054/057 de §29.3), se generó el archivo
+corriendo el **import real** contra una base de datos temporal preparada para arrancar igual que
+producción, no copiando datos a mano:
+
+1. Clonado el esquema completo (sin datos) de la BD local a una BD temporal
+   (`test_import_produccion_temp`).
+2. Sembrado **solo** el catálogo base de las migraciones 035/036 + 039/047/050/052/056/053/055/058
+   en su estado final (el mismo que producción ya tenía tras §29.3) — leído directo de cada
+   archivo de migración, no de memoria.
+3. Corrido `services/importEmpleadosService.js::confirmar()` (el mismo código del botón "Cargar
+   Excel", invocado directo en Node con `DB_DATABASE` apuntando a la BD temporal) contra el Excel
+   real: **389 creados, 0 errores** — mismo resultado que la carga original en local (§ sección 5
+   / `project-rrhh-bulk-import`).
+4. Exportado el resultado a SQL **sin IDs literales**: cada referencia a catálogo (cliente,
+   campaña, cargo, ciudad, banco, EPS/ARL/AFP/CESANTIAS/CAJA, etc.) y cada relación entre
+   empleados (jefe inmediato/área, director de área, analista encargado) se resuelve con
+   subconsultas por nombre/NIT/cédula, no por ID — así el archivo no depende de que los
+   auto_increment de producción coincidan exactamente con los de la BD temporal. Los catálogos
+   abiertos (los que el import puede crear si faltan: `tipo_identificacion`, `ciudad`, `cliente`,
+   `campania`, `centro_costo`, `cargo`, `tipo_contrato`, `banco`, `oleada`,
+   `entidad_seguridad_social`) se exportan también, solo las filas nuevas (diff contra el seed
+   base de 035/036), con `INSERT IGNORE`/`WHERE NOT EXISTS` según tengan o no `UNIQUE KEY`.
+5. **Validado de verdad antes de entregarlo**: corrido contra una SEGUNDA BD temporal limpia (mismo
+   catálogo base, 0 empleados) — sin errores, conteos consistentes (389 empleados, 389 contratos,
+   1945 afiliaciones de seguridad social, etc.) y un empleado de muestra (Kevin Vargas, cédula
+   1001294395) con los mismos datos exactos del Excel. Ambas BDs temporales borradas al terminar.
+
+Archivo final: `empleados_produccion_NO_COMMITEAR.sql` (en la raíz del repo backend, **no
+commiteado** — agregado a `.gitignore` junto con el patrón `*_NO_COMMITEAR.sql` para cualquier
+futuro similar). Corrido por el usuario contra producción, exitoso.
+
+**Nota para el futuro**: con esto, los catálogos de producción (`cliente`, `campania`, `cargo`,
+`centro_costo`, `oleada`, `ciudad`, `entidad_seguridad_social`) ya tienen datos reales (no solo el
+seed de 035/036) — las migraciones 049/054/057 pendientes (§29.3) se pueden regenerar ahora contra
+esos IDs reales si se necesita avanzar con ellas.
+
+### 29.7 Bug encontrado en producción: `nombre_propio` NULL rompía la pestaña "Equipo" de Asistencia
+
+El usuario creó un usuario de prueba `director_operaciones` vinculado a Kevin Buitrago (mismo
+empleado que en local) y, al entrar a la pestaña "Equipo" de Asistencia, la pantalla se rompía:
+`TypeError: Cannot read properties of null (reading 'localeCompare')`.
+
+**Causa — bug del generador del §29.6, no del código de la app**: el `INSERT INTO users_company`
+armado a mano en el script de exportación **omitió la columna `nombre_propio`** — ese campo
+normalmente lo calcula el backend solo (`nombrePropio()` en `models/UserCompany.js`, llamado desde
+`camposPersonales()` dentro de `create()`/`update()`), pero como el script generador insertaba
+directo por SQL sin pasar por ese código, la columna (nullable) quedó `NULL` para los 389. Local
+nunca tuvo este problema porque ahí los empleados se cargaron por la ruta real de la app.
+
+`services/asistencia/equipoService.js::equipo()` expone `nombre: empleado.nombre_propio` tal cual,
+y `EquipoAsistencia.jsx` (frontend) lo usaba sin verificar null en dos sitios: el filtro de
+búsqueda (`e.nombre.toLowerCase()`) y el `.sort()` (`a.nombre.localeCompare(b.nombre)`) — este
+último es el que tumbaba toda la pantalla (useMemo que no captura el error).
+
+**Fix de datos (producción, ya corrido por el usuario)**:
+```sql
+UPDATE users_company
+SET nombre_propio = TRIM(CONCAT_WS(' ', primer_nombre, segundo_nombre, primer_apellido, segundo_apellido))
+WHERE nombre_propio IS NULL OR nombre_propio = '';
+```
+Misma fórmula exacta que `nombrePropio()` en el backend. Tuvo que correrse con
+`SET SQL_SAFE_UPDATES=0` (mismo ajuste de Workbench que en §29.3, no un problema real).
+
+**Fix de código (defensivo, ya commiteado y pusheado — commit frontend `ab8a39d` "ajuste error")**:
+`EquipoAsistencia.jsx` — los dos puntos sin guarda ahora usan `(e.nombre || '')`, para que un
+nombre nulo por cualquier otro camino futuro no vuelva a tumbar la pantalla completa, solo ordene/
+filtre como texto vacío. `eslint` sin errores.
+
+**Alcance verificado**: grep confirmó que `EquipoAsistencia.jsx` es el único componente de
+Asistencia que usa `.localeCompare` sobre un nombre de empleado sin guarda — el resto de consumos
+de `nombre`/`nombre_propio` en ese módulo (helpers `nombrePropio()`/`iniciales()` de
+`utils/formatoRRHH.js`) ya manejaban `null`/falsy de antes.
+
+### 29.8 Pendiente
+
+- **Confirmar** que el `UPDATE` de `nombre_propio` (§29.7) corrió exitosamente en producción y que
+  la pestaña "Equipo" ya carga bien con Kevin Buitrago.
+- Migraciones **049** (ciudades DIVIPOLA), **054** (datos reales de `salario_referencia`) y **057**
+  (campaña OBAMACARE-LV) — regenerar contra los IDs reales de producción (ya hay catálogo real
+  para apoyarse, ver nota de §29.6) si se quiere avanzar con ellas.
+- Inconsistencia `RecursosHumanosRoute` (frontend) vs `verificarRecursosHumanos` (backend) sobre si
+  `admin` puede entrar a `/recursos-humanos` (§29.4) — detectada, no corregida.
+- `.gitignore` (backend) tiene el patrón `*_NO_COMMITEAR.sql` agregado pero **sin commitear
+  todavía** — junto con `migrations/026_add_directivo_financiero_role.sql` (fix de otra sesión, ver
+  conversación del commit `6d2b858`), quedan sueltos en el working tree del backend.
+- Deploy de código a producción (backend `git pull` + `pm2 restart`; frontend `git pull` + 
+  `npm install` + `npm run build` + reload nginx) — commits backend (`6d2b858`, sin push) y
+  frontend (`69f39ab`/`ab8a39d`, ya pusheados) listos, pendiente confirmar que el deploy en el
+  servidor ya recogió todo esto (el usuario ya estaba operando producción en vivo durante esta
+  sesión, así que probablemente sí, pero no se verificó explícitamente).
+
+## 30. Contratación desde Hydra (2026-10-01)
+
+Los candidatos aprobados en Hydra (la app de selección) llegan a RRHH por API y se registran como
+empleados desde **RRHH → "Contratación Hydra"** (`/recursos-humanos/contratacion-hydra`):
+- Los candidatos esperan en tablas de staging (`hydra_*`, migraciones 059-061) y **no** tocan
+  `users_company` hasta el registro.
+- RRHH completa y marca con ☑ cada una de las 7 secciones de cada candidato.
+- El lote se registra todo o nada, con `UserCompany.crearEnConexion`.
+- Gestor avisa a Hydra para que el candidato pase a `contratado`.
+
+Todo vive en [`conexionhydra.md`](../conexionhydra.md): el plan, el contrato de la API, las notas
+de implementación (§13) y la guía de despliegue (§14).
+
+Los diagramas están en [`docs/diagramas/conexion-hydra/`](../docs/diagramas/conexion-hydra/README.md):
+- arquitectura;
+- secuencia del envío de un lote;
+- secuencia del registro y aviso;
+- estados del candidato;
+- flujo de datos.
+
+**Estado**: implementado y probado en local. Sin desplegar a producción.

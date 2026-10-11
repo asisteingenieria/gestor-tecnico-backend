@@ -1,0 +1,6 @@
+# Evidencia de verificación que genera Archify en cada corrida (rutas absolutas locales).
+*.finalize.json
+*.finalize-summary.json
+*.browser-check.json
+*.delivery.json
+*.delivery-pending.json
