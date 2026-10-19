@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const User = require('./User');
 
 const SELECT_EMPLEADO = `
     SELECT
@@ -493,6 +494,16 @@ class UserCompany {
         await guardarVacunacion(conn, ucId, data.vacunacion);
         await guardarDotacion(conn, ucId, data.dotacion);
         await guardarRecursos(conn, ucId, data.recursos);
+
+        // Todo empleado nuevo queda con su usuario de empleado (cédula / cédula, cambio
+        // obligatorio en el primer ingreso) para ver su asistencia. Cubre el alta manual, el
+        // import masivo y el registro desde Hydra, que pasan todos por aquí. Ver asistencia.md §19.
+        await User.crearCuentaEmpleadoEnConexion(conn, {
+            usersCompanyId: ucId,
+            cedula: data.numero_identificacion,
+            nombre: data.nombre_propio
+                || [data.primer_nombre, data.segundo_nombre, data.primer_apellido, data.segundo_apellido].filter(Boolean).join(' ')
+        });
 
         return ucId;
     }

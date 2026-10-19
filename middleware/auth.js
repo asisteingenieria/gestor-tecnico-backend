@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 
 // Middleware para verificar el token JWT
+const RUTAS_PERMITIDAS_SIN_CAMBIO = ['/api/auth/me', '/api/auth/change-password'];
+
 const verifyToken = (req, res, next) => {
     const token = req.header('x-auth-token');
 
@@ -11,6 +13,11 @@ const verifyToken = (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded.user;
+        // Cuenta con la contraseña inicial (cédula): hasta cambiarla solo puede consultar su
+        // sesión y cambiar la contraseña. Ver asistencia.md §19.
+        if (req.user.debe_cambiar_password && !RUTAS_PERMITIDAS_SIN_CAMBIO.includes(req.originalUrl.split('?')[0])) {
+            return res.status(403).json({ codigo: 'CAMBIO_PASSWORD_REQUERIDO', msg: 'Debes cambiar tu contraseña antes de continuar' });
+        }
         next();
     } catch (err) {
         res.status(401).json({ msg: 'Token no válido' });
@@ -67,7 +74,9 @@ const canManageDisenos = verifyRole(['admin', 'coordinador', 'disenador']);
 // Middlewares para asistencia
 const isDirectorOperaciones = verifyRole(['director_operaciones', 'admin']);
 const isEmpleado = verifyRole(['empleado', 'admin']);
-const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'admin']);
+// recursosHumanos: su cuenta ya está vinculada a su ficha (es el "analista encargado" de las
+// altas), así que ve su propia asistencia con ella en vez de tener cuenta de empleado aparte.
+const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'recursosHumanos', 'admin']);
 
 // Middleware para contratación desde Hydra (conexionhydra.md §8)
 const isRecursosHumanos = verifyRole(['recursosHumanos', 'admin']);

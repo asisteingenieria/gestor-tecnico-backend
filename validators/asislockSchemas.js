@@ -12,7 +12,9 @@ function validarRegistro(r, i) {
     if (r === null || typeof r !== 'object' || Array.isArray(r)) return [`${p} debe ser un objeto`];
 
     const errores = [];
-    if (!Number.isInteger(r.id) || r.id <= 0) errores.push(`${p}.id debe ser un entero positivo (login_biometrico.id)`);
+    // id es opcional: sin él, Gestor identifica cada evento por cédula + fecha + hora.
+    const sinId = r.id === undefined || r.id === null;
+    if (!sinId && (!Number.isInteger(r.id) || r.id <= 0)) errores.push(`${p}.id, si se envía, debe ser un entero positivo (login_biometrico.id)`);
 
     const usuarioValido = (typeof r.usuario === 'string' && r.usuario.trim().length > 0 && r.usuario.length <= 20)
         || (Number.isInteger(r.usuario) && r.usuario > 0);
@@ -23,8 +25,9 @@ function validarRegistro(r, i) {
     if (!esHora(r.hora_logout)) errores.push(`${p}.hora_logout debe ser texto "HH:MM:SS" o null`);
     if (!r.hora_login && !r.hora_logout) errores.push(`${p} debe traer hora_login, hora_logout o ambas`);
 
-    if (!(r.estado_conexion === undefined || r.estado_conexion === null || Number.isInteger(r.estado_conexion))) {
-        errores.push(`${p}.estado_conexion debe ser entero o null`);
+    // VARCHAR(20) en login_biometrico de AsisLock; se acepta también como número.
+    if (!(esTextoOpcional(r.estado_conexion, 20) || Number.isInteger(r.estado_conexion))) {
+        errores.push(`${p}.estado_conexion debe ser texto de hasta 20 caracteres, número o null`);
     }
     if (!esTextoOpcional(r.ip_local, 50)) errores.push(`${p}.ip_local debe ser texto de hasta 50 caracteres`);
     if (!esTextoOpcional(r.ip_publica, 50)) errores.push(`${p}.ip_publica debe ser texto de hasta 50 caracteres`);
@@ -44,6 +47,7 @@ function validarEnvioAsislock(body) {
 
     const vistos = new Set();
     for (const r of body.registros) {
+        if (r.id === undefined || r.id === null) continue;
         if (vistos.has(r.id)) return [`El registro id ${r.id} viene repetido en el mismo envío`];
         vistos.add(r.id);
     }

@@ -1,7 +1,7 @@
 const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository');
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const equipoService = require('./equipoService');
-const { NoEncontradoError } = require('../../errors/AppError');
+const { NoEncontradoError, ConflictoJornadaError } = require('../../errors/AppError');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -30,8 +30,17 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, minutosAprobados, 
     if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
     await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
 
-    await horaExtraRepo.resolver(idhoraExtra, { estado: 'aprobada', minutosAprobados, comentario, aprobadoPorUserId });
+    await resolverPendiente(solicitud, { estado: 'aprobada', minutosAprobados, comentario, aprobadoPorUserId });
     return { success: true };
+}
+
+// Solo una solicitud pendiente se resuelve, y una sola vez. El `AND estado = 'pendiente'` del
+// UPDATE cubre además a dos directores (o dos pestañas) resolviendo la misma a la vez.
+async function resolverPendiente(solicitud, decision) {
+    const conflicto = () => new ConflictoJornadaError(`La solicitud de hora extra ya está ${solicitud.estado === 'pendiente' ? 'resuelta' : solicitud.estado}`);
+    if (solicitud.estado !== 'pendiente') throw conflicto();
+    const resuelta = await horaExtraRepo.resolver(solicitud.idhora_extra, decision);
+    if (!resuelta) throw conflicto();
 }
 
 async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprobadoPorUserId }) {
@@ -40,7 +49,7 @@ async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprob
     if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
     await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
 
-    await horaExtraRepo.resolver(idhoraExtra, { estado: 'rechazada', minutosAprobados: null, comentario, aprobadoPorUserId });
+    await resolverPendiente(solicitud, { estado: 'rechazada', minutosAprobados: null, comentario, aprobadoPorUserId });
     return { success: true };
 }
 

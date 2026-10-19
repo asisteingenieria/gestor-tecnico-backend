@@ -5,6 +5,7 @@ const horarioRepo = require('../../repositories/asistencia/horarioAsignadoReposi
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
 const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
 const registroRepo = require('../../repositories/asistencia/asislockRegistroRepository');
+const loginBiometricoRepo = require('../../repositories/asistencia/loginBiometricoRepository');
 const { asislock } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
@@ -14,14 +15,61 @@ const notificacionService = require('./notificacionService');
 
 const MAX_INTENTOS_POR_CARRERA = 2;
 
+// estado_conexion es VARCHAR(20) en AsisLock; si llega como número se guarda como texto.
+const textoONulo = (v) => (v === undefined || v === null ? null : String(v));
+
+/** Fila de login_biometrico tal como la tiene AsisLock (copia de la migración 064). */
+function datosCopia(registro) {
+    return {
+        llave: asislock.llaveSesion(registro),
+        asislockId: registro.id ?? null,
+        usuario: String(registro.usuario ?? '').slice(0, 20),
+        fecha: registro.fecha,
+        horaLogin: asislock.normalizarHora(registro.hora_login),
+        horaLogout: asislock.normalizarHora(registro.hora_logout),
+        estadoConexion: textoONulo(registro.estado_conexion),
+        ipLocal: registro.ip_local ?? null,
+        ipPublica: registro.ip_publica ?? null,
+        aplicativo: registro.aplicativo ?? null,
+        conectadoBiometrico: registro.conectado_biometrico ?? null
+    };
+}
+
+/**
+ * Guarda la sesión en login_biometrico. Un logout sin id ni hora_login (sistemas que no envían
+ * id) no trae con qué identificar su sesión: cierra la sesión abierta de esa cédula ese día, o
+ * queda como fila solo con logout si no hay ninguna.
+ */
+async function guardarCopia(registro) {
+    const copia = datosCopia(registro);
+    if (registro.id || registro.hora_login || !copia.horaLogout) return loginBiometricoRepo.guardar(copia);
+
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+        if (!(await loginBiometricoRepo.existeLogout(copia.usuario, copia.fecha, copia.horaLogout, conn))) {
+            const abierta = await loginBiometricoRepo.findSesionAbiertaParaActualizar(copia.usuario, copia.fecha, copia.horaLogout, conn);
+            if (abierta) await loginBiometricoRepo.cerrarSesion(abierta.idlogin_biometrico, copia, conn);
+            else await loginBiometricoRepo.guardar(copia, conn);
+        }
+        await conn.commit();
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
+    }
+}
+
 function datosBitacora(registro, evento, hora) {
     return {
-        asislockId: registro.id,
+        llave: asislock.llaveEvento(registro, evento),
+        asislockId: registro.id ?? null,
         evento,
         usuario: String(registro.usuario ?? '').slice(0, 20),
         fechaReportada: registro.fecha ?? null,
         horaReportada: hora ?? null,
-        estadoConexion: registro.estado_conexion ?? null,
+        estadoConexion: textoONulo(registro.estado_conexion),
         ipLocal: registro.ip_local ?? null,
         ipPublica: registro.ip_publica ?? null,
         aplicativo: registro.aplicativo ?? null,
@@ -35,7 +83,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
         await conn.beginTransaction();
         const bitacora = datosBitacora(registro, evento, hora);
 
-        const previo = await registroRepo.findParaActualizar(registro.id, evento, conn);
+        const previo = await registroRepo.findParaActualizar(bitacora.llave, evento, conn);
         if (previo && previo.resultado !== 'rechazado') {
             await conn.commit();
             return { resultado: 'duplicado', accion: previo.accion, motivo: previo.motivo };
@@ -96,7 +144,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
                 jornadaId: jornada.idjornada,
                 tipo,
                 origen: 'asislock',
-                nota: `AsisLock registro #${registro.id}${registro.aplicativo ? ` (${String(registro.aplicativo).slice(0, 80)})` : ''}`,
+                nota: `AsisLock ${registro.id ? `registro #${registro.id}` : `(sin id, cédula ${registro.usuario})`}${registro.aplicativo ? ` (${String(registro.aplicativo).slice(0, 80)})` : ''}`,
                 ip: (registro.ip_publica || registro.ip_local || null)?.slice(0, 45) ?? null,
                 userAgent: 'AsisLock',
                 ocurridoEn: instante
@@ -141,10 +189,13 @@ async function procesarEvento(datos) {
  */
 async function recibirRegistros(registros) {
     const ahora = new Date();
+    // La copia se guarda siempre, aunque después el login/logout se rechace o se ignore.
+    for (const registro of registros) await guardarCopia(registro);
+
     const pendientes = [];
     const resultados = registros.map((registro) => {
         const instantes = asislock.instantesDelRegistro(registro);
-        const fila = { id: registro.id, usuario: String(registro.usuario ?? ''), login: null, logout: null };
+        const fila = { id: registro.id ?? null, usuario: String(registro.usuario ?? ''), login: null, logout: null };
         for (const evento of ['login', 'logout']) {
             const hora = registro[`hora_${evento}`];
             if (hora === undefined || hora === null || hora === '') continue;

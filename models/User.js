@@ -17,7 +17,7 @@ class User {
     static async getById(id) {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, users_company_id, created_at FROM users WHERE id = ?',
+                'SELECT id, username, full_name, role, sede, departamento, users_company_id, debe_cambiar_password, created_at FROM users WHERE id = ?',
                 [id]
             );
             return rows[0];
@@ -256,6 +256,53 @@ class User {
 
     static async validatePassword(plainPassword, hashedPassword) {
         return await bcrypt.compare(plainPassword, hashedPassword);
+    }
+
+    // Cuenta de empleado automática de una ficha de RRHH (asistencia.md §19): usuario y
+    // contraseña inicial = cédula, marcada para cambiar la contraseña en el primer ingreso.
+    // No falla si no se puede crear (la ficha ya tiene una cuenta vinculada, o ese usuario ya
+    // existe): devuelve el motivo, para que el alta del empleado nunca se caiga por esto.
+    // Usa la conexión de quien llama para quedar dentro de su transacción.
+    static async crearCuentaEmpleadoEnConexion(conn, { usersCompanyId, cedula, nombre }) {
+        const usuario = String(cedula ?? '').trim();
+        if (!usuario) return { creada: false, motivo: 'sin_cedula' };
+
+        const [vinculadas] = await conn.query(
+            'SELECT id, username, role FROM users WHERE users_company_id = ? LIMIT 1',
+            [usersCompanyId]
+        );
+        if (vinculadas.length > 0) return { creada: false, motivo: 'ya_tiene_cuenta', cuenta: vinculadas[0] };
+
+        const [ocupado] = await conn.query('SELECT id FROM users WHERE username = ? LIMIT 1', [usuario]);
+        if (ocupado.length > 0) return { creada: false, motivo: 'usuario_ocupado' };
+
+        const hash = await bcrypt.hash(usuario, await bcrypt.genSalt(10));
+        const [resultado] = await conn.query(
+            `INSERT INTO users (username, password, debe_cambiar_password, full_name, role, sede, departamento, users_company_id)
+             VALUES (?, ?, 1, ?, 'empleado', NULL, NULL, ?)`,
+            [usuario, hash, String(nombre || usuario).slice(0, 100), usersCompanyId]
+        );
+        return { creada: true, id: resultado.insertId, username: usuario };
+    }
+
+    static async marcarPasswordCambiada(id) {
+        await db.query('UPDATE users SET debe_cambiar_password = 0 WHERE id = ?', [id]);
+    }
+
+    // ¿La ficha de RRHH vinculada a esta cuenta sigue vigente? Se considera retirada si su
+    // contrato más reciente está 'retirado' o 'inactivo', o si no tiene contrato.
+    static async fichaVigente(usersCompanyId) {
+        const [rows] = await db.query(
+            `SELECT ec.nombre AS estado
+               FROM contrato c
+               JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+              WHERE c.users_company_id = ?
+              ORDER BY c.idcontrato DESC
+              LIMIT 1`,
+            [usersCompanyId]
+        );
+        if (rows.length === 0) return false;
+        return !['retirado', 'inactivo'].includes(rows[0].estado);
     }
 }
 

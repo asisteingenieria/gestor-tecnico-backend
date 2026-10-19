@@ -55,7 +55,7 @@ async function resolver(id, { estado, minutosAprobados, comentario, aprobadoPorU
     const [resultado] = await conn.query(
         `UPDATE hora_extra
          SET estado = ?, minutos_aprobados = ?, comentario_director = ?, aprobado_por_user_id = ?, fecha_decision = NOW()
-         WHERE idhora_extra = ?`,
+         WHERE idhora_extra = ? AND estado = 'pendiente'`,
         [estado, minutosAprobados ?? null, comentario ?? null, aprobadoPorUserId, id]
     );
     return resultado.affectedRows > 0;

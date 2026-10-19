@@ -7,6 +7,8 @@ const { combinarFechaHora } = require('../../utils/fechaBogota');
  *
  * Decisiones de negocio (2026-10-11):
  *   - `usuario` de AsisLock es la cédula del empleado.
+ *   - `id` es opcional (2026-10-19): otro sistema envía sin él. Sin id, cada evento se
+ *     identifica por cédula + fecha + hora (llaveEvento / llaveSesion).
  *   - Vale la hora que reporta AsisLock (fecha + hora_login/hora_logout, hora de Bogotá).
  *   - Primer login del día = entrada. Un logout antes de la ventana de salida abre una
  *     desconexión (no cuenta como tiempo laborado) y el siguiente login la cierra. Un logout
@@ -78,6 +80,40 @@ function instantesDelRegistro({ fecha, hora_login, hora_logout }) {
     if (login && logout && logout < login) logout = new Date(logout.getTime() + 24 * 60 * 60 * 1000);
 
     return { fecha: fechaIso, login, logout };
+}
+
+// Parte de una llave: el valor normalizado si se pudo interpretar; si no, el crudo recortado,
+// para que un reenvío del mismo dato malo produzca la misma llave.
+const pieza = (normalizado, crudo) => normalizado ?? String(crudo ?? '').trim().slice(0, 20);
+
+function piezasSinId(registro) {
+    return [
+        pieza(normalizarCedula(registro.usuario), registro.usuario),
+        pieza(normalizarFecha(registro.fecha), registro.fecha)
+    ];
+}
+
+/**
+ * Llave de idempotencia de un login o logout (asislock_registro, junto con el evento). Con id
+ * de AsisLock, el id; sin id (sistemas que no lo envían), cédula + fecha + hora del evento.
+ */
+function llaveEvento(registro, evento) {
+    if (registro.id) return `id:${registro.id}`;
+    const hora = registro[`hora_${evento}`];
+    return `cc:${[...piezasSinId(registro), pieza(normalizarHora(hora), hora)].join('|')}`;
+}
+
+/**
+ * Llave de la fila en login_biometrico (una por sesión). Con id, el id; sin id, cédula + fecha
+ * + hora_login. Un logout suelto sin id ni hora_login lleva su propia llave ('-' en vez del
+ * login); el servicio primero intenta cerrar con él la sesión abierta de esa cédula.
+ */
+function llaveSesion(registro) {
+    if (registro.id) return `id:${registro.id}`;
+    if (registro.hora_login) {
+        return `cc:${[...piezasSinId(registro), pieza(normalizarHora(registro.hora_login), registro.hora_login)].join('|')}`;
+    }
+    return `cc:${[...piezasSinId(registro), '-', pieza(normalizarHora(registro.hora_logout), registro.hora_logout)].join('|')}`;
 }
 
 /** Motivo de rechazo por la hora reportada, o null si es aceptable. */
@@ -170,6 +206,8 @@ module.exports = {
     normalizarFecha,
     normalizarHora,
     instantesDelRegistro,
+    llaveEvento,
+    llaveSesion,
     motivoRechazoHora,
     desconexionAbierta,
     pausaAbierta,

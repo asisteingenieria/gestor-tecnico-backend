@@ -15,7 +15,8 @@
     "recalcular-jornadas": "node scripts/recalcularJornadas.js",
     "despachar-hydra": "node scripts/despacharEnviosHydra.js",
     "verificar-hydra": "node scripts/verificarConexionHydra.js",
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test tests/**/*.test.js",
+    "test:e2e": "node tests/e2e/asistencia.e2e.js"
   },
   "keywords": [],
   "author": "",

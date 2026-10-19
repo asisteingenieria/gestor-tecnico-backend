@@ -5,7 +5,10 @@ contra el servidor real — ver §14 para el detalle de qué se construyó y en 
 plan original, §15 para el fix del 2026-09-16 a la creación de usuarios `director_operaciones`/
 `empleado` desde el panel de admin, §16 para la corrección de jerarquía a `jefe_area_id`, y §17
 para el rediseño visual del frontend (Opción C) + el endpoint `mis-jornadas` + dos bugs de
-backend corregidos (2026-09-24/25).
+backend corregidos (2026-09-24/25), §18 para la integración con AsisLock (login biométrico →
+jornada, migración 062, commit 7bce3e9; en producción falta confirmar la 062) y §19 para las
+cuentas de empleado automáticas por cédula con cambio obligatorio de contraseña (migración 063,
+probado en local, sin commitear ni desplegar a 2026-10-12) (ambas del 2026-10-11), y §20 para la prueba end-to-end (`npm run test:e2e`) y sus tres correcciones (2026-10-19).
 Fecha del plan: 2026-09-15 · Fecha de implementación: 2026-09-15
 Repos involucrados:
 - Backend: `C:\Users\juan.acosta\Desktop\BackGestor\gestor-tecnico-backend`
@@ -598,11 +601,11 @@ desde marcas de tiempo del servidor.
 |---|---|
 | **Marcaje de entrada** | El front llama `POST /mi-jornada/entrada` al cargar la pantalla tras el login. El backend crea la `jornada` (si no existe) y el evento `entrada`. Idempotente: un segundo llamado el mismo día devuelve la jornada existente sin duplicar. |
 | **Llegada tarde** | `minutos_tarde = max(0, entrada_real − (hora_entrada + tolerancia))`. Tolerancia por horario, default 5 min. |
-| **Una pausa a la vez** | El servidor rechaza `inicio_bano` si hay una pausa abierta (409). Igual para `inicio_almuerzo`. |
+| **Una pausa a la vez** | El servidor rechaza `inicio_bano` si hay una pausa abierta (422 `REGLA_ASISTENCIA`; el plan decía 409, ver §20). Igual para `inicio_almuerzo`. |
 | **Almuerzo con hora exacta** | Si `hora_almuerzo_inicio` está definida, se calcula `desviacion_almuerzo_min = abs(inicio_real − hora_programada)`. **No se bloquea** el marcaje; se registra la desviación y se levanta alerta si supera 15 min. Si es NULL, el almuerzo es libre. |
 | **Exceso de almuerzo** | Si la pausa de almuerzo supera `minutos_almuerzo`, el excedente descuenta del tiempo laborado (ya lo hace el cálculo) y genera alerta `almuerzo_excedido`. |
 | **Baño** | Sin bloqueo. Alerta si una pausa supera 15 min o si el acumulado del día supera 30 min. Ambos configurables. |
-| **Botón Salida** | Habilitado solo cuando `ahora >= hora_salida − 10 min`. **Validado en el servidor** (403 si se intenta antes); el front solo refleja el flag `puedeMarcarSalida`. |
+| **Botón Salida** | Habilitado solo cuando `ahora >= hora_salida − 10 min`. **Validado en el servidor** (422 `REGLA_ASISTENCIA` si se intenta antes; el plan decía 403, ver §20); el front solo refleja el flag `puedeMarcarSalida`. |
 | **Salida anticipada** | Entre −10 min y la hora de salida cuenta como salida anticipada: se registra `minutos_salida_anticipada` con alerta, pero se permite (es la ventana que pidió el negocio). |
 | **Horas extra** | Solo cuentan tras la hora de salida y solo con un registro `hora_extra` en estado `aprobada`. El empleado puede pedirlas (`tipo='solicitada'`) y el director aprueba; o el director las asigna directamente (`tipo='asignada'`, ya nace `aprobada`). |
 | **Jornada sin marcar** | Un empleado con horario y sin evento `entrada` al terminar el día queda `ausente`. Se resuelve de forma perezosa al consultar y con un cierre nocturno (ver §10). |
@@ -626,7 +629,7 @@ Todas las rutas pasan por `verifyToken`. Montaje en `index.js`:
 | `POST` | `/mi-jornada/entrada` | Marca entrada (idempotente) |
 | `POST` | `/mi-jornada/pausa` | Body `{ tipo: 'bano' \| 'almuerzo' }` |
 | `POST` | `/mi-jornada/pausa/fin` | Cierra la pausa activa |
-| `POST` | `/mi-jornada/salida` | 403 si faltan más de 10 min |
+| `POST` | `/mi-jornada/salida` | 422 si faltan más de 10 min |
 | `GET` | `/mi-jornada/:fecha/trazabilidad` | Línea de tiempo del día + totales + alertas |
 | `GET` | `/mis-jornadas?desde=&hasta=` | Filas crudas de `jornada` del rango (default: semana actual) — agregada 2026-09-25, ver §17 |
 | `GET` | `/mis-estadisticas?desde=&hasta=` | Agregados del periodo (§9) |
@@ -1250,7 +1253,7 @@ Respuesta 200 con un resultado por registro y por evento (`registrado | duplicad
 rechazado` + `accion`/`motivo`). Idempotente por `(asislock_id, evento)`; un `rechazado` sí se
 reprocesa al reenviarlo (p. ej. tras crear la ficha que faltaba).
 
-**Migración `062_asistencia_asislock.sql`** (aplicada en local, **no en producción**):
+**Migración `062_asistencia_asislock.sql`** (aplicada en local; en producción ya está `ASISLOCK_API_KEY` en el `.env`, **falta confirmar que la 062 se corrió**):
 `jornada_evento.tipo` + `inicio_desconexion`/`fin_desconexion`, `jornada_evento.origen` + `asislock`
 (ENUMs reescritos completos), `jornada.minutos_desconexion`, tabla `asislock_registro`
 (bitácora/idempotencia) y parámetros `asislock_tolerancia_futuro_min` (5) y
@@ -1290,3 +1293,167 @@ salida (218 min = 233 brutos − 15 desconectado, 5 min de salida anticipada), d
 `empleado_no_encontrado`, `hora_futura`, cierre del día con desconexión abierta (salida a la hora
 del logout), y en Chrome la trazabilidad y el aviso de Mi Jornada. El script de ejemplo del
 documento se ejecutó contra la API local.
+
+---
+
+## 19. Sesión 2026-10-11 — Cuenta de empleado automática para toda ficha de RRHH
+
+**Pedido:** que todo empleado, sin importar su cargo, pueda ver su asistencia sin que el admin
+cree las cuentas una por una.
+
+**Decisiones del usuario:**
+- Toda ficha de RRHH tiene un usuario de **empleado**: usuario = cédula, contraseña inicial =
+  cédula, con **cambio obligatorio en el primer ingreso**.
+- Quien ya tiene cuenta con otro rol (coordinador, jefe de operaciones, técnico…) **conserva la
+  suya** y además recibe la de empleado (esas cuentas no estaban vinculadas a ninguna ficha, así
+  que no chocan con `uq_users_users_company`).
+- **RRHH** no recibe cuenta aparte: su cuenta ya está vinculada a su ficha porque
+  `userCompanyController.create()` usa ese `users_company_id` como *analista encargado* del alta
+  (no se puede desvincular). En cambio, su cuenta de RRHH ganó acceso a "Mi asistencia".
+- `director_operaciones` y `empleado` que ya tenían cuenta vinculada no se tocan.
+- Si RRHH retira al empleado (contrato más reciente `retirado` o `inactivo`, o sin contrato), la
+  cuenta **deja de entrar** (403 en el login); si lo reintegran, vuelve a entrar sola.
+
+**Migración `063_cuentas_empleado_automaticas.sql`** (se puede repetir): `users.debe_cambiar_password`.
+
+**Backend:**
+- `User.crearCuentaEmpleadoEnConexion(conn, …)`: crea la cuenta dentro de la transacción de quien
+  llama; si la ficha ya tiene cuenta o la cédula ya es un usuario, no falla (devuelve el motivo).
+- `UserCompany.crearEnConexion` la llama al final → la reciben solos los empleados nuevos del alta
+  manual, del import masivo y del registro desde Hydra.
+- `scripts/crearCuentasEmpleados.js` — backfill de las fichas existentes; **simula por defecto**,
+  crea con `--aplicar`, idempotente, reporta cédulas que ya son usuario de otra cuenta.
+- Login: bloquea cuentas vinculadas a una ficha retirada; el JWT y la respuesta llevan
+  `debe_cambiar_password`. `verifyToken` responde 403 `CAMBIO_PASSWORD_REQUERIDO` a todo salvo
+  `/api/auth/me` y `/api/auth/change-password` mientras la marca esté activa. `change-password`
+  rechaza una nueva igual al usuario o a la actual, quita la marca y devuelve una sesión nueva.
+- `canRegistrarAsistencia` incluye `recursosHumanos`.
+- `scripts/seedEmpleadosAsistencia.js`: reemplaza la cuenta automática de sus fichas de prueba
+  por el login fijo del seed, ya vinculado.
+
+**Frontend:** pantalla `CambiarPasswordObligatorio` en `/cambiar-password` (todo `ProtectedRoute`
+redirige ahí mientras haga falta; el interceptor de `api.js` también ante el 403); RRHH tiene
+"Mi asistencia" en su menú, que abre las pantallas de asistencia con el layout de asistencia y un
+enlace de vuelta a Recursos Humanos.
+
+**Verificado en local:** migración aplicada dos veces sin error; backfill: 388 cuentas creadas,
+10 fichas que ya tenían cuenta intactas (3 director, 5 empleado, 2 RRHH), re-ejecución sin cambios.
+Contra el servidor: login con cédula → 403 en cualquier endpoint menos `me`/cambio → cambio con la
+cédula rechazado → cambio válido devuelve token y desbloquea → la cédula ya no sirve → ficha
+retirada = 403 / reintegrada = 200 → RRHH vinculado ve su asistencia y sigue con su módulo. Alta de
+un empleado nuevo crea su cuenta (probado dentro de una transacción revertida). En Chrome: el
+primer ingreso lleva a la pantalla de cambio y al guardar entra a Mi Jornada.
+
+**Pendientes / a tener en cuenta:**
+- Si RRHH corrige la cédula de una ficha, el usuario de la cuenta sigue siendo la cédula vieja.
+- `MiJornada` sigue marcando la entrada al abrirse (comportamiento de la Fase 5). Con AsisLock como
+  fuente, abrir Gestor para *consultar* crea una entrada a esa hora (si AsisLock ya marcó antes,
+  manda la más temprana; pero en un día libre crearía una jornada). Decidir si se apaga el
+  marcaje automático para quien marca por AsisLock.
+- El login no tiene límite de intentos; con usuarios = cédula conviene agregarlo.
+
+**Estado (2026-10-12):** probado en local, sin commitear ni desplegar. Orden para producción: 063 →
+pull + `pm2 restart gestor-backend` → `node scripts/crearCuentasEmpleados.js` (revisar) → `--aplicar`
+→ frontend `git pull && npm install && npm run build && chmod -R a+rX dist`.
+
+---
+
+## 20. Sesión 2026-10-19 — Prueba end-to-end y tres correcciones
+
+**Prueba nueva:** `tests/e2e/asistencia.e2e.js` (`npm run test:e2e`). Hace peticiones HTTP reales
+contra el backend y la BD local, con 86 verificaciones:
+- permisos;
+- plantillas y asignación de horarios;
+- la jornada completa en Gestor, con pausas, salida, trazabilidad y estadísticas;
+- horas extra;
+- las vistas del director y el evento manual;
+- la API de AsisLock (clave, `id` como texto o `null` → 400, entrada → desconexión → reconexión →
+  salida = 209 min, duplicados, cédula inexistente, hora futura);
+- la cuenta por cédula con cambio obligatorio de contraseña (063).
+
+Si no recibe `E2E_BASE`, levanta su propio servidor en el puerto 5099 con una `ASISLOCK_API_KEY`
+de prueba, sin tocar `.env`. Borra al empezar y al terminar lo que crea en el día para las fichas
+7-11 del seed (`--conservar` lo deja para mirarlo en el frontend) y deja como estaba la cuenta por
+cédula que usa. Hay que correrla entre las 04:00 y las 23:40 hora Bogotá. Va aparte de `npm test`,
+que sigue sin servidor ni BD; por eso el archivo no termina en `.test.js`.
+
+**Correcciones (la primera corrida dio 80/85):**
+- **500 con fechas imposibles.** `middleware/validar.js` revisaba solo el formato del tipo `fecha`,
+  así que `2026-13-45` llegaba a MySQL (`Incorrect DATE value`). Ahora también verifica que la fecha
+  exista y responde 400. El middleware lo comparten las rutas de Hydra, que también se benefician.
+- **Horas extra ya resueltas se podían volver a resolver.** Un director podía rechazar una aprobada,
+  o reaprobarla con otros minutos. Ahora `horaExtraService.aprobar`/`rechazar` exigen `pendiente`
+  (409 `CONFLICTO_JORNADA`), y `horaExtraRepository.resolver` lleva `AND estado = 'pendiente'` para
+  cubrir dos decisiones simultáneas. El frontend (`HorasExtra.jsx`) ya ofrecía los botones solo para
+  las pendientes.
+- **`scripts/seedEmpleadosAsistencia.js` no corría** ("La campaña seleccionada no existe") porque
+  tenía fija la campaña 1 de 035/036, que ya no existe tras cargar los catálogos reales. Ahora la
+  resuelve al arrancar: usa la de las fichas de prueba o, si no hay, la primera. Además se quitó un
+  aviso "Falta vincular users.users_company_id" que salía siempre, aunque el vínculo existiera.
+
+**Diferencias con el plan, documentadas y no cambiadas:**
+- Una segunda pausa y la salida antes de tiempo responden **422**, no 409/403 como decía §7 (ya
+  corregido arriba).
+- La salida anticipada se calcula y se guarda (`jornada.minutos_salida_anticipada`), pero no viaja
+  en `/mi-jornada/hoy` ni genera la alerta que prometía §7.
+
+**Pendiente — baño y almuerzo desde AsisLock:** el usuario confirmó que los botones de baño y
+almuerzo también están en AsisLock. Hoy la API (§18) solo recibe login/logout de
+`login_biometrico`, y las pausas que lleguen por esa vía no se registran. Falta saber de qué tabla y
+con qué campos salen esos eventos en AsisLock: ni el repo local ni el remoto de AsisLock (último
+commit de julio de 2026) tienen esos botones.
+
+## 21. Sesión 2026-10-19 — Copia de `login_biometrico` en Gestor (migración 064)
+
+El usuario pidió que Gestor guarde los datos que envía AsisLock en una tabla con la misma forma que
+`login_biometrico` de AsisLock. Definición en AsisLock (dada por el usuario):
+`id int AUTO_INCREMENT PK, usuario varchar(11), fecha varchar(20), hora_login time, hora_logout time,
+estado_conexion varchar(20), ip_local varchar(50), ip_publica varchar(50), aplicativo varchar(80),
+conectado_biometrico varchar(15)`.
+
+- **Tabla nueva `login_biometrico`** (064): mismas columnas, una fila por `id` de AsisLock (no es
+  autoincremental en Gestor), más `recibido_en`/`actualizado_en`. Diferencias deliberadas: `usuario`
+  es `VARCHAR(20)` (lo que acepta la API) y las horas se guardan normalizadas a `HH:MM:SS`; una hora
+  inválida queda `NULL` aquí y cruda en `asislock_registro`.
+- **`asislock_registro` sigue igual** (una fila por login/logout, con resultado y motivo: es la llave de
+  idempotencia). Solo `estado_conexion` pasa de `TINYINT` a `VARCHAR(20)`.
+- `repositories/asistencia/loginBiometricoRepository.guardar` hace upsert. `hora_login`/`hora_logout`
+  usan `COALESCE`: un reenvío atrasado sin logout no borra un logout ya recibido.
+- `asislockService.recibirRegistros` guarda la copia de cada registro antes de procesar sus eventos,
+  aunque luego se rechacen o ignoren. Un envío que no pasa la validación (400) no guarda nada.
+- El validador acepta `estado_conexion` como texto de hasta 20 caracteres, número o `null` (antes
+  solo entero: con el `varchar(20)` de AsisLock habría dado 400).
+- `id` sigue exigiéndose como número JSON > 0. El 400 de `registros[0].id` que vio AsisLock se va
+  con el `id int AUTO_INCREMENT` de su tabla, siempre que el envío no lo convierta en texto.
+- E2E: 89/89 (3 checks nuevos sobre la copia); unitarios 130/130. 064 aplicada en local, **no en
+  producción** (requiere la 062 antes).
+
+**Mismo día — el cliente de AsisLock (proyecto `block`, fuera de este repo):** la tabla real en
+AsisLock es `registro_login` (no `login_biometrico`): `id int AUTO_INCREMENT, usuario int, fecha
+varchar(20), hora_login time, hora_logout time, estado_conexion tinyint`. El 400 de `id` venía de
+`ConexionDB.envio_datos` (`connection/conexion.py`), que armaba el registro con la hora del equipo y
+**sin `id`**; además el logout (`panelEstados.desconectar`) nunca se enviaba. Se corrigió en `block`:
+`envio_datos` lee la última fila de `registro_login` del usuario y la manda con su `id`, y
+`desconectar` la reenvía con `hora_logout` antes de apagar el equipo. Como el logout no conoce
+`conectado_biometrico`, `loginBiometricoRepository` lo conserva con `COALESCE`. Probado contra
+Gestor local: 200, la copia queda con login y logout.
+**Origen de baño/almuerzo encontrado:** `panelEstados.cambiarEstado` guarda cada cambio de estado en
+`asislock.conexion_asislock` (`estado_conexion` 1 Conectado, 2 Break, 3 Almuerzo, 4 Capacitación,
+5 Baño, 0 Desconectar; `nombre_estado_conexion`, `fecha`, `hora_login`), una fila por clic, y hoy no
+se envía a Gestor.
+
+**Mismo día — `id` opcional (064 reescrita antes de desplegarse):** el usuario confirmó que otro
+sistema enviará sin `id`. La identidad de cada evento pasa a una `llave`: `id:<id>` si vino el id;
+si no, `cc:<cédula>|<fecha>|<hora del evento>` (`domain/asistencia/asislock.js`, `llaveEvento` y
+`llaveSesion`). `asislock_registro` es única por `(llave, evento)` y `asislock_id` admite NULL.
+`login_biometrico` pasa a tener PK propia (`idlogin_biometrico`), `llave` única y el id de AsisLock
+en `asislock_id`. Un logout sin id ni `hora_login` cierra la sesión **sin id** abierta de esa cédula
+ese día (la E2E encontró que, sin ese filtro, cerraba una sesión con id de la misma cédula). La
+decisión de jornada (entrada/desconexión/salida) ya dependía solo del estado de la cédula, no del id.
+Contrato actualizado (`docs/asislock/API_AsisLock.md` §3.3). Unitarios 132/132, E2E 97/97.
+
+**Producción, 2026-10-19:** el usuario corrió `migraciones_produccion_062_064.sql` (062+063+064
+consolidadas e idempotentes, generado en Descargas). Por el log: la 062 ya estaba aplicada (columna,
+tabla y parámetros existían), la 063 y la 064 entraron ese día; `asislock_registro` tenía 10 filas, que
+recibieron su `llave = 'id:<id>'`. Hasta desplegar el código nuevo, el backend viejo de producción no
+llena `llave` (NOT NULL) y falla al recibir envíos de AsisLock.

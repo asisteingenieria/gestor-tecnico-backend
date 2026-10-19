@@ -272,21 +272,51 @@ async function crearLogin(persona) {
         console.log(`  = login '${persona.login.username}' ya existe (users.id=${existente.id})`);
         return existente.id;
     }
+    // Al crear la ficha, Gestor le genera sola su cuenta de empleado (usuario = cédula, ver
+    // asistencia.md §19). En estos datos de prueba esa cuenta se reemplaza por el login fijo
+    // del seed, que queda vinculado directamente a la ficha.
+    const fichaId = await buscarPorIdentificacion(persona.numero_identificacion);
+    if (fichaId) {
+        await db.query('DELETE FROM users WHERE users_company_id = ? AND username = ?', [fichaId, persona.numero_identificacion]);
+    }
     const creado = await User.create({
         username: persona.login.username,
         password: persona.login.password,
         full_name: nombreCompleto(persona),
         role: persona.login.role,
-        sede: 'bogota'
+        sede: 'bogota',
+        users_company_id: fichaId ?? undefined
     });
     console.log(`  + login '${persona.login.username}' (${persona.login.role})`);
     return creado?.id ?? creado;
+}
+
+// La campaña 1 del seed de 035/036 desaparece cuando se cargan los catálogos reales de RRHH
+// (pasó en local con el import de los 389 empleados). Se usa la que ya tienen las fichas de
+// prueba, o si no la primera que exista, para que el seed siga corriendo.
+async function resolverCampania() {
+    const [[sembrada]] = await db.query('SELECT idcampania FROM campania WHERE idcampania = ?', [CAT.campania.claro]);
+    if (sembrada) return sembrada.idcampania;
+
+    const [[actual]] = await db.query(
+        `SELECT c.campania_idcampania AS id FROM contrato c
+           JOIN users_company uc ON uc.id = c.users_company_id
+          WHERE uc.numero_identificacion = ? ORDER BY c.idcontrato DESC LIMIT 1`,
+        [PERSONAS[0].numero_identificacion]
+    );
+    const [[primera]] = await db.query('SELECT idcampania FROM campania ORDER BY idcampania LIMIT 1');
+    const id = actual?.id ?? primera?.idcampania;
+    if (!id) throw new Error('No hay campañas en la tabla campania');
+    console.log(`  (la campaña ${CAT.campania.claro} no existe; se usa la ${id})`);
+    return id;
 }
 
 (async () => {
     try {
         const director = PERSONAS.find(p => p.rol_prueba === 'director');
         const empleados = PERSONAS.filter(p => p.rol_prueba === 'empleado');
+
+        CAT.campania.claro = await resolverCampania();
 
         console.log('\n== Fichas de RRHH ==');
         const directorId = await guardarEmpleado(director, null);
@@ -297,7 +327,6 @@ async function crearLogin(persona) {
         console.log('\n== Cuentas de login ==');
         if (await rolesListos()) {
             for (const persona of PERSONAS) await crearLogin(persona);
-            console.log("\n  ! Falta vincular users.users_company_id con las fichas (migración 043).");
         } else {
             console.log("  ! Los roles 'director_operaciones' y 'empleado' aún no existen en el ENUM users.role.");
             console.log('    Aplica la migración 043 y vuelve a ejecutar este script para crear los logins.');
