@@ -9,6 +9,8 @@ const {
     normalizarFecha,
     normalizarHora,
     instantesDelRegistro,
+    llaveEvento,
+    llaveSesion,
     motivoRechazoHora,
     desconexionAbierta,
     decidirLogin,
@@ -57,6 +59,22 @@ test('normalizarCedula quita puntos, espacios y guiones', () => {
     assert.equal(normalizarCedula(' 52 859 804 '), '52859804');
     assert.equal(normalizarCedula(80767085), '80767085');
     assert.equal(normalizarCedula('  '), null);
+});
+
+test('llaveEvento: con id usa el id; sin id, cédula + fecha + hora del evento normalizadas', () => {
+    assert.equal(llaveEvento({ id: 39150, usuario: '1010', fecha: '2026-10-19', hora_login: '12:31:58' }, 'login'), 'id:39150');
+    const sinId = { usuario: '1.010', fecha: '19/10/2026', hora_login: '7:05', hora_logout: '12:40:00' };
+    assert.equal(llaveEvento(sinId, 'login'), 'cc:1010|2026-10-19|07:05:00');
+    assert.equal(llaveEvento(sinId, 'logout'), 'cc:1010|2026-10-19|12:40:00');
+    assert.equal(llaveEvento({ ...sinId, id: null }, 'login'), 'cc:1010|2026-10-19|07:05:00');
+    // un dato que no se puede interpretar entra crudo, para que su reenvío dé la misma llave
+    assert.equal(llaveEvento({ usuario: '1010', fecha: 'ayer', hora_login: '25:00' }, 'login'), 'cc:1010|ayer|25:00');
+});
+
+test('llaveSesion: sin id se identifica por la hora del login; un logout suelto lleva "-"', () => {
+    assert.equal(llaveSesion({ id: 7, usuario: '1010', fecha: '2026-10-19', hora_logout: '12:40' }), 'id:7');
+    assert.equal(llaveSesion({ usuario: '1010', fecha: '2026-10-19', hora_login: '12:31:58', hora_logout: '12:40' }), 'cc:1010|2026-10-19|12:31:58');
+    assert.equal(llaveSesion({ usuario: '1010', fecha: '2026-10-19', hora_login: null, hora_logout: '12:40' }), 'cc:1010|2026-10-19|-|12:40:00');
 });
 
 test('instantesDelRegistro interpreta la hora como Bogotá (UTC-5)', () => {

@@ -6,8 +6,14 @@ const validadoresTipo = {
     decimal: (v) => v !== '' && v !== null && !isNaN(Number(v)),
     booleano: (v) => typeof v === 'boolean',
     array: (v) => Array.isArray(v),
-    fecha: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+    fecha: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && esFechaReal(v)
 };
+
+// '2026-13-45' cumple el formato pero no existe; sin esto llegaba a MySQL y respondía 500.
+function esFechaReal(v) {
+    const d = new Date(`${v}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
 
 function validarCampo(nombre, reglas, valor, errores) {
     const presente = valor !== undefined && valor !== null && valor !== '';

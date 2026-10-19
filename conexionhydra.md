@@ -1297,3 +1297,22 @@ Basta con quitar las variables `HYDRA_*` del `.env` de Gestor y reiniciar pm2:
 
 Las tablas nuevas no afectan al resto de RRHH. Si alguna vez hay que retirarlas, se hace con
 `DROP` en orden inverso (061 → 059).
+
+### 14.8 Estado del despliegue (2026-10-11)
+
+- **Hydra: desplegado.**
+  - Backend con las migraciones 018/019 y las 6 variables `GESTOR_*` apuntando a
+    `http://31.97.138.23:5001/api/integraciones/hydra/v1`.
+  - Frontend reconstruido.
+  - Commits: backend `main` 4706ce0, frontend `sebas-branch` c5fbef5.
+- **Gestor:**
+  - Se hizo pull del código (b4d5de8) en `srv845606` y se agregaron las 5 variables `HYDRA_*` al `.env`.
+  - Las migraciones 059-061 se entregaron unidas en `migrations/ultimos_cambios.sql` (no commiteado;
+    se puede repetir). **Falta confirmar** que se corrieron, que se agregó el cron de
+    `despacharEnviosHydra.js`, que `npm run verificar-hydra` terminó en "Todo listo" y que se hizo la
+    prueba de §14.6.
+- **Tropiezos:**
+  - Una `GESTOR_*` vacía impide arrancar Hydra.
+  - Un `umask 077` dejó el `dist` de Hydra ilegible para nginx (403); se arregló con
+    `chmod -R a+rX dist`.
+- **El tráfico va por HTTP a la IP pública de Gestor.** HTTPS sigue pendiente (§12).

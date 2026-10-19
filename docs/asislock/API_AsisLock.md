@@ -83,12 +83,12 @@ con los **mismos nombres de columna**:
 
 | Campo | Obligatorio | Formato | Uso en Gestor |
 |---|---|---|---|
-| `id` | Sí | entero > 0 (`login_biometrico.id`) | Llave para no duplicar: reenviar el mismo `id` no registra dos veces |
+| `id` | No (recomendado) | entero > 0 (id de la fila en AsisLock) o `null` | Llave para no duplicar: reenviar el mismo `id` no registra dos veces. Sin `id`, ver §3.3 |
 | `usuario` | Sí | texto o número, hasta 20 caracteres | **Cédula** del empleado. Se ignoran puntos, espacios y guiones |
 | `fecha` | Sí | `YYYY-MM-DD` (recomendado). También `DD/MM/YYYY`, `YYYY/MM/DD`, `DD-MM-YYYY` | Día de la jornada (día del login) |
 | `hora_login` | Al menos una de las dos | `HH:MM:SS` o `HH:MM`, hora de Colombia | Instante del login |
 | `hora_logout` | | `HH:MM:SS`, `HH:MM` o `null` si sigue conectado | Instante del logout. Si es menor que `hora_login`, se toma como del día siguiente |
-| `estado_conexion` | No | entero o `null` | Solo se guarda como referencia |
+| `estado_conexion` | No | texto (hasta 20), número o `null` | Solo se guarda como referencia |
 | `ip_local`, `ip_publica` | No | texto, hasta 50 | Se guardan como evidencia del marcaje |
 | `aplicativo` | No | texto, hasta 80 | Se guarda como referencia |
 | `conectado_biometrico` | No | texto, hasta 15 | Se guarda como referencia |
@@ -101,6 +101,25 @@ con los **mismos nombres de columna**:
 3. **Resincronización periódica** (recomendado): cada 1 a 5 minutos, reenviar las filas de hoy y de
    ayer. Es seguro: lo ya registrado vuelve como `duplicado` y no cambia nada. Así, si una
    petición falla por red, se recupera sola.
+
+### 3.3 Envíos sin `id`
+
+Un sistema que no tiene el `id` de la fila puede omitirlo (o mandarlo `null`). Entonces Gestor
+identifica cada evento por **cédula + fecha + hora**:
+
+- Un login se reconoce por `usuario` + `fecha` + `hora_login`. Reenviarlo igual vuelve como `duplicado`.
+- El logout puede ir en la misma fila (con `hora_login` y `hora_logout`) o **solo** (con
+  `hora_login: null` y `hora_logout`). Un logout solo cierra la sesión sin `id` que esa cédula tenga
+  abierta ese día. Reenviarlo igual vuelve como `duplicado`.
+- La hora debe ser exactamente la misma en cada reenvío: si cambia un segundo, Gestor lo toma como
+  otro evento.
+
+```json
+{ "registros": [ { "usuario": "1023456789", "fecha": "2026-10-13", "hora_login": "07:58:12", "hora_logout": null } ] }
+{ "registros": [ { "usuario": "1023456789", "fecha": "2026-10-13", "hora_login": null, "hora_logout": "10:15:00" } ] }
+```
+
+En la respuesta, `id` vuelve `null`.
 
 Se pueden enviar varios registros en una sola petición. Gestor los aplica en orden de hora,
 sin importar el orden en que vengan en el arreglo.
@@ -156,7 +175,7 @@ Siempre con la forma `{ "success": false, "codigo": "...", "message": "...", "de
 
 | HTTP | `codigo` | Causa | Qué hacer |
 |---|---|---|---|
-| 400 | `VALIDACION` | Cuerpo mal formado (falta `id`, `usuario`, `fecha` o ambas horas; `id` repetido en el mismo envío; JSON inválido). `detalles` dice qué campo | Corregir y reenviar. No se procesó nada |
+| 400 | `VALIDACION` | Cuerpo mal formado (falta `usuario`, `fecha` o ambas horas; `id` que no es un entero > 0 o repetido en el mismo envío; JSON inválido). `detalles` dice qué campo | Corregir y reenviar. No se procesó nada |
 | 401 | `NO_AUTORIZADO` | Clave ausente o incorrecta, o IP no permitida | Revisar la clave. No reintentar en bucle |
 | 413 | `ENVIO_DEMASIADO_GRANDE` | Más de 1 MB | Partir el envío |
 | 503 | `INTEGRACION_NO_CONFIGURADA` | Gestor aún no tiene la integración activa | Reintentar más tarde |

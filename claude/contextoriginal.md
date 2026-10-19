@@ -509,3 +509,87 @@ despliegue (§14). Los diagramas están en `docs/diagramas/conexion-hydra/`.
 
 **Estado:** implementado y probado solo en local; nada commiteado ni desplegado. Falta que
 RRHH/Selección confirmen las decisiones de §11 del plan y ejecutar el despliegue de §14.
+
+> **Actualización 2026-10-11:** Hydra quedó desplegado y Gestor recibió el código (ver §12).
+
+## 12. Sesión 2026-10-11 — Despliegue de Hydra, integración con AsisLock y cuentas de empleado automáticas
+
+### 12.1 Despliegue de la conexión con Hydra
+
+- **Hydra en producción** (200.91.204.54):
+  - Backend en `/var/www/noviembrehidra/backend` (pm2 `hidra-backend`), con migraciones 018/019 y
+    las 6 variables `GESTOR_*` en `.env` apuntando a `http://31.97.138.23:5001`.
+  - Frontend en `/var/www/noviembrehidra/frontend`; nginx sirve `dist/`.
+  - Commits: backend `main` 4706ce0, frontend `sebas-branch` c5fbef5.
+- **Gestor en producción** (`srv845606`, 31.97.138.23): se hizo pull del commit b4d5de8 y se agregaron
+  las variables `HYDRA_*` al `.env`. El SQL de las migraciones 059-061 se entregó unido en
+  `migrations/ultimos_cambios.sql` (no commiteado; se puede repetir). **Falta confirmar que se corrió.**
+- **Tropiezos del despliegue:**
+  - En Hydra, una variable `GESTOR_*` vacía impide arrancar, por la validación zod de URL.
+  - Un `umask 077` en un comando entregado al usuario dejó el build de Hydra sin permiso de lectura,
+    y nginx respondía 403. Se arregló con `chmod -R a+rX dist`. **No se debe incluir `umask` en
+    comandos para el usuario.**
+- **El tráfico Hydra ↔ Gestor sale por internet en HTTP** (Gestor está en una IP pública). Se recomendó
+  HTTPS con nginx.
+
+### 12.2 Integración AsisLock → asistencia (commit 7bce3e9)
+
+El login y el logout biométricos de AsisLock (app de escritorio PyQt5, tabla `login_biometrico`)
+alimentan la jornada. Se recibe en `POST /api/integraciones/asislock/v1/registros` con la cabecera
+`x-api-key`.
+- Un logout antes de la ventana de salida cuenta como desconexión no laborada.
+- Migración 062 (no se puede repetir).
+- Documento para el equipo de AsisLock: `docs/asislock/API_AsisLock.md`, con copia en Descargas.
+- La clave `ASISLOCK_API_KEY` ya está en el `.env` de producción. **Falta confirmar que la 062 se
+  corrió en producción** y que el frontend se reconstruyó.
+- Detalle completo: `asistencia.md` §18.
+
+### 12.3 Servidor de pruebas
+
+Un Gestor de pruebas corre en una VM interna:
+- Usuario `tecnologia`, código en `~/Documentos/gestor/gestor-tecnico-backend`.
+- Base de datos en 10.255.255.87, usuario `pruebas`.
+- Rama `main`, en el commit **1120d36**, anterior a asistencia, a Hydra y a AsisLock.
+
+Para revisar qué migraciones le faltan:
+- `migrations/diagnostico_migraciones.sql` es de solo lectura y revisa una por una de la 020 a la 062.
+  No está commiteado.
+- `Descargas/pruebas_ultimos_cambios.sql` trae la 059-062 en versión que se puede repetir, más una
+  verificación final.
+
+Pendiente, en pausa por pedido del usuario:
+- correr el diagnóstico;
+- aplicar lo que falte, ahora también la 063;
+- hacer pull.
+
+Ojo: su `JWT_SECRET` es el texto de ejemplo, igual que en producción.
+
+### 12.4 Cuenta de empleado automática para toda ficha de RRHH (migración 063)
+
+Toda ficha de RRHH recibe un usuario `empleado`, con usuario y contraseña inicial iguales a la cédula y
+cambio obligatorio en el primer ingreso.
+- Quien ya tiene otro rol conserva su cuenta y además recibe la nueva.
+- RRHH ve su asistencia desde su propia cuenta, porque esa cuenta ya está vinculada como analista
+  encargado.
+- Una ficha retirada no puede entrar.
+- Las fichas nuevas reciben la cuenta solas, desde `UserCompany.crearEnConexion`.
+- Las fichas existentes la reciben con `node scripts/crearCuentasEmpleados.js [--aplicar]`. En local
+  creó 388 cuentas.
+- Detalle completo: `asistencia.md` §19.
+- **Estado: probado en local, sin commitear ni desplegar.**
+
+Orden de despliegue:
+1. La 063.
+2. Pull y `pm2 restart` del backend.
+3. El script, primero sin `--aplicar` y luego con `--aplicar`.
+4. Pull, `npm install`, `npm run build` y `chmod -R a+rX dist` del frontend.
+
+### 12.5 Riesgos que quedaron señalados
+
+- El `JWT_SECRET` de producción y de pruebas es el texto de ejemplo. Hay que rotarlo; al hacerlo, se
+  cierran todas las sesiones.
+- Durante la sesión se pegaron en el chat `.env` con secretos reales (Hydra, Gestor, pruebas).
+  Conviene rotar esas claves.
+- El login no tiene límite de intentos. Ahora es más urgente, porque los usuarios son cédulas.
+- "Mi jornada" marca la entrada al abrirse, lo que choca con AsisLock como fuente.
+- Si se corrige una cédula, el usuario de la cuenta no cambia.

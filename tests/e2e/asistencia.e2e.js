@@ -1,0 +1,384 @@
+/**
+ * Prueba end-to-end del módulo de asistencia: HTTP real contra el backend + BD local.
+ *
+ *   npm run test:e2e              levanta su propio servidor en el puerto 5099
+ *   npm run test:e2e -- --conservar   deja los datos del día para mirarlos en el frontend
+ *   E2E_BASE=http://localhost:5001 E2E_ASISLOCK_KEY=... node tests/e2e/asistencia.e2e.js
+ *                                 usa un servidor ya levantado
+ *
+ * Requiere el seed (`node scripts/seedEmpleadosAsistencia.js`) y, para la sección 7, al menos
+ * una cuenta automática por cédula (`node scripts/crearCuentasEmpleados.js --aplicar`).
+ * Toca solo datos de prueba: horarios, jornadas, horas extra y registros AsisLock del día de
+ * hoy de las fichas 7-12 del seed, que borra al empezar y al terminar. La cuenta por cédula que
+ * usa para probar el cambio de contraseña queda restaurada.
+ *
+ * Arma los horarios alrededor de la hora actual: correrla entre las 04:00 y las 23:40 Bogotá.
+ * No va en `npm test` (que corre sin servidor ni BD): por eso no termina en `.test.js`.
+ */
+const path = require('path');
+const { spawn } = require('child_process');
+const db = require('../../config/db');
+const bcrypt = require('bcryptjs');
+
+const PUERTO_PROPIO = 5099;
+const API_KEY = process.env.E2E_ASISLOCK_KEY || 'e2e-clave-local';
+let BASE = process.env.E2E_BASE;
+let servidor = null;
+
+// Sin E2E_BASE levanta el backend con una clave de AsisLock propia (sin tocar .env).
+async function levantarServidor() {
+    if (BASE) return;
+    BASE = `http://localhost:${PUERTO_PROPIO}`;
+    servidor = spawn(process.execPath, ['index.js'], {
+        cwd: path.join(__dirname, '..', '..'),
+        env: { ...process.env, PORT: String(PUERTO_PROPIO), ASISLOCK_API_KEY: API_KEY, NODE_ENV: 'development' },
+        stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let errores = '';
+    servidor.stderr.on('data', (d) => { errores += d; });
+    for (let i = 0; i < 50; i++) {
+        try {
+            const r = await fetch(`${BASE}/api/integraciones/asislock/v1/salud`, { headers: { 'x-api-key': API_KEY } });
+            if (r.ok) return;
+        } catch { /* todavía no escucha */ }
+        if (servidor.exitCode !== null) break;
+        await new Promise((ok) => setTimeout(ok, 200));
+    }
+    throw new Error(`El servidor de prueba no levantó en el puerto ${PUERTO_PROPIO}\n${errores}`);
+}
+const CLAVE_SEED = 'Prueba123*';
+const EMP = { director: 7, e1: 8, e2: 9, e3: 10, e4: 11, e5: 12 };
+const CEDULA_E4 = '9000000005';
+const CEDULA_E5 = '9000000006'; // envíos sin id (sección 6b)
+const ASISLOCK_IDS = [990001, 990002, 990003, 990004];
+
+let ok = 0; let fallos = 0;
+const fallidos = [];
+function check(nombre, condicion, detalle) {
+    if (condicion) { ok++; console.log(`  ✔ ${nombre}`); }
+    else { fallos++; fallidos.push(nombre); console.log(`  ✘ ${nombre}${detalle !== undefined ? `\n      → ${JSON.stringify(detalle).slice(0, 400)}` : ''}`); }
+}
+const seccion = (t) => console.log(`\n== ${t} ==`);
+
+async function http(metodo, ruta, { token, body, headers = {} } = {}) {
+    const r = await fetch(`${BASE}${ruta}`, {
+        method: metodo,
+        headers: { 'content-type': 'application/json', ...(token ? { 'x-auth-token': token } : {}), ...headers },
+        body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body))
+    });
+    const texto = await r.text();
+    let json; try { json = JSON.parse(texto); } catch { json = texto; }
+    return { status: r.status, body: json };
+}
+const login = async (username, password) => http('POST', '/api/auth/login', { body: { username, password } });
+
+// --- hora de Bogotá ---
+const ahora = new Date();
+const bogota = (d) => new Date(d.getTime() - 5 * 3600000);
+const fechaBog = (d) => bogota(d).toISOString().slice(0, 10);
+const horaBog = (d) => bogota(d).toISOString().slice(11, 19);
+const mas = (min) => new Date(ahora.getTime() + min * 60000);
+const HOY = fechaBog(ahora);
+
+async function limpiar() {
+    const ids = Object.values(EMP);
+    await db.query(`DELETE FROM jornada WHERE fecha = ? AND users_company_id IN (?)`, [HOY, ids]);
+    await db.query(`DELETE FROM horario_asignado WHERE fecha = ? AND users_company_id IN (?)`, [HOY, ids]);
+    await db.query(`DELETE FROM hora_extra WHERE fecha = ? AND users_company_id IN (?)`, [HOY, ids]);
+    await db.query(`DELETE FROM asislock_registro WHERE asislock_id IN (?)`, [ASISLOCK_IDS]);
+    await db.query(`DELETE FROM asislock_registro WHERE usuario = ? AND fecha_reportada = ?`, [CEDULA_E5, HOY]);
+    await db.query(`DELETE FROM login_biometrico WHERE asislock_id IN (?) OR (usuario = ? AND fecha = ?)`, [ASISLOCK_IDS, CEDULA_E5, HOY]);
+    await db.query(`DELETE FROM horario_plantilla WHERE nombre LIKE 'E2E %'`);
+}
+
+const evento = (body, tipo) => (body?.eventos ?? body?.linea_tiempo ?? body?.timeline ?? []).filter?.((e) => e.tipo === tipo) ?? [];
+
+async function main() {
+    if (fechaBog(mas(-240)) !== HOY || fechaBog(mas(15)) !== HOY) {
+        throw new Error('La prueba arma horarios de -4 h a +15 min: córrela entre las 04:00 y las 23:40 hora Bogotá');
+    }
+    await levantarServidor();
+    console.log(`Servidor ${BASE} · fecha Bogotá ${HOY} · hora Bogotá ${horaBog(ahora)}`);
+    await limpiar();
+
+    seccion('1. Autenticación y permisos');
+    const sinToken = await http('GET', '/api/asistencia/mi-jornada/hoy');
+    check('sin token → 401', sinToken.status === 401, sinToken);
+    const sesiones = {};
+    for (const [k, u] of [['director', 'director.operaciones'], ['e1', 'empleado1'], ['e2', 'empleado2'], ['e3', 'empleado3'], ['e4', 'empleado4']]) {
+        const r = await login(u, CLAVE_SEED);
+        check(`login ${u}`, r.status === 200 && r.body.token, r);
+        sesiones[k] = r.body.token;
+    }
+    const prohibido = await http('GET', '/api/asistencia/equipo', { token: sesiones.e1 });
+    check('empleado no entra a /equipo → 403', prohibido.status === 403, prohibido);
+
+    seccion('2. Director: plantillas y horarios');
+    const plantilla = await http('POST', '/api/asistencia/horarios/plantillas', {
+        token: sesiones.director,
+        body: { nombre: 'E2E Turno', hora_entrada: '08:00:00', hora_salida: '17:00:00', minutos_almuerzo: 60, tolerancia_entrada_min: 5 }
+    });
+    check('crear plantilla → 201', plantilla.status === 201, plantilla);
+    const plantillaId = plantilla.body?.idhorario_plantilla ?? plantilla.body?.id ?? plantilla.body?.plantilla?.idhorario_plantilla;
+    const lista = await http('GET', '/api/asistencia/horarios/plantillas', { token: sesiones.director });
+    check('la plantilla aparece en el listado', lista.status === 200 && JSON.stringify(lista.body).includes('E2E Turno'), lista.status);
+    if (plantillaId) {
+        const upd = await http('PUT', `/api/asistencia/horarios/plantillas/${plantillaId}`, { token: sesiones.director, body: { nombre: 'E2E Turno editado' } });
+        check('editar plantilla → 200', upd.status === 200, upd);
+    }
+
+    // Horarios de hoy, armados alrededor de la hora actual:
+    //  e1: entró hace 1 h (llega tarde) y sale en 5 min (la salida ya está habilitada)
+    //  e2 y e3: salen en 3 h (la salida aún está bloqueada)
+    //  e4 (AsisLock): entró hace 4 h y sale en 5 min
+    const asignar = async (empleados, entrada, salida) => http('POST', '/api/asistencia/horarios', {
+        token: sesiones.director,
+        body: { empleados, desde: HOY, hasta: HOY, hora_entrada: horaBog(entrada), hora_salida: horaBog(salida), minutos_almuerzo: 60 }
+    });
+    let r = await asignar([EMP.e1], mas(-60), mas(5));
+    check('asignar horario a empleado1', r.status === 201, r);
+    r = await asignar([EMP.e2, EMP.e3], mas(-10), mas(180));
+    check('asignación masiva a empleado2 y empleado3', r.status === 201, r);
+    r = await asignar([EMP.e4], mas(-240), mas(5));
+    check('asignar horario a empleado4', r.status === 201, r);
+    const horarios = await http('GET', `/api/asistencia/horarios?desde=${HOY}&hasta=${HOY}`, { token: sesiones.director });
+    check('consultar horarios del día', horarios.status === 200 && JSON.stringify(horarios.body).includes(String(EMP.e4)), horarios.status);
+
+    const ajeno = await db.query(
+        `SELECT users_company_id AS id FROM contrato WHERE users_company_id NOT IN (?) AND (jefe_area_id IS NULL OR jefe_area_id <> ?) LIMIT 1`,
+        [Object.values(EMP), EMP.director]
+    ).then(([f]) => f[0]?.id).catch(() => null);
+    if (ajeno) {
+        r = await asignar([ajeno], mas(-60), mas(60));
+        check(`no puede asignar horario a un empleado ajeno (${ajeno}) → 403/404`, [403, 404].includes(r.status), r);
+        const t = await http('GET', `/api/asistencia/equipo/${ajeno}/jornadas`, { token: sesiones.director });
+        check('no puede ver jornadas de un empleado ajeno → 403/404', [403, 404].includes(t.status), t);
+    }
+
+    seccion('3. Empleado1: jornada completa en Gestor');
+    let hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e1 });
+    check('mi-jornada/hoy antes de marcar → 200', hoy.status === 200, hoy);
+    const entrada = await http('POST', '/api/asistencia/mi-jornada/entrada', { token: sesiones.e1 });
+    check('marcar entrada', entrada.status === 200, entrada);
+    const entrada2 = await http('POST', '/api/asistencia/mi-jornada/entrada', { token: sesiones.e1 });
+    check('segunda entrada es idempotente (200)', entrada2.status === 200, entrada2);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e1 });
+    check('minutos_tarde ≈ 55 (60 − 5 de tolerancia)', Math.abs((hoy.body.minutos_tarde ?? -99) - 55) <= 1, hoy.body.minutos_tarde);
+    check('alerta llegada_tarde', (hoy.body.alertas ?? []).includes('llegada_tarde'), hoy.body.alertas);
+    check('puede_marcar_salida = true (faltan 5 min)', hoy.body.puede_marcar_salida === true, hoy.body.puede_marcar_salida);
+    check('servidor_ahora presente', Boolean(hoy.body.servidor_ahora), hoy.body);
+
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e1, body: { tipo: 'bano' } });
+    check('iniciar pausa de baño', r.status === 200, r);
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e1, body: { tipo: 'almuerzo' } });
+    check('segunda pausa con una abierta → 422', r.status === 422, r);
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e1, body: { tipo: 'siesta' } });
+    check('tipo de pausa inválido → 400', r.status === 400, r);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e1 });
+    check('estado en_pausa con pausa_activa', hoy.body.estado === 'en_pausa' && hoy.body.pausa_activa, { estado: hoy.body.estado, pausa: hoy.body.pausa_activa });
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa/fin', { token: sesiones.e1 });
+    check('finalizar pausa', r.status === 200, r);
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa/fin', { token: sesiones.e1 });
+    check('finalizar sin pausa abierta → 409/422', [409, 422].includes(r.status), r);
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e1, body: { tipo: 'almuerzo' } });
+    check('iniciar almuerzo', r.status === 200, r);
+    r = await http('POST', '/api/asistencia/mi-jornada/salida', { token: sesiones.e1 });
+    check('salida con almuerzo abierto (lo cierra o lo exige cerrar)', [200, 409, 422].includes(r.status), r);
+    if (r.status !== 200) {
+        await http('POST', '/api/asistencia/mi-jornada/pausa/fin', { token: sesiones.e1 });
+        r = await http('POST', '/api/asistencia/mi-jornada/salida', { token: sesiones.e1 });
+        check('salida tras cerrar el almuerzo', r.status === 200, r);
+    }
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e1 });
+    check('jornada finalizada', hoy.body.estado === 'finalizada', hoy.body.estado);
+    const [[jE1]] = await db.query('SELECT minutos_salida_anticipada FROM jornada WHERE users_company_id = ? AND fecha = ?', [EMP.e1, HOY]);
+    check('salida anticipada guardada (≈5 min)', Math.abs((jE1?.minutos_salida_anticipada ?? -99) - 5) <= 1, jE1);
+    r = await http('POST', '/api/asistencia/mi-jornada/salida', { token: sesiones.e1 });
+    check('segunda salida → rechazada (409/422)', [409, 422].includes(r.status), r);
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e1, body: { tipo: 'bano' } });
+    check('pausa tras la salida → rechazada', [409, 422].includes(r.status), r);
+    const traza = await http('GET', `/api/asistencia/mi-jornada/${HOY}/trazabilidad`, { token: sesiones.e1 });
+    check('trazabilidad del día → 200', traza.status === 200, traza);
+    const tiposTraza = JSON.stringify(traza.body);
+    check('trazabilidad trae entrada, baño, almuerzo y salida',
+        ['entrada', 'inicio_bano', 'fin_bano', 'inicio_almuerzo', 'salida'].every((t) => tiposTraza.includes(`"${t}"`)), traza.body);
+    r = await http('GET', `/api/asistencia/mis-jornadas?desde=${HOY}&hasta=${HOY}`, { token: sesiones.e1 });
+    check('mis-jornadas devuelve la de hoy', r.status === 200 && JSON.stringify(r.body).includes('finalizada'), r);
+    r = await http('GET', `/api/asistencia/mis-estadisticas?desde=${HOY}&hasta=${HOY}`, { token: sesiones.e1 });
+    check('mis-estadisticas → 200', r.status === 200, r);
+    const pct = JSON.stringify(r.body).match(/"(?:puntualidad|porcentaje_puntualidad)[^"]*":\s*(-?[\d.]+)/);
+    if (pct) check('puntualidad dentro de 0-100', Number(pct[1]) >= 0 && Number(pct[1]) <= 100, pct[1]);
+    r = await http('GET', `/api/asistencia/mi-horario?desde=${HOY}&hasta=${HOY}`, { token: sesiones.e1 });
+    check('mi-horario devuelve el turno asignado', r.status === 200 && JSON.stringify(r.body).includes(horaBog(mas(5)).slice(0, 5)), r);
+    r = await http('GET', '/api/asistencia/mi-jornada/2026-13-45/trazabilidad', { token: sesiones.e1 });
+    check('fecha inválida → 400', r.status === 400, r);
+
+    seccion('4. Empleado2: salida bloqueada y horas extra');
+    await http('POST', '/api/asistencia/mi-jornada/entrada', { token: sesiones.e2 });
+    r = await http('POST', '/api/asistencia/mi-jornada/salida', { token: sesiones.e2 });
+    check('salida 3 h antes → 422', r.status === 422, r);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e2 });
+    check('puede_marcar_salida = false y segundos_para_habilitar > 0',
+        hoy.body.puede_marcar_salida === false && hoy.body.segundos_para_habilitar_salida > 0, hoy.body);
+    const sol = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.e2, body: { fecha: HOY, minutos_estimados: 60, motivo: 'E2E cierre de campaña' } });
+    check('solicitar hora extra → 201', sol.status === 201, sol);
+    const bandeja = await http('GET', '/api/asistencia/horas-extra?estado=pendiente', { token: sesiones.director });
+    const pendiente = (Array.isArray(bandeja.body) ? bandeja.body : bandeja.body?.horas_extra ?? bandeja.body?.data ?? [])
+        .find((h) => h.motivo === 'E2E cierre de campaña');
+    check('la solicitud llega a la bandeja del director', Boolean(pendiente), bandeja.body);
+    if (pendiente) {
+        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/aprobar`, { token: sesiones.director, body: { minutos_aprobados: 45, comentario: 'E2E ok' } });
+        check('aprobar hora extra', r.status === 200, r);
+        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/rechazar`, { token: sesiones.director, body: { comentario: 'E2E' } });
+        check('rechazar una ya aprobada → 409', r.status === 409, r);
+        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/aprobar`, { token: sesiones.director, body: { minutos_aprobados: 90 } });
+        check('reaprobar con otros minutos → 409', r.status === 409, r);
+    }
+    r = await http('GET', '/api/asistencia/mis-horas-extra?estado=aprobada', { token: sesiones.e2 });
+    check('empleado2 ve su hora extra aprobada (45 min)', JSON.stringify(r.body).includes('"minutos_aprobados":45'), r.body);
+    r = await http('POST', '/api/asistencia/horas-extra/asignar', { token: sesiones.director, body: { empleados: [EMP.e3], fecha: HOY, minutos: 30, motivo: 'E2E asignada' } });
+    check('director asigna hora extra a empleado3 → 201', r.status === 201, r);
+    r = await http('GET', '/api/asistencia/mis-horas-extra', { token: sesiones.e3 });
+    check('la asignada nace aprobada', JSON.stringify(r.body).includes('E2E asignada') && JSON.stringify(r.body).includes('aprobada'), r.body);
+
+    seccion('5. Director: equipo, trazabilidad y evento manual');
+    const equipo = await http('GET', '/api/asistencia/equipo', { token: sesiones.director });
+    check('equipo → 200', equipo.status === 200, equipo);
+    const eq = JSON.stringify(equipo.body);
+    check('equipo incluye a los 4 empleados con horario', [EMP.e1, EMP.e2, EMP.e3, EMP.e4].every((id) => eq.includes(`:${id},`) || eq.includes(`:${id}}`)), equipo.body);
+    r = await http('GET', `/api/asistencia/equipo/${EMP.e1}/jornada/${HOY}/trazabilidad`, { token: sesiones.director });
+    check('trazabilidad de empleado1 vista por el director', r.status === 200 && JSON.stringify(r.body).includes('"salida"'), r.status);
+    r = await http('GET', `/api/asistencia/equipo/${EMP.e1}/jornadas?desde=${HOY}&hasta=${HOY}`, { token: sesiones.director });
+    check('jornadas de empleado1', r.status === 200, r);
+    r = await http('GET', `/api/asistencia/equipo/estadisticas?desde=${HOY}&hasta=${HOY}`, { token: sesiones.director });
+    check('estadísticas del equipo', r.status === 200, r);
+    const [[jE2]] = await db.query('SELECT idjornada FROM jornada WHERE users_company_id = ? AND fecha = ?', [EMP.e2, HOY]);
+    r = await http('POST', `/api/asistencia/equipo/jornada/${jE2.idjornada}/evento`, { token: sesiones.director, body: { tipo: 'inicio_bano' } });
+    check('evento manual sin nota → 400', r.status === 400, r);
+    r = await http('POST', `/api/asistencia/equipo/jornada/${jE2.idjornada}/evento`, { token: sesiones.director, body: { tipo: 'inicio_bano', nota: 'E2E corrección' } });
+    check('evento manual con nota → 200/201', [200, 201].includes(r.status), r);
+    const [[ev]] = await db.query("SELECT origen, nota FROM jornada_evento WHERE jornada_id = ? AND tipo = 'inicio_bano'", [jE2.idjornada]);
+    check("evento manual guardado con origen='director'", ev?.origen === 'director' && ev?.nota === 'E2E corrección', ev);
+    // Director marcando su propia asistencia
+    r = await http('POST', '/api/asistencia/mi-jornada/entrada', { token: sesiones.director });
+    check('el director marca su propia entrada (sin horario, 200 o 422 explicado)', [200, 422].includes(r.status), r);
+
+    seccion('6. API AsisLock');
+    const RUTA = '/api/integraciones/asislock/v1';
+    r = await http('GET', `${RUTA}/salud`, { headers: { 'x-api-key': API_KEY } });
+    check('salud → 200', r.status === 200, r);
+    r = await http('POST', `${RUTA}/registros`, { body: { registros: [] } });
+    check('sin clave → 401', r.status === 401, r);
+    r = await http('POST', `${RUTA}/registros`, { headers: { 'x-api-key': 'mala' }, body: { registros: [] } });
+    check('clave errada → 401', r.status === 401, r);
+    const fila = (id, horaLogin, horaLogout, usuario = CEDULA_E4) => ({ id, usuario, fecha: HOY, hora_login: horaLogin, hora_logout: horaLogout, estado_conexion: 'CONECTADO', aplicativo: 'E2E' });
+    const enviar = (registros) => http('POST', `${RUTA}/registros`, { headers: { 'x-api-key': API_KEY }, body: { registros } });
+    r = await enviar([{ ...fila(ASISLOCK_IDS[0], horaBog(mas(-230)), null), id: String(ASISLOCK_IDS[0]) }]);
+    check('id como texto → 400 (el error que vio AsisLock)', r.status === 400 && JSON.stringify(r.body).includes('registros[0].id'), r);
+    r = await enviar([{ ...fila(ASISLOCK_IDS[0], horaBog(mas(-230)), null), id: 0 }]);
+    check('id 0 → 400', r.status === 400, r);
+
+    // login hace 230 min → entrada
+    r = await enviar([fila(ASISLOCK_IDS[0], horaBog(mas(-230)), null)]);
+    check('login → entrada', r.status === 200 && JSON.stringify(r.body).includes('"entrada"'), r.body);
+    r = await enviar([fila(ASISLOCK_IDS[0], horaBog(mas(-230)), null)]);
+    check('reenvío del mismo login → duplicado', JSON.stringify(r.body).includes('duplicado'), r.body);
+    // logout hace 120 min → desconexión (antes de la ventana de salida)
+    r = await enviar([fila(ASISLOCK_IDS[0], horaBog(mas(-230)), horaBog(mas(-120)))]);
+    check('logout temprano → desconexión', JSON.stringify(r.body).includes('desconexion'), r.body);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e4 });
+    check('empleado4 aparece desconectado (en_pausa)', hoy.body.estado === 'en_pausa', { estado: hoy.body.estado });
+    r = await http('POST', '/api/asistencia/mi-jornada/pausa', { token: sesiones.e4, body: { tipo: 'bano' } });
+    check('no puede iniciar baño mientras está desconectado → 422', r.status === 422, r);
+    // login hace 100 min → reconexión
+    r = await enviar([fila(ASISLOCK_IDS[1], horaBog(mas(-100)), null)]);
+    check('nuevo login → reconexión', JSON.stringify(r.body).includes('reconexion'), r.body);
+    // logout ahora (salida en 5 min, ventana de 10) → salida
+    r = await enviar([fila(ASISLOCK_IDS[1], horaBog(mas(-100)), horaBog(mas(-1)))]);
+    check('logout dentro de la ventana → salida', JSON.stringify(r.body).includes('"salida"'), r.body);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e4 });
+    check('jornada de empleado4 finalizada', hoy.body.estado === 'finalizada', hoy.body.estado);
+    const [copias] = await db.query('SELECT asislock_id, usuario, hora_login, hora_logout, estado_conexion FROM login_biometrico WHERE asislock_id IN (?) ORDER BY asislock_id', [ASISLOCK_IDS.slice(0, 2)]);
+    check('login_biometrico: una fila por id, con login y logout (064)', copias.length === 2 && copias.every((c) => c.hora_login && c.hora_logout && c.usuario === CEDULA_E4), copias);
+    check("login_biometrico: estado_conexion como texto ('CONECTADO')", copias.every((c) => c.estado_conexion === 'CONECTADO'), copias);
+    r = await enviar([fila(ASISLOCK_IDS[0], horaBog(mas(-230)), null)]);
+    const [[sigueConLogout]] = await db.query('SELECT hora_logout FROM login_biometrico WHERE asislock_id = ?', [ASISLOCK_IDS[0]]);
+    check('reenvío atrasado sin logout no borra el logout guardado', r.status === 200 && sigueConLogout.hora_logout !== null, sigueConLogout);
+    check('minutos trabajados ≈ 229 − 20 desconectado = 209', Math.abs((hoy.body.minutos_trabajados ?? 0) - 209) <= 2, hoy.body.minutos_trabajados);
+    r = await enviar([fila(ASISLOCK_IDS[2], horaBog(mas(-50)), null, '0000000001')]);
+    check('cédula inexistente → rechazado empleado_no_encontrado', JSON.stringify(r.body).includes('empleado_no_encontrado'), r.body);
+    r = await enviar([fila(ASISLOCK_IDS[3], horaBog(mas(60)), null, '9000000006')]);
+    check('hora en el futuro → rechazado hora_futura', JSON.stringify(r.body).includes('hora_futura'), r.body);
+    const [[{ orig }]] = await db.query(
+        "SELECT COUNT(*) AS orig FROM jornada_evento e JOIN jornada j ON j.idjornada = e.jornada_id WHERE j.users_company_id = ? AND j.fecha = ? AND e.origen = 'asislock'",
+        [EMP.e4, HOY]
+    );
+    check("eventos de empleado4 guardados con origen='asislock' (4)", orig === 4, orig);
+
+    seccion('6b. API AsisLock sin id (otro sistema, migración 064)');
+    // empleado5 no tiene horario hoy: todo logout es desconexión.
+    const sinId = (horaLogin, horaLogout) => ({ usuario: CEDULA_E5, fecha: HOY, hora_login: horaLogin, hora_logout: horaLogout, estado_conexion: 1, aplicativo: 'E2E sin id', conectado_biometrico: 'Teletrabajo' });
+    const loginSinId = horaBog(mas(-200));
+    const logoutSinId = horaBog(mas(-100));
+    r = await enviar([sinId(loginSinId, null)]);
+    check('login sin id → entrada', r.status === 200 && r.body.resultados[0].id === null && r.body.resultados[0].login?.accion === 'entrada', r.body);
+    r = await enviar([sinId(loginSinId, null)]);
+    check('reenvío del login sin id → duplicado', r.body.resultados?.[0].login?.resultado === 'duplicado', r.body);
+    r = await enviar([{ ...sinId(null, logoutSinId), estado_conexion: 0, conectado_biometrico: null }]);
+    check('logout suelto sin id → desconexión', r.body.resultados?.[0].logout?.accion === 'desconexion', r.body);
+    r = await enviar([{ ...sinId(null, logoutSinId), estado_conexion: 0, conectado_biometrico: null }]);
+    check('reenvío del logout sin id → duplicado', r.body.resultados?.[0].logout?.resultado === 'duplicado', r.body);
+    // La sección 6 dejó una sesión con id de esta misma cédula (990004, abierta): no debe tocarla.
+    let [sesionesE5] = await db.query('SELECT asislock_id, hora_login, hora_logout, conectado_biometrico FROM login_biometrico WHERE usuario = ? AND fecha = ? AND asislock_id IS NULL', [CEDULA_E5, HOY]);
+    const [[conId]] = await db.query('SELECT hora_logout FROM login_biometrico WHERE asislock_id = ?', [ASISLOCK_IDS[3]]);
+    check('el logout sin id no cierra la sesión con id de la misma cédula', conId.hora_logout === null, conId);
+    check('login_biometrico: el logout sin id cerró su sesión abierta (1 fila, conserva Teletrabajo)',
+        sesionesE5.length === 1 && sesionesE5[0].asislock_id === null && sesionesE5[0].hora_login === loginSinId
+            && sesionesE5[0].hora_logout === logoutSinId && sesionesE5[0].conectado_biometrico === 'Teletrabajo', sesionesE5);
+    r = await enviar([sinId(horaBog(mas(-50)), null)]);
+    check('nuevo login sin id → reconexión', r.body.resultados?.[0].login?.accion === 'reconexion', r.body);
+    [sesionesE5] = await db.query('SELECT 1 FROM login_biometrico WHERE usuario = ? AND fecha = ? AND asislock_id IS NULL', [CEDULA_E5, HOY]);
+    check('login_biometrico: la segunda sesión es otra fila (2)', sesionesE5.length === 2, sesionesE5.length);
+
+    seccion('7. Cuenta automática por cédula (migración 063)');
+    const [[cuenta]] = await db.query(
+        `SELECT u.id, u.username, u.password, u.debe_cambiar_password FROM users u
+          JOIN users_company uc ON uc.id = u.users_company_id AND uc.numero_identificacion = u.username
+         WHERE u.role = 'empleado' AND u.debe_cambiar_password = 1 LIMIT 1`
+    );
+    if (!cuenta) {
+        check('existe una cuenta automática con cambio pendiente', false, 'correr scripts/crearCuentasEmpleados.js --aplicar');
+    } else {
+        try {
+            const ses = await login(cuenta.username, cuenta.username);
+            check('login con cédula/cédula → 200 con debeCambiarPassword', ses.status === 200 && ses.body.user?.debeCambiarPassword === true, ses.body.user ?? ses);
+            const tk = ses.body.token;
+            r = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: tk });
+            check('antes de cambiar la clave → 403 CAMBIO_PASSWORD_REQUERIDO', r.status === 403 && r.body.codigo === 'CAMBIO_PASSWORD_REQUERIDO', r);
+            r = await http('GET', '/api/auth/me', { token: tk });
+            check('/api/auth/me sí responde', r.status === 200, r);
+            r = await http('PUT', '/api/auth/change-password', { token: tk, body: { currentPassword: cuenta.username, newPassword: cuenta.username } });
+            check('nueva clave igual a la cédula → 400', r.status === 400, r);
+            r = await http('PUT', '/api/auth/change-password', { token: tk, body: { currentPassword: cuenta.username, newPassword: 'E2e-Nueva-123' } });
+            check('cambio válido → 200 con token nuevo', r.status === 200 && r.body.token, r);
+            r = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: r.body.token });
+            check('con el token nuevo ya entra a asistencia', r.status === 200, r);
+            r = await login(cuenta.username, cuenta.username);
+            check('la cédula ya no sirve como clave → 400', r.status === 400, r);
+        } finally {
+            await db.query('UPDATE users SET password = ?, debe_cambiar_password = ? WHERE id = ?', [cuenta.password, cuenta.debe_cambiar_password, cuenta.id]);
+            const [[restaurada]] = await db.query('SELECT password FROM users WHERE id = ?', [cuenta.id]);
+            check(`cuenta ${cuenta.username} restaurada a su estado original`, await bcrypt.compare(cuenta.username, restaurada.password));
+        }
+    }
+}
+
+main()
+    .catch((e) => { fallos++; fallidos.push(`excepción: ${e.message}`); console.error(e); })
+    .finally(async () => {
+        if (!process.argv.includes('--conservar')) await limpiar().catch((e) => console.error('limpieza:', e.message));
+        if (servidor) servidor.kill();
+        console.log(`\nResultado: ${ok} OK · ${fallos} fallos`);
+        if (fallidos.length) console.log(fallidos.map((f) => ` - ${f}`).join('\n'));
+        process.exit(fallos ? 1 : 0);
+    });

@@ -1901,3 +1901,34 @@ Los diagramas están en [`docs/diagramas/conexion-hydra/`](../docs/diagramas/con
 - flujo de datos.
 
 **Estado**: implementado y probado en local. Sin desplegar a producción.
+
+> **Actualización 2026-10-11:** Hydra quedó en producción. En Gestor se hizo pull del código y se
+> configuró el `.env`. Las migraciones 059-061 se entregaron como `migrations/ultimos_cambios.sql`;
+> falta confirmar que se corrieron. Ver `claude/contextoriginal.md` §12.1.
+
+## 31. Sesión 2026-10-11 — Cuenta de empleado automática al registrar a alguien en RRHH
+
+Desde la migración 063, **registrar un empleado le crea su usuario para ver su asistencia**:
+- El usuario y la contraseña inicial son la cédula, con cambio obligatorio en el primer ingreso.
+- Aplica a los tres caminos de alta:
+  - el formulario manual;
+  - el import por Excel;
+  - el registro de un lote de Hydra.
+- La crea `User.crearCuentaEmpleadoEnConexion`, llamada al final de `UserCompany.crearEnConexion`
+  dentro de la misma transacción.
+- **Nunca hace fallar el alta.** Si la cédula ya es el usuario de otra cuenta, o si la ficha ya tiene
+  una cuenta vinculada, no la crea y sigue.
+
+Efectos sobre lo que hace RRHH:
+- **Retiro** (§16): si el contrato más reciente de la ficha queda `retirado` o `inactivo`, su cuenta
+  vinculada no puede entrar. Al **reactivar**, vuelve a entrar sin hacer nada más.
+- **Corregir la cédula** de una ficha no cambia el usuario de la cuenta, que sigue siendo la cédula
+  vieja. Pendiente.
+- **Las cuentas de RRHH** siguen vinculadas a su ficha, porque ese vínculo las registra como
+  *analista encargado* en el alta. Por eso no reciben cuenta aparte; en cambio, `RecursosHumanosLayout`
+  ganó la entrada **"Mi asistencia"**, que abre `/asistencia` con el layout de asistencia y un enlace
+  de vuelta a RRHH.
+- **Las fichas que ya existían** reciben su cuenta con `node scripts/crearCuentasEmpleados.js`. Por
+  defecto solo simula; con `--aplicar`, la crea.
+
+Detalle en `asistencia.md` §19. Estado: probado en local, sin commitear ni desplegar.
