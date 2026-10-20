@@ -1744,3 +1744,36 @@ entra por cédula); unitarios 132/132.
 frontend con rebuild. Avisar a Kevin y a los demás jefes que desde ese momento entran con su cédula
 (clave inicial = cédula) y que deben cambiarla al primer ingreso. Un token ya emitido de una cuenta
 desactivada sigue valiendo hasta que expire (5 h): `verifyToken` no consulta la BD.
+
+**Producción, 2026-10-20:** respaldo `/root/respaldo_antes_065_2026-10-20.sql` (2.7 MB) →
+`Descargas\migraciones_produccion_065_067.sql` en Workbench. El primer intento se detuvo con el error
+1267 (`users`/`users_company` en producción son `utf8mb4_unicode_ci` y la tabla nueva quedó con el
+default del servidor, `utf8mb4_0900_ai_ci`) antes de mover nada; se corrigió comparando las cédulas
+con `BINARY` (commit `07389cc`, que **aún no está en `main`**) y el segundo intento terminó sin
+errores: 0 cuentas automáticas quedaron en `users` (producción no tenía, el script de la §19 nunca se
+había corrido allí), 0 plantillas sin dueño, 1 cuenta `director_operaciones` desactivada. Backend
+`main` = merge #14 (`891f0f8`, incluye `ed09eae`) + `pm2 restart`; frontend `git pull` + build.
+`crearCuentasEmpleados.js --aplicar`: **389 cuentas creadas** (todas las fichas vigentes, Kevin y la
+ficha de prueba 1010 incluidas); 1 ficha ya tenía cuenta (RRHH). Kevin: 107 personas a cargo.
+Pendiente: que Kevin entre por primera vez con su cédula (su primer ingreso le corresponde a él),
+merge de `07389cc` a `main`, rotar la `ASISLOCK_API_KEY` (se pegó en el chat) y avisar a los
+empleados que su usuario y clave inicial son su cédula.
+
+## 27. Sesión 2026-10-20 — "Seleccionar todos" al asignar horarios
+
+**Pedido:** al asignar un horario, poder marcar a todo el equipo de una vez (Kevin tiene 107 personas).
+
+- `GestionHorarios.jsx`: casilla "Seleccionar todos (N)" sobre la lista; con texto en el buscador
+  actúa solo sobre lo visible ("Seleccionar los N de la búsqueda") y suma a lo ya marcado. Queda a
+  medias (indeterminada) si solo hay algunos marcados. El filtro del buscador ya no se cae con un
+  `nombre` vacío (`(e.nombre || '')`, mismo caso que tumbó Equipo en producción en §17).
+- `horarioService.asignarMasivo`: valida todo el equipo con una sola consulta
+  (`equipoRepository.subordinadosDe`) en vez de una por empleado, quita ids repetidos, e inserta en
+  **una transacción** con `horarioAsignadoRepository.insertarVarios` (lotes de 500, mismo upsert por
+  `(users_company_id, fecha)`). Antes eran inserciones sueltas sin transacción: un fallo a mitad dejaba
+  parte del equipo sin horario. Si una persona no es del equipo, 403 y no se escribe nada.
+
+**Verificado:** en Chrome, el jefe del seed marca a sus 5 con un clic, desmarca una (casilla a
+medias), filtra y suma con "los 3 de la búsqueda", y asigna 25 horarios. Con el servicio en local,
+la ficha de Kevin (106 personas) por un mes: 2.438 horarios en 0,18 s; con una persona ajena en la
+lista, 403 y 0 filas. E2E 119/119, unitarios 132/132.

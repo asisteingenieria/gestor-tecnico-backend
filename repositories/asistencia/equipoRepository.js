@@ -50,6 +50,20 @@ async function tieneEmpleadosACargo(usersCompanyId, conn = db) {
     return filas.length > 0;
 }
 
+// De una lista de fichas, las que tienen a este jefe en su contrato activo (una sola consulta
+// para la asignación masiva, en vez de una por empleado).
+async function subordinadosDe(directorUsersCompanyId, empleadoIds, conn = db) {
+    if (empleadoIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT DISTINCT c.users_company_id
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?) AND c.users_company_id IN (?)`,
+        [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS, empleadoIds]
+    );
+    return filas.map((f) => f.users_company_id);
+}
+
 async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     const [filas] = await conn.query(
         `SELECT DISTINCT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo
@@ -64,4 +78,4 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     return filas;
 }
 
-module.exports = { directorUserIdDe, esSubordinado, tieneEmpleadosACargo, listaEmpleadosACargo };
+module.exports = { directorUserIdDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };
