@@ -1,8 +1,9 @@
+const db = require('../../config/db');
 const horarioPlantillaRepo = require('../../repositories/asistencia/horarioPlantillaRepository');
 const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const equipoService = require('./equipoService');
-const { NoEncontradoError, ReglaAsistenciaError } = require('../../errors/AppError');
+const { NoAutorizadoError, NoEncontradoError, ReglaAsistenciaError } = require('../../errors/AppError');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -60,9 +61,10 @@ function generarFechas(desde, hasta, diasSemana) {
 
 async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, diasSemana, plantillaId, valores, creadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    for (const empleadoId of empleados) {
-        await equipoService.assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
-    }
+    // Todo el equipo en una consulta (con "Seleccionar todos" pueden ser 100+ personas).
+    const idsPedidos = [...new Set(empleados.map(Number))];
+    const aCargo = new Set(await equipoRepo.subordinadosDe(directorUsersCompanyId, idsPedidos));
+    if (idsPedidos.some((id) => !aCargo.has(id))) throw new NoAutorizadoError('El empleado no está a su cargo');
 
     let datosHorario = valores;
     if (plantillaId) {
@@ -80,26 +82,33 @@ async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, 
     }
 
     const fechas = generarFechas(desde, hasta, diasSemana);
-    let creados = 0;
-    for (const empleadoId of empleados) {
-        for (const fecha of fechas) {
-            await horarioAsignadoRepo.insertar({
-                usersCompanyId: empleadoId,
-                fecha,
-                horarioPlantillaId: plantillaId ?? null,
-                horaEntrada: datosHorario.horaEntrada,
-                horaSalida: datosHorario.horaSalida,
-                minutosAlmuerzo: datosHorario.minutosAlmuerzo,
-                horaAlmuerzoInicio: datosHorario.horaAlmuerzoInicio,
-                toleranciaEntradaMin: datosHorario.toleranciaEntradaMin,
-                esDescanso: false,
-                creadoPor,
-                notas: null
-            });
-            creados += 1;
-        }
+    const filas = idsPedidos.flatMap((empleadoId) => fechas.map((fecha) => ({
+        usersCompanyId: empleadoId,
+        fecha,
+        horarioPlantillaId: plantillaId ?? null,
+        horaEntrada: datosHorario.horaEntrada,
+        horaSalida: datosHorario.horaSalida,
+        minutosAlmuerzo: datosHorario.minutosAlmuerzo,
+        horaAlmuerzoInicio: datosHorario.horaAlmuerzoInicio,
+        toleranciaEntradaMin: datosHorario.toleranciaEntradaMin,
+        esDescanso: false,
+        creadoPor,
+        notas: null
+    })));
+
+    // Todo o nada: una asignación a medio camino dejaría parte del equipo sin horario.
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+        await horarioAsignadoRepo.insertarVarios(filas, conn);
+        await conn.commit();
+    } catch (error) {
+        await conn.rollback();
+        throw error;
+    } finally {
+        conn.release();
     }
-    return { success: true, horarios_creados: creados };
+    return { success: true, horarios_creados: filas.length };
 }
 
 async function consultarHorarios({ directorUsersCompanyId, empleadoId, desde, hasta }) {

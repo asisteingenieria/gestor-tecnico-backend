@@ -21,6 +21,36 @@ async function findById(id, conn = db) {
     return filas[0] ?? null;
 }
 
+// Igual que `insertar` pero varias filas por sentencia (asignación masiva: un equipo grande
+// por un mes son miles de filas). Mismas columnas y mismo upsert por (users_company_id, fecha).
+const LOTE_INSERCION = 500;
+async function insertarVarios(filas, conn = db) {
+    for (let i = 0; i < filas.length; i += LOTE_INSERCION) {
+        const lote = filas.slice(i, i + LOTE_INSERCION);
+        await conn.query(
+            `INSERT INTO horario_asignado
+                (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, creado_por_user_id, creado_por_cuenta_id, notas)
+             VALUES ?
+             ON DUPLICATE KEY UPDATE
+                horario_plantilla_id = VALUES(horario_plantilla_id),
+                hora_entrada = VALUES(hora_entrada),
+                hora_salida = VALUES(hora_salida),
+                minutos_almuerzo = VALUES(minutos_almuerzo),
+                hora_almuerzo_inicio = VALUES(hora_almuerzo_inicio),
+                tolerancia_entrada_min = VALUES(tolerancia_entrada_min),
+                es_descanso = VALUES(es_descanso),
+                creado_por_user_id = VALUES(creado_por_user_id),
+                creado_por_cuenta_id = VALUES(creado_por_cuenta_id),
+                notas = VALUES(notas)`,
+            [lote.map((f) => [
+                f.usersCompanyId, f.fecha, f.horarioPlantillaId ?? null, f.horaEntrada, f.horaSalida,
+                f.minutosAlmuerzo ?? 60, f.horaAlmuerzoInicio ?? null, f.toleranciaEntradaMin ?? 5,
+                f.esDescanso ? 1 : 0, f.creadoPor?.userId ?? null, f.creadoPor?.cuentaId ?? null, f.notas ?? null
+            ])]
+        );
+    }
+}
+
 // Upsert por (users_company_id, fecha): una reasignación sobre un día ya asignado lo reemplaza.
 async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, esDescanso, creadoPor, notas }, conn = db) {
     const [resultado] = await conn.query(
@@ -74,4 +104,4 @@ async function eliminar(id, conn = db) {
     return resultado.affectedRows > 0;
 }
 
-module.exports = { findByEmpleadoYFecha, findRango, findById, insertar, actualizar, eliminar };
+module.exports = { findByEmpleadoYFecha, findRango, findById, insertar, insertarVarios, actualizar, eliminar };
