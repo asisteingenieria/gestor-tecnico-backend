@@ -67,8 +67,8 @@ SELECT u.users_company_id, u.username, u.password, u.debe_cambiar_password, u.id
   FROM `users` u
   JOIN `users_company` uc ON uc.id = u.users_company_id
  WHERE u.role = 'empleado'
-   AND u.username = TRIM(uc.numero_identificacion)
-   AND NOT EXISTS (SELECT 1 FROM `cuenta_empleado` ce WHERE ce.users_company_id = u.users_company_id OR ce.usuario = u.username)
+   AND BINARY u.username = BINARY TRIM(uc.numero_identificacion)
+   AND NOT EXISTS (SELECT 1 FROM `cuenta_empleado` ce WHERE ce.users_company_id = u.users_company_id OR BINARY ce.usuario = BINARY u.username)
    -- referencias fuera de asistencia: esas cuentas se quedan en users
    AND NOT EXISTS (SELECT 1 FROM `incidents` x WHERE x.returned_by_id = u.id)
    AND NOT EXISTS (SELECT 1 FROM `activos_historial` x WHERE x.modificado_por_id = u.id)
@@ -116,4 +116,4 @@ SELECT COUNT(*) AS cuentas_en_cuenta_empleado FROM `cuenta_empleado`;
 SELECT u.id, u.username, u.users_company_id
   FROM `users` u
   JOIN `users_company` uc ON uc.id = u.users_company_id
- WHERE u.role = 'empleado' AND u.username = TRIM(uc.numero_identificacion);
+ WHERE u.role = 'empleado' AND BINARY u.username = BINARY TRIM(uc.numero_identificacion);
