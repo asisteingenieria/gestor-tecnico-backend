@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, canRegistrarAsistencia, isDirectorOperaciones } = require('../middleware/auth');
+const { verifyToken, canRegistrarAsistencia, canDirigirEquipo } = require('../middleware/auth');
 const validar = require('../middleware/validar');
 const asyncHandler = require('../middleware/asyncHandler');
 
@@ -46,26 +46,26 @@ router.get('/mis-estadisticas', canRegistrarAsistencia, validar(rangoQuerySchema
 router.post('/horas-extra/solicitar', canRegistrarAsistencia, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
 router.get('/mis-horas-extra', canRegistrarAsistencia, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misHorasExtra));
 
-// --- Director de operaciones ---
-router.get('/equipo', isDirectorOperaciones, asyncHandler(equipoController.equipo));
-router.get('/equipo/:empleadoId/jornadas', isDirectorOperaciones, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
-router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', isDirectorOperaciones, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
-router.get('/equipo/estadisticas', isDirectorOperaciones, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
-router.post('/equipo/jornada/:id/evento', isDirectorOperaciones, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
+// --- Jefe de equipo (director_operaciones o ficha con empleados a cargo, §23) ---
+router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));
+router.get('/equipo/:empleadoId/jornadas', canDirigirEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
+router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canDirigirEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
+router.get('/equipo/estadisticas', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
+router.post('/equipo/jornada/:id/evento', canDirigirEquipo, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
 
-router.get('/horarios/plantillas', isDirectorOperaciones, asyncHandler(horarioController.listarPlantillas));
-router.post('/horarios/plantillas', isDirectorOperaciones, validar(crearPlantillaSchema), asyncHandler(horarioController.crearPlantilla));
-router.put('/horarios/plantillas/:id', isDirectorOperaciones, validar(actualizarPlantillaSchema), asyncHandler(horarioController.actualizarPlantilla));
-router.delete('/horarios/plantillas/:id', isDirectorOperaciones, validar(idParamSchema), asyncHandler(horarioController.eliminarPlantilla));
+router.get('/horarios/plantillas', canDirigirEquipo, asyncHandler(horarioController.listarPlantillas));
+router.post('/horarios/plantillas', canDirigirEquipo, validar(crearPlantillaSchema), asyncHandler(horarioController.crearPlantilla));
+router.put('/horarios/plantillas/:id', canDirigirEquipo, validar(actualizarPlantillaSchema), asyncHandler(horarioController.actualizarPlantilla));
+router.delete('/horarios/plantillas/:id', canDirigirEquipo, validar(idParamSchema), asyncHandler(horarioController.eliminarPlantilla));
 
-router.get('/horarios', isDirectorOperaciones, validar(consultarHorariosQuerySchema), asyncHandler(horarioController.consultarHorarios));
-router.post('/horarios', isDirectorOperaciones, validar(asignarHorarioSchema), asyncHandler(horarioController.asignarMasivo));
-router.put('/horarios/:id', isDirectorOperaciones, validar(actualizarAsignacionSchema), asyncHandler(horarioController.actualizarAsignacion));
-router.delete('/horarios/:id', isDirectorOperaciones, validar(idParamSchema), asyncHandler(horarioController.eliminarAsignacion));
+router.get('/horarios', canDirigirEquipo, validar(consultarHorariosQuerySchema), asyncHandler(horarioController.consultarHorarios));
+router.post('/horarios', canDirigirEquipo, validar(asignarHorarioSchema), asyncHandler(horarioController.asignarMasivo));
+router.put('/horarios/:id', canDirigirEquipo, validar(actualizarAsignacionSchema), asyncHandler(horarioController.actualizarAsignacion));
+router.delete('/horarios/:id', canDirigirEquipo, validar(idParamSchema), asyncHandler(horarioController.eliminarAsignacion));
 
-router.get('/horas-extra', isDirectorOperaciones, validar(bandejaHorasExtraQuerySchema), asyncHandler(horaExtraController.bandeja));
-router.put('/horas-extra/:id/aprobar', isDirectorOperaciones, validar(aprobarHoraExtraSchema), asyncHandler(horaExtraController.aprobar));
-router.put('/horas-extra/:id/rechazar', isDirectorOperaciones, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
-router.post('/horas-extra/asignar', isDirectorOperaciones, validar(asignarHoraExtraSchema), asyncHandler(horaExtraController.asignar));
+router.get('/horas-extra', canDirigirEquipo, validar(bandejaHorasExtraQuerySchema), asyncHandler(horaExtraController.bandeja));
+router.put('/horas-extra/:id/aprobar', canDirigirEquipo, validar(aprobarHoraExtraSchema), asyncHandler(horaExtraController.aprobar));
+router.put('/horas-extra/:id/rechazar', canDirigirEquipo, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
+router.post('/horas-extra/asignar', canDirigirEquipo, validar(asignarHoraExtraSchema), asyncHandler(horaExtraController.asignar));
 
 module.exports = router;

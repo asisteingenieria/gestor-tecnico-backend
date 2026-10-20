@@ -1,4 +1,5 @@
 const horaExtraService = require('../../services/asistencia/horaExtraService');
+const { autorDe } = require('./autor');
 
 async function solicitar(req, res) {
     const resultado = await horaExtraService.solicitar({
@@ -6,7 +7,7 @@ async function solicitar(req, res) {
         fecha: req.body.fecha,
         minutosEstimados: req.body.minutos_estimados,
         motivo: req.body.motivo,
-        solicitadoPorUserId: req.user.id
+        solicitadoPor: autorDe(req)
     });
     res.status(201).json(resultado);
 }
@@ -33,7 +34,7 @@ async function aprobar(req, res) {
         idhoraExtra: Number(req.params.id),
         minutosAprobados: req.body.minutos_aprobados,
         comentario: req.body.comentario,
-        aprobadoPorUserId: req.user.id
+        aprobadoPor: autorDe(req)
     });
     res.json(resultado);
 }
@@ -43,7 +44,7 @@ async function rechazar(req, res) {
         directorUsersCompanyId: req.user.users_company_id,
         idhoraExtra: Number(req.params.id),
         comentario: req.body.comentario,
-        aprobadoPorUserId: req.user.id
+        aprobadoPor: autorDe(req)
     });
     res.json(resultado);
 }
@@ -55,7 +56,7 @@ async function asignar(req, res) {
         fecha: req.body.fecha,
         minutos: req.body.minutos,
         motivo: req.body.motivo,
-        aprobadoPorUserId: req.user.id
+        aprobadoPor: autorDe(req)
     });
     res.status(201).json(resultado);
 }

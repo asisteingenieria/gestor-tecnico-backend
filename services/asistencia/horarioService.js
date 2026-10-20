@@ -8,25 +8,37 @@ function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
 }
 
-async function listarPlantillas() {
-    return horarioPlantillaRepo.findAll();
+// Cada jefe ve y usa solo sus plantillas (dueño = su ficha, migración 066, asistencia.md §25).
+// La de otro jefe responde 404, igual que una que no existe, para no revelar las ajenas.
+async function plantillaPropia(id, directorUsersCompanyId) {
+    const plantilla = await horarioPlantillaRepo.findById(id);
+    if (!plantilla || !plantilla.activo || plantilla.dueno_users_company_id !== directorUsersCompanyId) {
+        throw new NoEncontradoError('Plantilla no encontrada');
+    }
+    return plantilla;
 }
 
-async function crearPlantilla(datos) {
-    const id = await horarioPlantillaRepo.crear(datos);
+async function listarPlantillas({ directorUsersCompanyId }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    return horarioPlantillaRepo.findPorDueno(directorUsersCompanyId);
+}
+
+async function crearPlantilla({ directorUsersCompanyId, ...datos }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    const id = await horarioPlantillaRepo.crear({ ...datos, duenoUsersCompanyId: directorUsersCompanyId });
     return { success: true, idhorario_plantilla: id };
 }
 
-async function actualizarPlantilla(id, campos) {
-    const plantilla = await horarioPlantillaRepo.findById(id);
-    if (!plantilla) throw new NoEncontradoError('Plantilla no encontrada');
+async function actualizarPlantilla({ directorUsersCompanyId, id, campos }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    await plantillaPropia(id, directorUsersCompanyId);
     await horarioPlantillaRepo.actualizar(id, campos);
     return { success: true };
 }
 
-async function eliminarPlantilla(id) {
-    const plantilla = await horarioPlantillaRepo.findById(id);
-    if (!plantilla) throw new NoEncontradoError('Plantilla no encontrada');
+async function eliminarPlantilla({ directorUsersCompanyId, id }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    await plantillaPropia(id, directorUsersCompanyId);
     await horarioPlantillaRepo.desactivar(id);
     return { success: true };
 }
@@ -46,7 +58,7 @@ function generarFechas(desde, hasta, diasSemana) {
     return fechas;
 }
 
-async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, diasSemana, plantillaId, valores, creadoPorUserId }) {
+async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, diasSemana, plantillaId, valores, creadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
     for (const empleadoId of empleados) {
         await equipoService.assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
@@ -54,8 +66,7 @@ async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, 
 
     let datosHorario = valores;
     if (plantillaId) {
-        const plantilla = await horarioPlantillaRepo.findById(plantillaId);
-        if (!plantilla) throw new NoEncontradoError('Plantilla no encontrada');
+        const plantilla = await plantillaPropia(plantillaId, directorUsersCompanyId);
         datosHorario = {
             horaEntrada: plantilla.hora_entrada,
             horaSalida: plantilla.hora_salida,
@@ -82,7 +93,7 @@ async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, 
                 horaAlmuerzoInicio: datosHorario.horaAlmuerzoInicio,
                 toleranciaEntradaMin: datosHorario.toleranciaEntradaMin,
                 esDescanso: false,
-                creadoPorUserId,
+                creadoPor,
                 notas: null
             });
             creados += 1;

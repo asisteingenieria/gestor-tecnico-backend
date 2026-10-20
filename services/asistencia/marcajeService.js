@@ -43,7 +43,7 @@ async function marcarEntrada({ usersCompanyId, contexto }) {
             conn
         );
         await eventoRepo.insertar(
-            { jornadaId: idjornada, tipo: 'entrada', origen: 'empleado', registradoPorUserId: contexto.userId, ip: contexto.ip, userAgent: contexto.userAgent },
+            { jornadaId: idjornada, tipo: 'entrada', origen: 'empleado', registradoPor: contexto.autor, ip: contexto.ip, userAgent: contexto.userAgent },
             conn
         );
         await recalcularYGuardar(usersCompanyId, fecha, idjornada, ahora, conn);
@@ -75,7 +75,7 @@ async function iniciarPausa({ usersCompanyId, tipo, contexto }) {
         assertPuedeIniciarPausa(estadoCalculado, tipo);
 
         await eventoRepo.insertar(
-            { jornadaId: jornada.idjornada, tipo: `inicio_${tipo}`, origen: 'empleado', registradoPorUserId: contexto.userId, ip: contexto.ip, userAgent: contexto.userAgent },
+            { jornadaId: jornada.idjornada, tipo: `inicio_${tipo}`, origen: 'empleado', registradoPor: contexto.autor, ip: contexto.ip, userAgent: contexto.userAgent },
             conn
         );
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);
@@ -108,7 +108,7 @@ async function finalizarPausa({ usersCompanyId, contexto }) {
         assertPuedeFinalizarPausa(estadoCalculado, tipoPausaActiva);
 
         await eventoRepo.insertar(
-            { jornadaId: jornada.idjornada, tipo: `fin_${tipoPausaActiva}`, origen: 'empleado', registradoPorUserId: contexto.userId, ip: contexto.ip, userAgent: contexto.userAgent },
+            { jornadaId: jornada.idjornada, tipo: `fin_${tipoPausaActiva}`, origen: 'empleado', registradoPor: contexto.autor, ip: contexto.ip, userAgent: contexto.userAgent },
             conn
         );
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);
@@ -140,7 +140,7 @@ async function marcarSalida({ usersCompanyId, contexto }) {
         assertPuedeMarcarSalida(estadoCalculado);
 
         await eventoRepo.insertar(
-            { jornadaId: jornada.idjornada, tipo: 'salida', origen: 'empleado', registradoPorUserId: contexto.userId, ip: contexto.ip, userAgent: contexto.userAgent },
+            { jornadaId: jornada.idjornada, tipo: 'salida', origen: 'empleado', registradoPor: contexto.autor, ip: contexto.ip, userAgent: contexto.userAgent },
             conn
         );
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);

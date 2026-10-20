@@ -1,12 +1,19 @@
 const User = require('../models/User');
+const CuentaEmpleado = require('../models/CuentaEmpleado');
 const jwt = require('jsonwebtoken');
+const { esJefeDeEquipo } = require('../services/asistencia/equipoService');
 
 // Arma y firma el JWT de la sesión. `debe_cambiar_password` viaja en el token para que
 // middleware/auth.js bloquee el resto de la API hasta que se cambie (asistencia.md §19).
-function firmarSesion(user) {
+// `esJefeEquipo` no va en el token (middleware/auth.js lo consulta en vivo); solo le dice al
+// frontend si muestra la gestión de equipo (asistencia.md §23).
+// `tipo_cuenta: 'empleado'` marca una sesión de cuenta_empleado (§24): su `id` es el de esa
+// tabla, no un users.id, y middleware/auth.js la limita a /api/auth y /api/asistencia.
+function firmarSesion(user, esJefeEquipo) {
     const payload = {
         user: {
             id: user.id,
+            ...(user.tipo_cuenta ? { tipo_cuenta: user.tipo_cuenta } : {}),
             username: user.username,
             role: user.role,
             sede: user.sede,
@@ -25,10 +32,31 @@ function firmarSesion(user) {
             role: user.role,
             sede: user.sede,
             departamento: user.departamento,
-            debeCambiarPassword: Boolean(user.debe_cambiar_password)
+            debeCambiarPassword: Boolean(user.debe_cambiar_password),
+            esJefeEquipo: Boolean(esJefeEquipo),
+            ...(user.tipo_cuenta ? { tipoCuenta: user.tipo_cuenta } : {})
         }
     };
 }
+
+// Una cuenta_empleado con la misma forma que una fila de users, para firmar su sesión y
+// responder /auth/me igual que para los demás usuarios.
+function comoUsuario(cuenta) {
+    return {
+        id: cuenta.idcuenta_empleado,
+        tipo_cuenta: 'empleado',
+        username: cuenta.usuario,
+        full_name: cuenta.nombre_propio || cuenta.nombre_completo || cuenta.usuario,
+        role: 'empleado',
+        sede: null,
+        departamento: null,
+        users_company_id: cuenta.users_company_id,
+        debe_cambiar_password: Boolean(cuenta.debe_cambiar_password),
+        created_at: cuenta.creado_en
+    };
+}
+
+const esSesionDeEmpleado = (reqUser) => reqUser?.tipo_cuenta === 'empleado';
 
 // @desc    Iniciar sesión de un usuario
 // @route   POST /api/auth/login
@@ -41,8 +69,14 @@ exports.login = async (req, res) => {
     }
 
     try {
-        // Verificar si el usuario existe
-        const user = await User.getByUsername(username);
+        // Primero los usuarios del sistema; si el usuario no existe ahí, las cuentas de
+        // empleado (cédula, §24). Si existe en users, solo vale la contraseña de users.
+        let user = await User.getByUsername(username);
+        let cuenta = null;
+        if (!user) {
+            cuenta = await CuentaEmpleado.getByUsuario(String(username).trim());
+            if (cuenta) user = { ...comoUsuario(cuenta), password: cuenta.password };
+        }
 
         if (!user) {
             return res.status(400).json({ msg: 'Credenciales inválidas' });
@@ -55,6 +89,12 @@ exports.login = async (req, res) => {
             return res.status(400).json({ msg: 'Credenciales inválidas' });
         }
 
+        // Las cuentas director_operaciones se desactivaron (067, asistencia.md §26): el jefe
+        // entra ahora con su cédula.
+        if (!cuenta && user.activo === 0) {
+            return res.status(403).json({ msg: 'Esta cuenta ya no está activa. Ingresa con tu número de cédula.' });
+        }
+
         // Una cuenta vinculada a una ficha de RRHH deja de entrar cuando el empleado se
         // retira (contrato 'retirado' o 'inactivo'). La cuenta se conserva: si lo reintegran,
         // vuelve a entrar sin hacer nada. Ver asistencia.md §19.
@@ -62,7 +102,8 @@ exports.login = async (req, res) => {
             return res.status(403).json({ msg: 'Tu cuenta está inactiva porque tu contrato ya no está vigente. Comunícate con Recursos Humanos.' });
         }
 
-        res.json(firmarSesion(user));
+        if (cuenta) await CuentaEmpleado.registrarIngreso(cuenta.idcuenta_empleado);
+        res.json(firmarSesion(user, await esJefeDeEquipo(user.users_company_id)));
 
     } catch (err) {
         console.error(err.message);
@@ -75,11 +116,13 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
     try {
-        const user = await User.getById(req.user.id);
+        const user = esSesionDeEmpleado(req.user)
+            ? await CuentaEmpleado.getById(req.user.id).then((c) => c && comoUsuario(c))
+            : await User.getById(req.user.id);
         if (!user) {
             return res.status(404).json({ msg: 'Usuario no encontrado' });
         }
-        res.json(user);
+        res.json({ ...user, es_jefe_equipo: await esJefeDeEquipo(user.users_company_id) });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Error del servidor');
@@ -109,6 +152,19 @@ exports.changePassword = async (req, res) => {
     }
 
     try {
+        if (esSesionDeEmpleado(req.user)) {
+            const cuenta = await CuentaEmpleado.getByUsuario(req.user.username);
+            if (!cuenta || cuenta.idcuenta_empleado !== req.user.id) {
+                return res.status(404).json({ msg: 'Usuario no encontrado' });
+            }
+            if (!(await User.validatePassword(currentPassword, cuenta.password))) {
+                return res.status(400).json({ msg: 'Contraseña actual incorrecta' });
+            }
+            await CuentaEmpleado.cambiarPassword(cuenta.idcuenta_empleado, newPassword);
+            const actualizada = comoUsuario(await CuentaEmpleado.getById(cuenta.idcuenta_empleado));
+            return res.json({ msg: 'Contraseña actualizada exitosamente', ...firmarSesion(actualizada, await esJefeDeEquipo(actualizada.users_company_id)) });
+        }
+
         const user = await User.getByUsername(req.user.username);
         
         // Verificar contraseña actual
@@ -122,7 +178,7 @@ exports.changePassword = async (req, res) => {
         await User.updatePassword(req.user.id, newPassword);
         await User.marcarPasswordCambiada(req.user.id);
         const actualizado = await User.getByUsername(req.user.username);
-        res.json({ msg: 'Contraseña actualizada exitosamente', ...firmarSesion(actualizado) });
+        res.json({ msg: 'Contraseña actualizada exitosamente', ...firmarSesion(actualizado, await esJefeDeEquipo(actualizado.users_company_id)) });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Error del servidor');

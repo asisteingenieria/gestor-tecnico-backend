@@ -1,4 +1,5 @@
 const horarioService = require('../../services/asistencia/horarioService');
+const { autorDe } = require('./autor');
 
 function datosPlantillaDe(req) {
     return {
@@ -12,21 +13,29 @@ function datosPlantillaDe(req) {
 }
 
 async function listarPlantillas(req, res) {
-    res.json(await horarioService.listarPlantillas());
+    res.json(await horarioService.listarPlantillas({ directorUsersCompanyId: req.user.users_company_id }));
 }
 
 async function crearPlantilla(req, res) {
-    const resultado = await horarioService.crearPlantilla({ ...datosPlantillaDe(req), creadoPorUserId: req.user.id });
+    const resultado = await horarioService.crearPlantilla({
+        ...datosPlantillaDe(req),
+        directorUsersCompanyId: req.user.users_company_id,
+        creadoPor: autorDe(req)
+    });
     res.status(201).json(resultado);
 }
 
 async function actualizarPlantilla(req, res) {
-    const resultado = await horarioService.actualizarPlantilla(Number(req.params.id), datosPlantillaDe(req));
+    const resultado = await horarioService.actualizarPlantilla({
+        directorUsersCompanyId: req.user.users_company_id,
+        id: Number(req.params.id),
+        campos: datosPlantillaDe(req)
+    });
     res.json(resultado);
 }
 
 async function eliminarPlantilla(req, res) {
-    const resultado = await horarioService.eliminarPlantilla(Number(req.params.id));
+    const resultado = await horarioService.eliminarPlantilla({ directorUsersCompanyId: req.user.users_company_id, id: Number(req.params.id) });
     res.json(resultado);
 }
 
@@ -55,7 +64,7 @@ async function asignarMasivo(req, res) {
             horaAlmuerzoInicio: req.body.hora_almuerzo_inicio,
             toleranciaEntradaMin: req.body.tolerancia_entrada_min
         },
-        creadoPorUserId: req.user.id
+        creadoPor: autorDe(req)
     });
     res.status(201).json(resultado);
 }

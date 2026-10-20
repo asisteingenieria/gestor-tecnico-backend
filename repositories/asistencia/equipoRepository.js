@@ -36,6 +36,20 @@ async function esSubordinado(directorUsersCompanyId, empleadoId, conn = db) {
     return filas.length > 0;
 }
 
+// ¿Esta ficha es jefe de área de al menos un contrato activo? Es lo que da acceso a la
+// gestión de equipo sin importar el rol de la cuenta (asistencia.md §23).
+async function tieneEmpleadosACargo(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT 1
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?)
+         LIMIT 1`,
+        [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas.length > 0;
+}
+
 async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     const [filas] = await conn.query(
         `SELECT DISTINCT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo
@@ -50,4 +64,4 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     return filas;
 }
 
-module.exports = { directorUserIdDe, esSubordinado, listaEmpleadosACargo };
+module.exports = { directorUserIdDe, esSubordinado, tieneEmpleadosACargo, listaEmpleadosACargo };

@@ -6,8 +6,8 @@
  *   E2E_BASE=http://localhost:5001 E2E_ASISLOCK_KEY=... node tests/e2e/asistencia.e2e.js
  *                                 usa un servidor ya levantado
  *
- * Requiere el seed (`node scripts/seedEmpleadosAsistencia.js`) y, para la sección 7, al menos
- * una cuenta automática por cédula (`node scripts/crearCuentasEmpleados.js --aplicar`).
+ * Requiere el seed (`node scripts/seedEmpleadosAsistencia.js`), la migración 065 y, para la
+ * sección 7, al menos una cuenta de empleado por cédula (`node scripts/crearCuentasEmpleados.js --aplicar`).
  * Toca solo datos de prueba: horarios, jornadas, horas extra y registros AsisLock del día de
  * hoy de las fichas 7-12 del seed, que borra al empezar y al terminar. La cuenta por cédula que
  * usa para probar el cambio de contraseña queda restaurada.
@@ -48,6 +48,7 @@ async function levantarServidor() {
 }
 const CLAVE_SEED = 'Prueba123*';
 const EMP = { director: 7, e1: 8, e2: 9, e3: 10, e4: 11, e5: 12 };
+const CEDULA_DIRECTOR = '9000000001';
 const CEDULA_E4 = '9000000005';
 const CEDULA_E5 = '9000000006'; // envíos sin id (sección 6b)
 const ASISLOCK_IDS = [990001, 990002, 990003, 990004];
@@ -105,13 +106,78 @@ async function main() {
     const sinToken = await http('GET', '/api/asistencia/mi-jornada/hoy');
     check('sin token → 401', sinToken.status === 401, sinToken);
     const sesiones = {};
-    for (const [k, u] of [['director', 'director.operaciones'], ['e1', 'empleado1'], ['e2', 'empleado2'], ['e3', 'empleado3'], ['e4', 'empleado4']]) {
+    // El jefe del seed entra con su cuenta por cédula (§26); su antigua cuenta director_operaciones
+    // quedó desactivada por la 067.
+    const viejo = await login('director.operaciones', CLAVE_SEED);
+    check('la cuenta director_operaciones desactivada ya no entra → 403', viejo.status === 403, viejo);
+    for (const [k, u] of [['director', CEDULA_DIRECTOR], ['e1', 'empleado1'], ['e2', 'empleado2'], ['e3', 'empleado3'], ['e4', 'empleado4']]) {
         const r = await login(u, CLAVE_SEED);
         check(`login ${u}`, r.status === 200 && r.body.token, r);
         sesiones[k] = r.body.token;
     }
     const prohibido = await http('GET', '/api/asistencia/equipo', { token: sesiones.e1 });
     check('empleado no entra a /equipo → 403', prohibido.status === 403, prohibido);
+
+    seccion('1b. Empleado con gente a cargo gestiona su equipo sin rol de director (§23)');
+    let plantillaJefe1 = null;
+    // empleado5 pasa a reportar a empleado1 solo durante esta sección.
+    const [[contratoE5]] = await db.query(
+        `SELECT c.idcontrato, c.jefe_area_id FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.users_company_id = ? AND ec.nombre IN ('activo', 'periodo_prueba')
+         ORDER BY c.fecha_ingreso DESC LIMIT 1`,
+        [EMP.e5]
+    );
+    await db.query('UPDATE contrato SET jefe_area_id = ? WHERE idcontrato = ?', [EMP.e1, contratoE5.idcontrato]);
+    try {
+        const me = await http('GET', '/api/auth/me', { token: sesiones.e1 });
+        check('/auth/me de empleado1 trae es_jefe_equipo = true', me.body?.es_jefe_equipo === true, me.body);
+        const relogin = await login('empleado1', CLAVE_SEED);
+        check('login de empleado1 trae esJefeEquipo = true', relogin.body?.user?.esJefeEquipo === true, relogin.body?.user);
+        const eq = await http('GET', '/api/asistencia/equipo', { token: sesiones.e1 });
+        const ids = Array.isArray(eq.body) ? eq.body.map((e) => e.users_company_id) : [];
+        check('empleado1 ve solo a empleado5 en /equipo', eq.status === 200 && ids.length === 1 && ids[0] === EMP.e5, eq);
+        const asignarE1 = (empleados) => http('POST', '/api/asistencia/horarios', {
+            token: sesiones.e1,
+            body: { empleados, desde: HOY, hasta: HOY, hora_entrada: '08:00:00', hora_salida: '17:00:00', minutos_almuerzo: 60 }
+        });
+        let r1b = await asignarE1([EMP.e5]);
+        check('empleado1 asigna horario a empleado5 → 201', r1b.status === 201, r1b);
+        const [[asig]] = await db.query('SELECT idhorario_asignado FROM horario_asignado WHERE users_company_id = ? AND fecha = ?', [EMP.e5, HOY]);
+        if (asig) {
+            const del = await http('DELETE', `/api/asistencia/horarios/${asig.idhorario_asignado}`, { token: sesiones.e1 });
+            check('empleado1 elimina esa asignación → 200', del.status === 200, del);
+        }
+        r1b = await asignarE1([EMP.e2]);
+        check('empleado1 no puede asignar a empleado2, que no está a su cargo → 403', r1b.status === 403, r1b);
+
+        // Plantillas por dueño (§25): la del jefe es solo suya.
+        r1b = await http('POST', '/api/asistencia/horarios/plantillas', {
+            token: sesiones.e1,
+            body: { nombre: 'E2E plantilla jefe1', hora_entrada: '07:00:00', hora_salida: '16:00:00', minutos_almuerzo: 60, tolerancia_entrada_min: 5 }
+        });
+        check('empleado1 crea su propia plantilla → 201', r1b.status === 201, r1b);
+        plantillaJefe1 = r1b.body?.idhorario_plantilla ?? null;
+        const [[deDirector]] = await db.query(
+            "SELECT idhorario_plantilla AS id FROM horario_plantilla WHERE activo = 1 AND dueno_users_company_id = ? LIMIT 1", [EMP.director]
+        );
+        const listaJefe1 = await http('GET', '/api/asistencia/horarios/plantillas', { token: sesiones.e1 });
+        const idsJefe1 = Array.isArray(listaJefe1.body) ? listaJefe1.body.map((p) => p.idhorario_plantilla) : [];
+        check('empleado1 ve solo sus plantillas', listaJefe1.status === 200 && idsJefe1.length === 1 && idsJefe1[0] === plantillaJefe1, listaJefe1.body);
+        if (deDirector) {
+            r1b = await http('PUT', `/api/asistencia/horarios/plantillas/${deDirector.id}`, { token: sesiones.e1, body: { nombre: 'E2E no debería' } });
+            check('empleado1 no puede editar una plantilla del director → 404', r1b.status === 404, r1b);
+            r1b = await http('DELETE', `/api/asistencia/horarios/plantillas/${deDirector.id}`, { token: sesiones.e1 });
+            check('ni eliminarla → 404', r1b.status === 404, r1b);
+        }
+        const meE2 = await http('GET', '/api/auth/me', { token: sesiones.e2 });
+        check('empleado2 (sin gente a cargo) trae es_jefe_equipo = false', meE2.body?.es_jefe_equipo === false, meE2.body);
+    } finally {
+        await db.query('UPDATE contrato SET jefe_area_id = ? WHERE idcontrato = ?', [contratoE5.jefe_area_id, contratoE5.idcontrato]);
+        await db.query('DELETE FROM horario_asignado WHERE fecha = ? AND users_company_id = ?', [HOY, EMP.e5]);
+    }
+    const yaNo = await http('GET', '/api/asistencia/equipo', { token: sesiones.e1 });
+    check('al quitarle el equipo, empleado1 pierde el acceso en el acto (mismo token) → 403', yaNo.status === 403, yaNo);
 
     seccion('2. Director: plantillas y horarios');
     const plantilla = await http('POST', '/api/asistencia/horarios/plantillas', {
@@ -122,6 +188,14 @@ async function main() {
     const plantillaId = plantilla.body?.idhorario_plantilla ?? plantilla.body?.id ?? plantilla.body?.plantilla?.idhorario_plantilla;
     const lista = await http('GET', '/api/asistencia/horarios/plantillas', { token: sesiones.director });
     check('la plantilla aparece en el listado', lista.status === 200 && JSON.stringify(lista.body).includes('E2E Turno'), lista.status);
+    check('el director no ve la plantilla de empleado1', !JSON.stringify(lista.body).includes('E2E plantilla jefe1'), lista.body);
+    if (plantillaJefe1) {
+        const ajena = await http('POST', '/api/asistencia/horarios', {
+            token: sesiones.director,
+            body: { empleados: [EMP.e1], desde: HOY, hasta: HOY, plantilla_id: plantillaJefe1 }
+        });
+        check('el director no puede asignar con la plantilla de otro jefe → 404', ajena.status === 404, ajena);
+    }
     if (plantillaId) {
         const upd = await http('PUT', `/api/asistencia/horarios/plantillas/${plantillaId}`, { token: sesiones.director, body: { nombre: 'E2E Turno editado' } });
         check('editar plantilla → 200', upd.status === 200, upd);
@@ -340,34 +414,68 @@ async function main() {
     [sesionesE5] = await db.query('SELECT 1 FROM login_biometrico WHERE usuario = ? AND fecha = ? AND asislock_id IS NULL', [CEDULA_E5, HOY]);
     check('login_biometrico: la segunda sesión es otra fila (2)', sesionesE5.length === 2, sesionesE5.length);
 
-    seccion('7. Cuenta automática por cédula (migración 063)');
+    seccion('7. Cuenta de empleado por cédula (063, en cuenta_empleado desde la 065)');
+    const [[enUsers]] = await db.query(
+        `SELECT COUNT(*) AS n FROM users u JOIN users_company uc ON uc.id = u.users_company_id
+          WHERE u.role = 'empleado' AND u.username = TRIM(uc.numero_identificacion)`
+    );
+    check('ninguna cuenta por cédula quedó en users (065)', enUsers.n === 0, enUsers);
     const [[cuenta]] = await db.query(
-        `SELECT u.id, u.username, u.password, u.debe_cambiar_password FROM users u
-          JOIN users_company uc ON uc.id = u.users_company_id AND uc.numero_identificacion = u.username
-         WHERE u.role = 'empleado' AND u.debe_cambiar_password = 1 LIMIT 1`
+        `SELECT idcuenta_empleado AS id, usuario AS username, password, debe_cambiar_password, users_company_id AS ficha
+           FROM cuenta_empleado WHERE debe_cambiar_password = 1 LIMIT 1`
     );
     if (!cuenta) {
-        check('existe una cuenta automática con cambio pendiente', false, 'correr scripts/crearCuentasEmpleados.js --aplicar');
+        check('existe una cuenta de empleado con cambio pendiente', false, 'correr scripts/crearCuentasEmpleados.js --aplicar');
     } else {
         try {
             const ses = await login(cuenta.username, cuenta.username);
             check('login con cédula/cédula → 200 con debeCambiarPassword', ses.status === 200 && ses.body.user?.debeCambiarPassword === true, ses.body.user ?? ses);
+            check("la sesión es de cuenta de empleado (tipoCuenta 'empleado', rol empleado)", ses.body.user?.tipoCuenta === 'empleado' && ses.body.user?.role === 'empleado', ses.body.user);
             const tk = ses.body.token;
             r = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: tk });
             check('antes de cambiar la clave → 403 CAMBIO_PASSWORD_REQUERIDO', r.status === 403 && r.body.codigo === 'CAMBIO_PASSWORD_REQUERIDO', r);
             r = await http('GET', '/api/auth/me', { token: tk });
-            check('/api/auth/me sí responde', r.status === 200, r);
+            check('/api/auth/me responde con la ficha de la cuenta', r.status === 200 && r.body.tipo_cuenta === 'empleado' && r.body.username === cuenta.username, r);
             r = await http('PUT', '/api/auth/change-password', { token: tk, body: { currentPassword: cuenta.username, newPassword: cuenta.username } });
             check('nueva clave igual a la cédula → 400', r.status === 400, r);
             r = await http('PUT', '/api/auth/change-password', { token: tk, body: { currentPassword: cuenta.username, newPassword: 'E2e-Nueva-123' } });
             check('cambio válido → 200 con token nuevo', r.status === 200 && r.body.token, r);
-            r = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: r.body.token });
+            const tkNuevo = r.body.token;
+            r = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: tkNuevo });
             check('con el token nuevo ya entra a asistencia', r.status === 200, r);
+            r = await http('GET', '/api/users', { token: tkNuevo });
+            check('la cuenta de empleado no entra a otros módulos (/api/users) → 403', r.status === 403, r);
+            r = await http('GET', '/api/users-company/catalogos', { token: tkNuevo });
+            check('ni a RRHH (/api/users-company) → 403', r.status === 403, r);
             r = await login(cuenta.username, cuenta.username);
             check('la cédula ya no sirve como clave → 400', r.status === 400, r);
+
+            // La cuenta de empleado como jefe: empleado5 le reporta solo durante esta prueba.
+            const [[cE5]] = await db.query(
+                `SELECT c.idcontrato, c.jefe_area_id FROM contrato c
+                 JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+                 WHERE c.users_company_id = ? AND ec.nombre IN ('activo', 'periodo_prueba')
+                 ORDER BY c.fecha_ingreso DESC LIMIT 1`,
+                [EMP.e5]
+            );
+            await db.query('UPDATE contrato SET jefe_area_id = ? WHERE idcontrato = ?', [cuenta.ficha, cE5.idcontrato]);
+            try {
+                r = await http('GET', '/api/auth/me', { token: tkNuevo });
+                check('la cuenta de empleado con gente a cargo trae es_jefe_equipo = true', r.body?.es_jefe_equipo === true, r.body);
+                r = await http('POST', '/api/asistencia/horarios', {
+                    token: tkNuevo,
+                    body: { empleados: [EMP.e5], desde: HOY, hasta: HOY, hora_entrada: '08:00:00', hora_salida: '17:00:00', minutos_almuerzo: 60 }
+                });
+                check('la cuenta de empleado jefe asigna horario a empleado5 → 201', r.status === 201, r);
+                const [[asig]] = await db.query('SELECT creado_por_user_id, creado_por_cuenta_id FROM horario_asignado WHERE users_company_id = ? AND fecha = ?', [EMP.e5, HOY]);
+                check('horario_asignado guarda la autoría en creado_por_cuenta_id', asig?.creado_por_cuenta_id === cuenta.id && asig?.creado_por_user_id === null, asig);
+            } finally {
+                await db.query('UPDATE contrato SET jefe_area_id = ? WHERE idcontrato = ?', [cE5.jefe_area_id, cE5.idcontrato]);
+                await db.query('DELETE FROM horario_asignado WHERE fecha = ? AND users_company_id = ?', [HOY, EMP.e5]);
+            }
         } finally {
-            await db.query('UPDATE users SET password = ?, debe_cambiar_password = ? WHERE id = ?', [cuenta.password, cuenta.debe_cambiar_password, cuenta.id]);
-            const [[restaurada]] = await db.query('SELECT password FROM users WHERE id = ?', [cuenta.id]);
+            await db.query('UPDATE cuenta_empleado SET password = ?, debe_cambiar_password = ? WHERE idcuenta_empleado = ?', [cuenta.password, cuenta.debe_cambiar_password, cuenta.id]);
+            const [[restaurada]] = await db.query('SELECT password FROM cuenta_empleado WHERE idcuenta_empleado = ?', [cuenta.id]);
             check(`cuenta ${cuenta.username} restaurada a su estado original`, await bcrypt.compare(cuenta.username, restaurada.password));
         }
     }

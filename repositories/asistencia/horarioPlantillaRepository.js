@@ -1,7 +1,11 @@
 const db = require('../../config/db');
 
-async function findAll(conn = db) {
-    const [filas] = await conn.query('SELECT * FROM horario_plantilla WHERE activo = 1 ORDER BY nombre');
+// Plantillas activas de un jefe (dueño = su ficha de RRHH, migración 066).
+async function findPorDueno(duenoUsersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        'SELECT * FROM horario_plantilla WHERE activo = 1 AND dueno_users_company_id = ? ORDER BY nombre',
+        [duenoUsersCompanyId]
+    );
     return filas;
 }
 
@@ -10,12 +14,15 @@ async function findById(id, conn = db) {
     return filas[0] ?? null;
 }
 
-async function crear({ nombre, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, creadoPorUserId }, conn = db) {
+async function crear({ nombre, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, duenoUsersCompanyId, creadoPor }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO horario_plantilla
-            (nombre, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, creado_por_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, horaEntrada, horaSalida, minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 5, creadoPorUserId]
+            (nombre, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, dueno_users_company_id, creado_por_user_id, creado_por_cuenta_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            nombre, horaEntrada, horaSalida, minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 5,
+            duenoUsersCompanyId, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null
+        ]
     );
     return resultado.insertId;
 }
@@ -46,4 +53,4 @@ async function desactivar(id, conn = db) {
     return resultado.affectedRows > 0;
 }
 
-module.exports = { findAll, findById, crear, actualizar, desactivar };
+module.exports = { findPorDueno, findById, crear, actualizar, desactivar };

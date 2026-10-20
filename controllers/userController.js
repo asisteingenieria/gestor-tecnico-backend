@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const UserCompany = require('../models/UserCompany');
+const CuentaEmpleado = require('../models/CuentaEmpleado');
 
 const ROLES_VINCULADOS_A_EMPLEADO = ['director_operaciones', 'empleado', 'recursosHumanos'];
 
@@ -93,7 +94,9 @@ exports.createUser = async (req, res) => {
         return res.status(400).json({ msg: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
-    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'director_operaciones', 'empleado'];
+    // director_operaciones ya no se crea (asistencia.md §26); updateUser lo sigue aceptando
+    // para editar las cuentas que ya existen.
+    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'empleado'];
     if (!validRoles.includes(role)) {
         return res.status(400).json({
             msg: 'Rol no válido. Debe ser: admin, coordinador, supervisor, technician, jefe_operaciones, administrativo, gestorActivos, tecnicoInventario, disenador, recursosHumanos, director_operaciones o empleado'
@@ -139,6 +142,12 @@ exports.createUser = async (req, res) => {
         const existingUser = await User.getByUsername(username);
         if (existingUser) {
             return res.status(400).json({ msg: 'Ya existe un usuario con ese nombre' });
+        }
+
+        // El login busca primero en users: un usuario con la cédula de una cuenta de empleado
+        // la dejaría sin poder entrar (asistencia.md §24).
+        if (await CuentaEmpleado.existeUsuario(username)) {
+            return res.status(400).json({ msg: 'Ese nombre de usuario es la cédula de una cuenta de empleado' });
         }
 
         // Para técnicos, no enviar departamento específico (usar default de BD)
@@ -259,6 +268,12 @@ exports.updateUser = async (req, res) => {
         const existingUser = await User.getByUsername(username);
         if (existingUser && existingUser.id !== parseInt(req.params.id)) {
             return res.status(400).json({ msg: 'Ya existe otro usuario con ese nombre' });
+        }
+
+        // El login busca primero en users: un usuario con la cédula de una cuenta de empleado
+        // la dejaría sin poder entrar (asistencia.md §24).
+        if (await CuentaEmpleado.existeUsuario(username)) {
+            return res.status(400).json({ msg: 'Ese nombre de usuario es la cédula de una cuenta de empleado' });
         }
 
         const updateData = {

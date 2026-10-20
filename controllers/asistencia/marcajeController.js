@@ -1,7 +1,8 @@
 const marcajeService = require('../../services/asistencia/marcajeService');
+const { autorDe } = require('./autor');
 
 function contextoDe(req) {
-    return { userId: req.user.id, ip: req.ip, userAgent: req.get('user-agent') };
+    return { autor: autorDe(req), ip: req.ip, userAgent: req.get('user-agent') };
 }
 
 async function marcarEntrada(req, res) {

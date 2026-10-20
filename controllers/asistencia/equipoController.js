@@ -1,4 +1,5 @@
 const equipoService = require('../../services/asistencia/equipoService');
+const { autorDe } = require('./autor');
 
 async function equipo(req, res) {
     const resultado = await equipoService.equipo(req.user.users_company_id);
@@ -39,7 +40,7 @@ async function registrarEventoManual(req, res) {
         jornadaId: Number(req.params.id),
         tipo: req.body.tipo,
         nota: req.body.nota,
-        registradoPorUserId: req.user.id
+        registradoPor: autorDe(req)
     });
     res.json(resultado);
 }
