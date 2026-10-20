@@ -1352,7 +1352,8 @@ primer ingreso lleva a la pantalla de cambio y al guardar entra a Mi Jornada.
   marcaje automático para quien marca por AsisLock.
 - El login no tiene límite de intentos; con usuarios = cédula conviene agregarlo.
 
-**Estado (2026-10-12):** probado en local, sin commitear ni desplegar. Orden para producción: 063 →
+**Estado (2026-10-12):** probado en local, sin commitear ni desplegar. *(Commiteado y desplegado
+el 2026-10-19, ver §22; falta confirmar que el script se corrió en producción.)* Orden para producción: 063 →
 pull + `pm2 restart gestor-backend` → `node scripts/crearCuentasEmpleados.js` (revisar) → `--aplicar`
 → frontend `git pull && npm install && npm run build && chmod -R a+rX dist`.
 
@@ -1456,4 +1457,290 @@ Contrato actualizado (`docs/asislock/API_AsisLock.md` §3.3). Unitarios 132/132,
 consolidadas e idempotentes, generado en Descargas). Por el log: la 062 ya estaba aplicada (columna,
 tabla y parámetros existían), la 063 y la 064 entraron ese día; `asislock_registro` tenía 10 filas, que
 recibieron su `llave = 'id:<id>'`. Hasta desplegar el código nuevo, el backend viejo de producción no
-llena `llave` (NOT NULL) y falla al recibir envíos de AsisLock.
+llena `llave` (NOT NULL) y falla al recibir envíos de AsisLock. *(Ya desplegado el mismo día, ver
+§22.)*
+
+> Nota: los puntos de la lista del principio de §21 que dicen "una fila por `id`" y "`id` sigue
+> exigiéndose" quedaron superados por el párrafo "`id` opcional". Lo vigente es la `llave`.
+
+## 22. Sesión 2026-10-19/20 — Despliegue, prueba en producción con la ficha 1010 y pendientes
+
+**Commits y despliegue (2026-10-19):**
+- Backend `4cfc7e6` en `sebas-branch`: cuentas por cédula (063), copia de `login_biometrico` con id
+  opcional (064), E2E de asistencia y las correcciones de §20.
+- Frontend `9bb3f2f` en `sebas-branch`: `CambiarPasswordObligatorio.jsx`, `App.jsx`,
+  `AuthContext.jsx`, `api.js`, `RecursosHumanosLayout.jsx`, `AsistenciaLayout.jsx` (pantalla de
+  cambio obligatorio de contraseña de la 063).
+- El usuario hizo el merge a `main` y desplegó ambos repos en producción. Las migraciones ya
+  estaban (062-064, ver §21).
+
+**Ficha de prueba en producción:** `Descargas\empleado_prueba_asislock_1010.sql` crea
+"PRUEBA ASISLOCK", cédula `1010` (CC), con un contrato copiado del agente de Claro vigente más
+reciente con `jefe_area_id` (mismo cliente, campaña, cargo, oleada, ciudad, empresa y los mismos
+jefes). Usa nombres de catálogo, no IDs (los de producción no son los locales), corre en una
+transacción y es idempotente. No crea cuenta de login. Trae comentado al final el `UPDATE` que
+la retira (estado `retirado`, sin borrarla: su jornada y los registros de AsisLock la referencian).
+
+**Resultado de la prueba (2026-10-19, horas Bogotá), en `asislock_registro`:**
+- 14:42-14:54, cuatro `login rechazado empleado_no_encontrado`: aún no existía la ficha 1010.
+- 14:55:30 `login registrado entrada`: abrió la jornada. **La integración funciona en producción.**
+- 14:57:45 `login ignorado ya_conectado`: segundo login sin logout de por medio. Correcto.
+- `asislock_id` vacío y ningún `logout`: la copia de AsisLock que se usó **no es la de `block`
+  corregida** (§21), que manda el `id` y el logout al desconectar.
+- Falta completar el flujo: un logout (debe dar `desconexion`) y otro login (`reconexion`). Se le
+  pasó al usuario cómo enviarlos a mano con `Invoke-RestMethod` contra
+  `/api/integraciones/asislock/v1/registros` mientras se porta el arreglo. Las horas deben ser
+  pasadas (más de 5 min adelante = `hora_futura`) y posteriores al último evento
+  (si no, `fuera_de_orden`).
+
+**Pendientes (consolidado al 2026-10-20):**
+
+*Prueba y despliegue*
+1. Terminar la prueba de la 1010 (logout → `desconexion`, login → `reconexion`) y luego retirar la
+   ficha con el `UPDATE` comentado del script.
+2. Portar los dos cambios de `block` a la copia de AsisLock que se usa de verdad:
+   `ConexionDB.envio_datos` (lee la última fila de `registro_login` y manda su `id`) y la llamada en
+   `panelEstados.desconectar` que envía el logout. Ojo: `desconectar` apaga el equipo
+   (`shutdown /s /t 0`), probarlo en una máquina que se pueda apagar.
+3. Confirmar en producción `node scripts/crearCuentasEmpleados.js` (revisar) y luego `--aplicar`
+   (cuentas por cédula de las fichas existentes, §19). No hay constancia de que se haya corrido.
+
+*Seguridad en `block` (cliente AsisLock)*
+4. La API key de AsisLock y las credenciales de su BD están quemadas en el código de `block`:
+   rotar la key y pasarlas a variables de entorno.
+5. `block` arma SQL con `.format(...)`: parametrizarlo.
+
+*Funcionalidad*
+6. **Baño/almuerzo desde AsisLock.** Origen: `asislock.conexion_asislock` (una fila por clic;
+   `estado_conexion` 1 Conectado, 2 Break, 3 Almuerzo, 4 Capacitación, 5 Baño, 0 Desconectar). Falta
+   que el usuario decida qué hacer con Break y Capacitación (Gestor solo tiene pausas `bano` y
+   `almuerzo`), y luego extender la API (o crear un endpoint de estados) y `block` para enviarlos.
+7. Decidir si se apaga el marcaje automático de entrada al abrir "Mi jornada" para quien marca por
+   AsisLock (§19; en la prueba en Chrome le marcó entrada al director sin horario).
+8. Límite de intentos en el login (los usuarios ahora son cédulas).
+9. Sincronizar el usuario de la cuenta cuando RRHH corrige la cédula.
+10. Salida anticipada: se guarda en `jornada.minutos_salida_anticipada` pero no viaja en
+    `/mi-jornada/hoy` ni genera la alerta de §7.
+
+*Errores de interfaz de la prueba en Chrome (2026-10-19, todos del frontend, sin corregir)*
+11. Los contadores saltan hasta ±30 s al recargar y en cada resincronización de 60 s:
+    `src/hooks/useJornada.js` multiplica por 60 minutos que el servidor redondea. Para la pausa,
+    usar `pausa_activa.desde`.
+12. En "Equipo hoy" la tarjeta "En pausa" cuenta 0 mientras la pestaña "En pausa" cuenta 1: la
+    tarjeta solo suma baño y almuerzo y deja fuera al desconectado de AsisLock
+    (`EquipoAsistencia.jsx:76-77`).
+13. ~~Los contadores del menú ("Horas extra", "Equipo hoy") no se actualizan~~ — corregido 2026-10-20 (§25). `AsistenciaLayout.jsx`
+    los carga una sola vez al montarse.
+14. Una jornada finalizada sigue mostrando "Salida programada 9:00 · en 9 min" y no la hora real de
+    salida.
+15. Menores: scroll horizontal en "Horas extra" del empleado; la plantilla acepta un almuerzo fuera
+    del turno sin avisar; el botón de la tarjeta de pausa no respondió al primer clic dos veces
+    (puede ser la herramienta de automatización, probar a mano).
+
+*Arrastrados de antes*
+16. Rotar el `JWT_SECRET` de producción y de pruebas (es el texto de ejemplo) y las claves que se
+    pegaron en el chat (ver `claude/contextoriginal.md` §12.5).
+17. Hydra: confirmar las migraciones 059-061 en producción (`conexionhydra.md` §14.8).
+
+## 23. Sesión 2026-10-20 — Todo jefe de área gestiona su equipo, sin rol de director
+
+**Pedido:** dejar de depender del rol `director_operaciones` para asignar horarios. Todo empleado
+ya tiene su cuenta por cédula (§19); si además tiene empleados a cargo (ej. Kevin Buitrago), esa
+misma cuenta debe poder gestionar a su equipo. Sin afectar las cuentas ya creadas.
+
+**Decisión: el permiso se deriva, no se guarda.** Jefe de equipo = ficha que es `jefe_area_id` de
+al menos un contrato `activo`/`periodo_prueba` (la misma jerarquía de §16). No hay tabla nueva ni
+cambio de rol: una tabla de "jefes" se desincronizaría cada vez que RRHH cambie un jefe de área, y
+el dato ya vive en `contrato`. El rol `director_operaciones` sigue funcionando igual (por rol pasa
+siempre); simplemente deja de ser necesario. No confundir con `jefe_operaciones`, que es un rol del
+módulo de incidentes y no se tocó.
+
+**Backend:**
+- `equipoRepository.tieneEmpleadosACargo` + `equipoService.esJefeDeEquipo`.
+- `middleware/auth.js` → `canDirigirEquipo`: deja pasar a `director_operaciones`/`admin` por rol, o
+  a cualquier cuenta cuya ficha tenga gente a cargo, **consultado en cada petición** (si RRHH le
+  quita el equipo, pierde el acceso en el acto aunque su token siga vigente).
+  `routes/asistencia.js` lo usa en las 17 rutas de equipo/horarios/horas extra en lugar de
+  `isDirectorOperaciones` (que sigue exportado). Qué empleados puede tocar lo sigue validando
+  `assertEmpleadoACargo` en cada servicio, como antes.
+- `authController`: `login` y `change-password` devuelven `user.esJefeEquipo`; `/auth/me` devuelve
+  `es_jefe_equipo`. Solo informa al frontend; no viaja en el JWT.
+- Las notificaciones por socket al jefe (`directorUserIdDe`) ya funcionaban con cualquier cuenta
+  vinculada a la ficha del jefe, así que no cambiaron.
+
+**Frontend:** `AuthContext.isDirectorOperaciones` ahora es `role === 'director_operaciones'` **o**
+`role === 'empleado'` con `esJefeEquipo`/`es_jefe_equipo`. Con eso el jefe entra a `/operaciones`
+(`RedirectByRole`/`DashboardRoute`), ve "Equipo hoy", "Horarios" y la bandeja de horas extra, y
+el layout lo rotula "Jefe de equipo". Se limitó a `empleado` a propósito: una cuenta de RRHH u otro
+rol con gente a cargo no cambia de pantallas (los endpoints sí la dejarían pasar).
+
+**Verificado:** unitarios 132/132; E2E 105/105 (sección 1b nueva: empleado1 recibe temporalmente a
+empleado5, ve solo a él, le asigna y borra un horario, recibe 403 con empleado2, y pierde el acceso
+con el mismo token al restaurar el contrato). En la BD local hay 6 jefes de área con cuenta
+`empleado` que ganan el acceso y 2 con `director_operaciones` (Kevin entre ellos), sin cambios.
+
+**Pendiente:** commit y despliegue de ambos repos (frontend con rebuild de `dist/`). No requiere
+migración. En producción, los jefes solo tendrán su cuenta si ya se corrió
+`crearCuentasEmpleados.js --aplicar` (pendiente 3 de §22).
+
+## 24. Sesión 2026-10-20 — Cuentas de empleado en su propia tabla (`cuenta_empleado`, migración 065)
+
+**Pedido:** que las cuentas de empleado (cédula / cédula, para ver su trazabilidad diaria) estén
+separadas de los usuarios del sistema, para no afectar los usuarios ya creados.
+
+**Decisiones del usuario:**
+- Las cuentas que la 063 creó dentro de `users` **se mueven** a la tabla nueva y se borran de `users`.
+- **Misma pantalla de login**: el backend busca primero en `users` y, si ese usuario no existe ahí,
+  en `cuenta_empleado`. Si existe en `users`, solo vale la contraseña de `users`.
+- Las cuentas vinculadas a mano (los 3 `director_operaciones` con Kevin, `empleado1..5` del seed,
+  los 2 de RRHH) **se quedan en `users`** como están y su ficha no recibe cuenta en la tabla nueva.
+
+**Migración `065_cuenta_empleado.sql`** (aplicada en local; **no en producción**):
+- Tabla `cuenta_empleado`: `users_company_id` único, `usuario` (cédula) único, `password`,
+  `debe_cambiar_password`, `ultimo_ingreso`, `movida_de_user_id` (de qué `users.id` vino).
+- Columnas de autor paralelas a las `*_por_user_id`: `horario_plantilla.creado_por_cuenta_id`,
+  `horario_asignado.creado_por_cuenta_id`, `hora_extra.solicitado_por_cuenta_id` y
+  `aprobado_por_cuenta_id`, `jornada_evento.registrado_por_cuenta_id` (FK a la tabla nueva,
+  `ON DELETE SET NULL`). `jornada.ajustada_por_user_id` no tiene paralela: ningún código la escribe.
+- Mueve las cuentas de la 063 (rol `empleado` cuyo usuario es la cédula de su ficha), con su
+  contraseña y su marca de cambio; reapunta la auditoría de asistencia y borra la fila de `users`.
+  **No mueve** una cuenta que otra tabla fuera de asistencia referencie (incidentes, diseños,
+  Hydra, activos…: varias tienen `ON DELETE CASCADE`); el `SELECT` final las lista.
+- La parte de `ADD COLUMN` no es idempotente: correr **una sola vez**. Requiere la 063.
+
+**Backend:**
+- `models/CuentaEmpleado.js` (patrón de `models/`, porque lo usan el login, el alta de RRHH y los
+  scripts). `User.crearCuentaEmpleadoEnConexion` se eliminó. `UserCompany.crearEnConexion` llama a
+  `CuentaEmpleado.crearEnConexion`, que se salta la ficha si ya tiene cuenta (en cualquiera de las
+  dos tablas) o si la cédula ya es un usuario.
+- Sesión: el JWT de una cuenta de empleado lleva `tipo_cuenta: 'empleado'`, `role: 'empleado'` e
+  `id` = `idcuenta_empleado`. La respuesta del login trae `user.tipoCuenta` y `/auth/me`
+  `tipo_cuenta`. `change-password` tiene su rama para la tabla nueva. El login registra
+  `ultimo_ingreso` y sigue bloqueando la ficha retirada.
+- **Aislamiento:** `verifyToken` limita esas sesiones a `/api/auth/*` y `/api/asistencia/*` (403 en
+  cualquier otra ruta), porque su `id` no es un `users.id` y puede coincidir con el de otro usuario.
+- Autoría: `controllers/asistencia/autor.js` (`autorDe(req)` → `{ userId, cuentaId }`). Los
+  parámetros `*PorUserId` de servicios y repositorios pasaron a `registradoPor`/`solicitadoPor`/
+  `aprobadoPor`/`creadoPor` con ese objeto, y cada repositorio escribe las dos columnas.
+- `userController.createUser`/`updateUser` rechazan (400) un nombre de usuario que ya es la cédula
+  de una cuenta de empleado: el login la taparía.
+- `scripts/crearCuentasEmpleados.js` crea en la tabla nueva (exige la 065).
+  `scripts/seedEmpleadosAsistencia.js` borra la cuenta automática de sus fichas de
+  `cuenta_empleado`.
+- Las notificaciones por socket al jefe (`directorUserIdDe`) siguen yendo solo a cuentas de
+  `users`. Hoy no afecta: ninguna pantalla de asistencia escucha esos eventos.
+
+**Frontend:** sin cambios. La sesión de empleado se ve igual (`role: 'empleado'`), las pantallas de
+asistencia solo llaman a `/api/asistencia`, y los hooks de incidentes y diseños están en `Layout`,
+que el empleado no usa.
+
+**Verificado en local:** respaldo de las 393 filas `empleado` de `users` antes de migrar; 065
+aplicada: 388 cuentas movidas, ninguna quedó en `users`. Backfill en simulación: 0 por crear
+(388 en `cuenta_empleado`, 10 vinculadas en `users`). Alta nueva dentro de una transacción
+revertida: crea en `cuenta_empleado`, nada en `users`, y no duplica. Unitarios 132/132; E2E
+112/112 (la sección 7 ahora: login por cédula en la tabla nueva, 403 en `/api/users` y
+`/api/users-company`, y una cuenta de empleado jefe asigna un horario con
+`creado_por_cuenta_id`).
+
+**Para producción** (en este orden; la 065 y el código nuevo van juntos: el backend viejo con la
+065 aplicada ya no podría crear cuentas de empleado nuevas, y el nuevo sin la 065 falla en el login
+de cédulas):
+1. Respaldo de `users`.
+2. `065_cuenta_empleado.sql`; revisar el `SELECT` final (cuentas que no se pudieron mover).
+3. Pull del backend + `pm2 restart gestor-backend`.
+4. `node scripts/crearCuentasEmpleados.js` (revisar) y luego `--aplicar`, para las fichas que aún
+   no tienen cuenta (pendiente 3 de §22).
+5. Frontend con rebuild (por §23).
+
+**Pendiente:** nadie puede restablecer la contraseña de una cuenta de empleado desde el panel (el
+admin ya no las ve en `/users`). Hoy sería por SQL; si hace falta, una opción "Restablecer acceso"
+en la ficha de RRHH.
+
+**Prueba en Chrome (2026-10-20, local, datos ficticios del seed, revertidos al final):** una cuenta
+de `cuenta_empleado` (ficha 12) con la ficha 11 a su cargo. Recorrido: login por cédula → cambio
+obligatorio de clave → entra a `/operaciones` rotulado "Jefe de equipo" → entrada automática, pausa
+de baño → Equipo hoy (solo su persona a cargo) → crea una plantilla y asigna 4 horarios → `/users`,
+`/recursos-humanos` y la API de usuarios, RRHH e incidentes le dan 403 → la empleada (cuenta de
+`users`) ve el horario asignado y pide horas extra → el jefe las aprueba → trazabilidad de la
+empleada y la propia, estadísticas → `director.operaciones` sigue igual y ya no ve a la ficha 11.
+En la BD, toda acción del jefe quedó en las columnas `*_por_cuenta_id` y la solicitud de la
+empleada en `solicitado_por_user_id`.
+
+Hallazgos nuevos (sin corregir):
+- **Las plantillas de horario son globales**: cualquier jefe ve, edita y elimina las de los demás
+  (`horario_plantilla` no tiene dueño ni equipo). Con todos los jefes de área entrando, conviene
+  decidir si cada jefe ve solo las suyas.
+- "Salida disponible en 374:02": la cuenta regresiva muestra minutos:segundos pasada la hora;
+  debería decir "6 h 14 min".
+- Al enviar una solicitud de horas extra no aparece aviso de confirmación (sí se guarda).
+- Confirmado de nuevo el punto 13 de §22: el contador "Horas extra" del menú no baja al aprobar.
+
+## 25. Sesión 2026-10-20 — Plantillas por jefe y tres correcciones de interfaz
+
+**Plantillas de horario por jefe (migración `066_horario_plantilla_dueno.sql`, aplicada en local, no
+en producción).** `horario_plantilla.dueno_users_company_id` = ficha del jefe que la creó. Es la ficha
+y no la cuenta para que una persona con usuario del sistema y cuenta por cédula vea las mismas. La
+066 asigna el dueño de las existentes por su creador (usuario vinculado o cuenta de empleado) y lista
+las que quedan sin dueño, que nadie ve. Requiere la 065.
+- `horarioPlantillaRepository.findAll` → `findPorDueno`; `crear` guarda el dueño.
+- `horarioService`: `plantillaPropia(id, ficha)` responde **404** si la plantilla es de otro jefe (no
+  revela las ajenas). La usan editar, eliminar y la asignación con `plantilla_id`. Listar y crear
+  exigen ficha vinculada (antes no), igual que el resto de la gestión de equipo.
+- E2E: 6 checks nuevos (el jefe ve solo las suyas; no edita ni elimina las del director; el director
+  no ve las del jefe ni asigna con ellas). 118/118.
+
+**Interfaz (frontend):**
+- Cuenta regresiva de salida (`BotonesPausa.jsx`): desde una hora muestra "5 h 56 min" (antes
+  "374:02"); en la última hora sigue en minutos:segundos.
+- Confirmación al pedir horas extra: en `MiJornada.jsx` el aviso salía dentro del modal y se cerraba a
+  los 1,2 s; ahora el modal se cierra y queda un aviso en la página por 6 s. En `HorasExtra.jsx` no
+  había aviso; ahora sí. El texto dice "tu jefe" en vez de "el director".
+- Contadores del menú (`AsistenciaLayout.jsx`, era el punto 13 de §22): se recargan al cambiar de
+  pantalla y cuando `HorasExtra.jsx` aprueba o rechaza (evento de `src/utils/eventosAsistencia.js`).
+
+**Verificado en Chrome** (datos ficticios del seed, revertidos): el jefe con cuenta por cédula ve
+"Sin plantillas todavía" (ya no la del director), crea la suya y solo esa aparece al asignar; el
+aviso de horas extra aparece; al aprobar el contador baja de 4 a 3 y al rechazar a 2; "Equipo hoy"
+se actualiza al cambiar de pantalla; la empleada ve "Salida disponible en 5 h 56 min".
+
+**Visto de paso, sin corregir:** el formulario de `HorasExtra.jsx` arranca la fecha con
+`new Date().toISOString().slice(0, 10)`, que entre las 19:00 y las 23:59 de Bogotá ya es el día
+siguiente (UTC).
+
+## 26. Sesión 2026-10-20 — Fin de las cuentas `director_operaciones`: los jefes entran con su cédula
+
+**Pedido:** que lo que estaba bajo el rol `director_operaciones` ya no funcione así. Kevin Buitrago
+(y todo jefe) entra por defecto con su cuenta por cédula y desde ella gestiona a su equipo, como
+cualquier jefe de área (§23).
+
+**Decisiones del usuario:** las cuentas `director_operaciones` existentes se **desactivan** (no se
+borran: conservan el historial de horarios, aprobaciones y eventos manuales) y el rol sale del
+selector de `/users`.
+
+**Migración `067_desactivar_cuentas_director.sql`** (aplicada en local; no en producción): agrega
+`users.activo` (1 por defecto, ningún otro usuario cambia) y desactiva todas las cuentas
+`director_operaciones`. No las desvincula de su ficha. Requiere la 065.
+
+**Código:**
+- Login: una cuenta de `users` con `activo = 0` responde 403 "Esta cuenta ya no está activa. Ingresa
+  con tu número de cédula." (después de validar la clave).
+- `CuentaEmpleado.crearEnConexion` y `scripts/crearCuentasEmpleados.js` ya no cuentan una cuenta
+  desactivada como "la ficha ya tiene cuenta": esas fichas reciben su cuenta por cédula.
+- `userController.createUser` ya no acepta `director_operaciones` (`updateUser` sí, para editar las
+  existentes). `UserManagement.jsx` lo oculta del selector salvo al editar una cuenta que ya lo tiene.
+- El rol sigue en el ENUM y en `canDirigirEquipo`; con las cuentas desactivadas ya no lo usa nadie.
+- Seed: el jefe de prueba (ficha 7) entra con su cuenta por cédula `9000000001`, con la clave fija del
+  seed y sin cambio obligatorio; `director.operaciones` quedó desactivada.
+
+**Verificado en local:** 067 desactivó 4 cuentas (`director.operaciones`, `jefeprueba` y
+`kevin.buitrago`, con ficha, y `Dprueba`, sin ficha, que no recibe cuenta). `crearCuentasEmpleados
+--aplicar` creó las 2 que faltaban (Kevin, ficha 25 con 106 personas a cargo, y `jefeprueba`); la del
+seed la creó el seed. Contra la API: Kevin entra con cédula/cédula, `esJefeEquipo: true`, y debe
+cambiar la clave antes de ver su equipo. E2E 119/119 (la cuenta desactivada → 403; el jefe del seed
+entra por cédula); unitarios 132/132.
+
+**Para producción** (en este orden, seguido): respaldo de `users` → 065 → 066 → 067 → pull del backend
++ `pm2 restart gestor-backend` → `node scripts/crearCuentasEmpleados.js` (revisar) → `--aplicar` →
+frontend con rebuild. Avisar a Kevin y a los demás jefes que desde ese momento entran con su cédula
+(clave inicial = cédula) y que deben cambiarla al primer ingreso. Un token ya emitido de una cuenta
+desactivada sigue valiendo hasta que expire (5 h): `verifyToken` no consulta la BD.

@@ -1,7 +1,7 @@
 /**
  * Seed de datos de prueba para el módulo de asistencia (ver asistencia.md).
  *
- * Crea 1 director de operaciones y 5 empleados a su cargo, con TODAS las tablas del
+ * Crea 1 jefe de área y 5 empleados a su cargo, con TODAS las tablas del
  * módulo de empleados pobladas:
  *   users_company (datos personales completos) · contrato · historial_salarial
  *   seguridad_social (EPS/ARL/AFP/cesantías/caja) · cuenta_bancaria · direccion
@@ -22,6 +22,7 @@
 const db = require('../config/db');
 const UserCompany = require('../models/UserCompany');
 const User = require('../models/User');
+const CuentaEmpleado = require('../models/CuentaEmpleado');
 
 // Catálogos ya sembrados por las migraciones 035/036.
 const CAT = {
@@ -54,7 +55,9 @@ const FECHA_INGRESO = '2026-09-01';
 const PERSONAS = [
     {
         rol_prueba: 'director',
-        login: { username: 'director.operaciones', password: 'Prueba123*', role: 'director_operaciones' },
+        // Jefe de área de los otros 5. Desde la §26 entra con su cuenta por cédula (no con un
+        // usuario director_operaciones), con la clave fija del seed y sin cambio obligatorio.
+        login: { cuentaEmpleado: true, password: 'Prueba123*' },
         numero_identificacion: '9000000001',
         fecha_expedicion: '2008-04-18', ciudad_expedicion_id: CAT.ciudad.bogota,
         primer_nombre: 'Marta', segundo_nombre: 'Lucía',
@@ -266,18 +269,29 @@ async function rolesListos() {
     return ct.includes("'empleado'") && ct.includes("'director_operaciones'");
 }
 
+async function crearCuentaPorCedula(persona) {
+    const fichaId = await buscarPorIdentificacion(persona.numero_identificacion);
+    const r = await CuentaEmpleado.crearEnConexion(db, { usersCompanyId: fichaId, cedula: persona.numero_identificacion });
+    if (!r.creada && r.motivo !== 'ya_tiene_cuenta') throw new Error(`No se pudo crear la cuenta por cédula de la ficha ${fichaId}: ${r.motivo}`);
+    const cuenta = await CuentaEmpleado.getByUsuario(persona.numero_identificacion);
+    if (!cuenta) throw new Error(`La ficha ${fichaId} tiene otra cuenta activa: no recibe cuenta por cédula`);
+    await CuentaEmpleado.cambiarPassword(cuenta.idcuenta_empleado, persona.login.password);
+    console.log(`  ${r.creada ? '+' : '='} cuenta por cédula '${persona.numero_identificacion}' (cuenta_empleado.id=${cuenta.idcuenta_empleado}, clave del seed)`);
+}
+
 async function crearLogin(persona) {
+    if (persona.login.cuentaEmpleado) return crearCuentaPorCedula(persona);
     const existente = await User.getByUsername(persona.login.username);
     if (existente) {
         console.log(`  = login '${persona.login.username}' ya existe (users.id=${existente.id})`);
         return existente.id;
     }
-    // Al crear la ficha, Gestor le genera sola su cuenta de empleado (usuario = cédula, ver
-    // asistencia.md §19). En estos datos de prueba esa cuenta se reemplaza por el login fijo
-    // del seed, que queda vinculado directamente a la ficha.
+    // Al crear la ficha, Gestor le genera sola su cuenta de empleado (usuario = cédula, en
+    // cuenta_empleado desde la 065 — asistencia.md §19 y §24). En estos datos de prueba esa
+    // cuenta se reemplaza por el login fijo del seed, que queda vinculado directamente a la ficha.
     const fichaId = await buscarPorIdentificacion(persona.numero_identificacion);
     if (fichaId) {
-        await db.query('DELETE FROM users WHERE users_company_id = ? AND username = ?', [fichaId, persona.numero_identificacion]);
+        await db.query('DELETE FROM cuenta_empleado WHERE users_company_id = ? AND usuario = ?', [fichaId, persona.numero_identificacion]);
     }
     const creado = await User.create({
         username: persona.login.username,

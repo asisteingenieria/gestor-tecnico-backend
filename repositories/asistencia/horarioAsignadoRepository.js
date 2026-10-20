@@ -22,11 +22,11 @@ async function findById(id, conn = db) {
 }
 
 // Upsert por (users_company_id, fecha): una reasignación sobre un día ya asignado lo reemplaza.
-async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, esDescanso, creadoPorUserId, notas }, conn = db) {
+async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, esDescanso, creadoPor, notas }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO horario_asignado
-            (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, creado_por_user_id, notas)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, creado_por_user_id, creado_por_cuenta_id, notas)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
             horario_plantilla_id = VALUES(horario_plantilla_id),
             hora_entrada = VALUES(hora_entrada),
@@ -36,11 +36,12 @@ async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada
             tolerancia_entrada_min = VALUES(tolerancia_entrada_min),
             es_descanso = VALUES(es_descanso),
             creado_por_user_id = VALUES(creado_por_user_id),
+            creado_por_cuenta_id = VALUES(creado_por_cuenta_id),
             notas = VALUES(notas)`,
         [
             usersCompanyId, fecha, horarioPlantillaId ?? null, horaEntrada, horaSalida,
             minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 5,
-            esDescanso ? 1 : 0, creadoPorUserId, notas ?? null
+            esDescanso ? 1 : 0, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null, notas ?? null
         ]
     );
     return resultado.insertId || null;

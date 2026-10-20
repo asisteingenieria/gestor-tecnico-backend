@@ -593,3 +593,42 @@ Orden de despliegue:
 - El login no tiene límite de intentos. Ahora es más urgente, porque los usuarios son cédulas.
 - "Mi jornada" marca la entrada al abrirse, lo que choca con AsisLock como fuente.
 - Si se corrige una cédula, el usuario de la cuenta no cambia.
+
+---
+
+## 13. Sesión 2026-10-19/20 — AsisLock en producción: copia de sesiones, id opcional y prueba real
+
+### 13.1 Qué se hizo
+
+- **Migración 064** (`asistencia.md` §21): tabla `login_biometrico` en Gestor, copia de la tabla de
+  sesiones de AsisLock (PK propia `idlogin_biometrico`, `llave` única, id de AsisLock en
+  `asislock_id`). `asislock_registro` pasa a ser única por `(llave, evento)`, `asislock_id` admite
+  NULL y `estado_conexion` es `VARCHAR(20)`.
+- **`id` opcional en la API:** otro sistema enviará sin `id`. La identidad es la `llave`
+  (`id:<id>` o `cc:<cédula>|<fecha>|<hora>`). Un logout sin id ni `hora_login` cierra la sesión sin
+  id abierta de esa cédula ese día. Contrato en `docs/asislock/API_AsisLock.md` §3.3.
+- **Cliente AsisLock = proyecto `block`** (Descargas, sin git, PyQt5 + PyInstaller, BD MySQL
+  `asislock`, tabla `registro_login`). El 400 `registros[0].id` venía de que `envio_datos` no
+  mandaba `id`; además nunca se enviaba el logout. Corregido en `block` (no en este repo). Los
+  estados Break/Almuerzo/Baño/Capacitación van a `asislock.conexion_asislock` y no llegan a Gestor.
+- **Producción:** el usuario corrió `Descargas\migraciones_produccion_062_064.sql` (consolidado e
+  idempotente; la 062 ya estaba, 063 y 064 entraron). Commits backend `4cfc7e6` y frontend
+  `9bb3f2f` en `sebas-branch`; el usuario hizo el merge y desplegó.
+- **Prueba real con la ficha 1010** (creada con `Descargas\empleado_prueba_asislock_1010.sql`, copia
+  de un agente de Claro con los mismos jefes): AsisLock registró la entrada a las 14:55:30 y un
+  segundo login quedó `ya_conectado`. No llegó ningún logout ni `id`: la copia de AsisLock usada no
+  tiene los arreglos de `block`.
+- Pruebas: unitarios 132/132, E2E 97/97.
+
+### 13.2 Pendientes
+
+La lista completa y numerada está en `asistencia.md` §22. Lo principal:
+- Terminar la prueba de la 1010 (logout → desconexión, login → reconexión) y retirar la ficha.
+- Portar los arreglos de `block` a la copia real de AsisLock; rotar su API key y sacar las
+  credenciales quemadas; parametrizar su SQL.
+- Confirmar `node scripts/crearCuentasEmpleados.js` → `--aplicar` en producción.
+- Baño/almuerzo desde AsisLock: falta decidir qué hacer con Break y Capacitación.
+- Decisiones abiertas: marcaje automático al abrir "Mi jornada", límite de intentos en el login,
+  sincronizar el usuario si cambia la cédula, exponer la salida anticipada.
+- Cuatro errores de interfaz de la prueba en Chrome (contadores ±30 s, tarjeta "En pausa", contadores
+  del menú, "Salida programada" en jornada finalizada), sin corregir.

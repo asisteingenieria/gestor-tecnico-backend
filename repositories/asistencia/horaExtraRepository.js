@@ -8,11 +8,11 @@ async function findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha, conn = db) 
     return filas;
 }
 
-async function insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPorUserId }, conn = db) {
+async function insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor }, conn = db) {
     const [resultado] = await conn.query(
-        `INSERT INTO hora_extra (users_company_id, fecha, tipo, minutos_estimados, estado, motivo, solicitado_por_user_id)
-         VALUES (?, ?, 'solicitada', ?, 'pendiente', ?, ?)`,
-        [usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPorUserId]
+        `INSERT INTO hora_extra (users_company_id, fecha, tipo, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id)
+         VALUES (?, ?, 'solicitada', ?, 'pendiente', ?, ?, ?)`,
+        [usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
     );
     return resultado.insertId;
 }
@@ -51,22 +51,26 @@ async function findPorEquipo(usersCompanyIds, { estado } = {}, conn = db) {
     return filas;
 }
 
-async function resolver(id, { estado, minutosAprobados, comentario, aprobadoPorUserId }, conn = db) {
+async function resolver(id, { estado, minutosAprobados, comentario, aprobadoPor }, conn = db) {
     const [resultado] = await conn.query(
         `UPDATE hora_extra
-         SET estado = ?, minutos_aprobados = ?, comentario_director = ?, aprobado_por_user_id = ?, fecha_decision = NOW()
+         SET estado = ?, minutos_aprobados = ?, comentario_director = ?, aprobado_por_user_id = ?, aprobado_por_cuenta_id = ?, fecha_decision = NOW()
          WHERE idhora_extra = ? AND estado = 'pendiente'`,
-        [estado, minutosAprobados ?? null, comentario ?? null, aprobadoPorUserId, id]
+        [estado, minutosAprobados ?? null, comentario ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, id]
     );
     return resultado.affectedRows > 0;
 }
 
-async function insertarAsignada({ usersCompanyId, fecha, minutos, motivo, aprobadoPorUserId }, conn = db) {
+async function insertarAsignada({ usersCompanyId, fecha, minutos, motivo, aprobadoPor }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO hora_extra
-            (users_company_id, fecha, tipo, minutos_estimados, minutos_aprobados, estado, motivo, solicitado_por_user_id, aprobado_por_user_id, fecha_decision)
-         VALUES (?, ?, 'asignada', ?, ?, 'aprobada', ?, ?, ?, NOW())`,
-        [usersCompanyId, fecha, minutos, minutos, motivo ?? null, aprobadoPorUserId, aprobadoPorUserId]
+            (users_company_id, fecha, tipo, minutos_estimados, minutos_aprobados, estado, motivo,
+             solicitado_por_user_id, solicitado_por_cuenta_id, aprobado_por_user_id, aprobado_por_cuenta_id, fecha_decision)
+         VALUES (?, ?, 'asignada', ?, ?, 'aprobada', ?, ?, ?, ?, ?, NOW())`,
+        [
+            usersCompanyId, fecha, minutos, minutos, motivo ?? null,
+            aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null
+        ]
     );
     return resultado.insertId;
 }

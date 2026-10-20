@@ -16,7 +16,7 @@ npm start       # NODE_ENV=production
 ```
 
 `npm test` corre `node --test tests/**/*.test.js` — hoy cubre el dominio puro del módulo de
-asistencia, de la conexión con Hydra y de la integración AsisLock (130 tests, sin servidor ni base de datos). `npm run test:e2e` es la prueba de punta a punta de asistencia contra el backend y la BD local (ver `asistencia.md` §20). El resto del repo
+asistencia, de la conexión con Hydra y de la integración AsisLock (132 tests, sin servidor ni base de datos). `npm run test:e2e` es la prueba de punta a punta de asistencia contra el backend y la BD local (119 checks, ver `asistencia.md` §20 y §23-§26). El resto del repo
 sigue sin pruebas.
 
 ## Arquitectura
@@ -50,7 +50,7 @@ No apliques el patrón de dos capas ahí, ni el de cuatro capas en los módulos 
   y `028`. Antes de crear una migración, revisa `ls migrations/` y toma el siguiente número
   realmente libre.
 - **`026_add_directivo_financiero_role.sql` es obsoleta — no la ejecutes.**
-- La BD local va aplicada hasta la **064** (062 = integración AsisLock → asistencia, §18; 063 = cuentas de empleado automáticas, §19; 064 = copia de `login_biometrico` de AsisLock, §21 de `asistencia.md`; **las tres aplicadas en producción el 2026-10-19** vía `migraciones_produccion_062_064.sql` — la 062 ya estaba, 063 y 064 entraron ese día). Antes iba hasta la **061** (módulo de asistencia + campos/catálogos de RRHH —
+- La BD local va aplicada hasta la **067** (065 = cuentas de empleado en su propia tabla `cuenta_empleado`, fuera de `users` — `asistencia.md` §24; 066 = plantillas de horario con dueño, cada jefe ve solo las suyas — §25; 067 = `users.activo` y desactivación de las cuentas `director_operaciones`, los jefes entran con su cédula — §26; **ninguna de las tres aplicada en producción**, van juntas con su código en el orden de §26). Antes, hasta la **064** (062 = integración AsisLock → asistencia, §18; 063 = cuentas de empleado automáticas, §19; 064 = copia de `login_biometrico` de AsisLock, §21 de `asistencia.md`; **las tres aplicadas en producción el 2026-10-19** vía `migraciones_produccion_062_064.sql` — la 062 ya estaba, 063 y 064 entraron ese día; el código —backend `4cfc7e6`, frontend `9bb3f2f`— se desplegó también ese día y AsisLock ya registra jornadas en producción. **Pendientes vigentes de asistencia/AsisLock: `asistencia.md` §22**). Antes iba hasta la **061** (módulo de asistencia + campos/catálogos de RRHH —
   ver `claude/modulo recursoshumanos.md`; 059-061 son el staging de la conexión con Hydra, ver
   [`conexionhydra.md`](conexionhydra.md), **todavía no aplicadas en producción**). **Producción, desde el 2026-10-01, también tiene
   043-058 aplicadas** (043-048, 050-053, 055, 056, 058 corridas tal cual + un `CREATE TABLE
@@ -71,7 +71,9 @@ ver `migrations/037_add_recursos_humanos_role.sql` como plantilla.
 Roles vigentes: `admin`, `supervisor`, `coordinador`, `jefe_operaciones`, `technician`,
 `administrativo`, `anonimo`, `gestorActivos`, `tecnicoInventario`, `directivoFinanciero`,
 `disenador`, `recursosHumanos`, `director_operaciones`, `empleado` (estos dos últimos,
-migración 043, módulo de asistencia).
+migración 043, módulo de asistencia). **`director_operaciones` ya no se crea** (§26): sus cuentas
+quedaron desactivadas (`users.activo = 0`, migración 067) y los jefes gestionan su equipo con su
+cuenta por cédula.
 
 Un rol nuevo toca **cinco lugares**, y si falta uno el rol queda a medias:
 1. el ENUM en una migración,
@@ -113,12 +115,14 @@ registrados en `index.js`**. Son el módulo "agentes" que reemplazó `users_comp
 
 ## Datos de prueba
 
-`node scripts/seedEmpleadosAsistencia.js` crea 1 director y 5 empleados a su cargo con todas
+`node scripts/seedEmpleadosAsistencia.js` crea 1 jefe de área y 5 empleados a su cargo con todas
 las tablas del módulo de empleados pobladas (cédulas `9000000001`–`9000000006`,
-`users_company.id` 7–12), más sus cuentas de login (`director.operaciones`, `empleado1`…
-`empleado5`, clave `Prueba123*`) ya vinculadas vía `users.users_company_id`. Es idempotente.
+`users_company.id` 7–12), más sus logins con clave `Prueba123*`: el jefe entra con su cuenta por
+cédula `9000000001` (`cuenta_empleado`, §26) y los empleados con `empleado1`…`empleado5` (en
+`users`, vinculados vía `users.users_company_id`). La antigua `director.operaciones` quedó
+desactivada por la 067. Es idempotente.
 
-`node scripts/crearCuentasEmpleados.js [--aplicar]` crea el usuario de empleado (usuario y clave inicial = cédula, cambio obligatorio al primer ingreso) de cada ficha vigente sin cuenta; los empleados nuevos lo reciben solos al registrarse — ver `asistencia.md` §19 (migración 063).
+`node scripts/crearCuentasEmpleados.js [--aplicar]` crea la cuenta de empleado (usuario y clave inicial = cédula, cambio obligatorio al primer ingreso) de cada ficha vigente sin cuenta; los empleados nuevos la reciben solos al registrarse — ver `asistencia.md` §19. **Desde la 065 esas cuentas viven en `cuenta_empleado`, no en `users`** (§24): su sesión lleva `tipo_cuenta: 'empleado'`, su `id` no es un `users.id` y `verifyToken` la limita a `/api/auth` y `/api/asistencia`. No escribas cuentas de empleado en `users`. Todo empleado con gente a cargo (`contrato.jefe_area_id`) gestiona su equipo sin importar su rol (§23).
 
 `node scripts/vincularUsuariosEmpleados.js` hace el backfill de `users.users_company_id` por
 nombre normalizado para usuarios ya existentes; reporta los que no matchean para resolver a

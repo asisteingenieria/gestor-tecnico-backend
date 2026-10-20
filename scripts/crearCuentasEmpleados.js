@@ -1,13 +1,16 @@
 /**
- * Backfill: crea el usuario de empleado de cada ficha de RRHH vigente que todavía no tiene
- * cuenta vinculada (asistencia.md §19, migración 063). Usuario y contraseña inicial = cédula,
- * con cambio de contraseña obligatorio en el primer ingreso.
+ * Backfill: crea la cuenta de empleado de cada ficha de RRHH vigente que todavía no tiene
+ * cuenta (asistencia.md §19). Usuario y contraseña inicial = cédula, con cambio de contraseña
+ * obligatorio en el primer ingreso. Desde la migración 065 (§24) las cuentas van en la tabla
+ * `cuenta_empleado`, no en `users`.
  *
  * Los empleados nuevos ya no necesitan esto: la cuenta se crea sola al registrarlos
  * (UserCompany.crearEnConexion). Este script es para los que ya estaban registrados.
  *
  * Se salta:
- *   - fichas que ya tienen una cuenta vinculada (empleado, director_operaciones o RRHH);
+ *   - fichas que ya tienen cuenta: en cuenta_empleado, o un usuario del sistema activo
+ *     vinculado (RRHH…). Las cuentas director_operaciones desactivadas por la 067 no cuentan:
+ *     esas fichas reciben su cuenta por cédula (§26);
  *   - fichas retiradas (contrato más reciente 'retirado' o 'inactivo') o sin contrato;
  *   - cédulas que ya son el usuario de otra cuenta (se reportan para resolver a mano).
  *
@@ -19,17 +22,17 @@
  */
 
 const db = require('../config/db');
-const User = require('../models/User');
+const CuentaEmpleado = require('../models/CuentaEmpleado');
 
 const APLICAR = process.argv.includes('--aplicar');
 
 (async () => {
     try {
-        const [columna] = await db.query(
-            "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'debe_cambiar_password'"
+        const [tabla] = await db.query(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'cuenta_empleado'"
         );
-        if (columna.length === 0) {
-            console.error('Falta la migración 063 (users.debe_cambiar_password). Aplícala antes de correr este script.');
+        if (tabla.length === 0) {
+            console.error('Falta la migración 065 (tabla cuenta_empleado). Aplícala antes de correr este script.');
             process.exit(1);
         }
 
@@ -41,29 +44,33 @@ const APLICAR = process.argv.includes('--aplicar');
                        JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
                       WHERE c.users_company_id = uc.id
                       ORDER BY c.idcontrato DESC LIMIT 1) AS estado_contrato,
-                    u.id AS cuenta_id, u.username AS cuenta_username, u.role AS cuenta_role
+                    COALESCE(ce.idcuenta_empleado, u.id) AS cuenta_id,
+                    IF(ce.idcuenta_empleado IS NOT NULL, 'cuenta_empleado', u.role) AS cuenta_role
                FROM users_company uc
-               LEFT JOIN users u ON u.users_company_id = uc.id
+               LEFT JOIN cuenta_empleado ce ON ce.users_company_id = uc.id
+               LEFT JOIN users u ON u.users_company_id = uc.id AND u.activo = 1
               ORDER BY uc.id`
         );
 
         const resumen = { creadas: [], yaTenian: [], retiradas: [], usuarioOcupado: [], sinCedula: [] };
 
         for (const f of fichas) {
-            const nombre = f.nombre_propio || f.nombre_completo;
             if (f.cuenta_id) { resumen.yaTenian.push(f); continue; }
             if (!f.estado_contrato || ['retirado', 'inactivo'].includes(f.estado_contrato)) { resumen.retiradas.push(f); continue; }
 
             if (!APLICAR) {
                 const cedula = String(f.numero_identificacion ?? '').trim();
                 if (!cedula) { resumen.sinCedula.push(f); continue; }
-                const [ocupado] = await db.query('SELECT username, role FROM users WHERE username = ? LIMIT 1', [cedula]);
+                const [ocupado] = await db.query(
+                    "SELECT role FROM users WHERE username = ? UNION ALL SELECT 'cuenta_empleado' FROM cuenta_empleado WHERE usuario = ? LIMIT 1",
+                    [cedula, cedula]
+                );
                 if (ocupado.length > 0) { resumen.usuarioOcupado.push({ ...f, ocupadoPor: ocupado[0].role }); continue; }
                 resumen.creadas.push(f);
                 continue;
             }
 
-            const r = await User.crearCuentaEmpleadoEnConexion(db, { usersCompanyId: f.id, cedula: f.numero_identificacion, nombre });
+            const r = await CuentaEmpleado.crearEnConexion(db, { usersCompanyId: f.id, cedula: f.numero_identificacion });
             if (r.creada) resumen.creadas.push(f);
             else if (r.motivo === 'usuario_ocupado') resumen.usuarioOcupado.push(f);
             else if (r.motivo === 'sin_cedula') resumen.sinCedula.push(f);
@@ -72,7 +79,7 @@ const APLICAR = process.argv.includes('--aplicar');
 
         console.log(APLICAR ? '\n== Cuentas de empleado creadas ==' : '\n== SIMULACIÓN (no se creó nada; usa --aplicar) ==');
         console.log(`  ${APLICAR ? 'Creadas' : 'Se crearían'}: ${resumen.creadas.length}`);
-        console.log(`  Ya tenían cuenta vinculada: ${resumen.yaTenian.length}`);
+        console.log(`  Ya tenían cuenta: ${resumen.yaTenian.length}`);
         const porRol = {};
         for (const f of resumen.yaTenian) porRol[f.cuenta_role ?? '?'] = (porRol[f.cuenta_role ?? '?'] ?? 0) + 1;
         for (const [rol, n] of Object.entries(porRol)) console.log(`    - ${rol}: ${n}`);

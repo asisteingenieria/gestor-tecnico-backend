@@ -16,6 +16,13 @@ async function assertEmpleadoACargo(directorUsersCompanyId, empleadoId, conn) {
     if (!aCargo) throw new NoAutorizadoError('El empleado no está a su cargo');
 }
 
+// Jefe de equipo = ficha que es jefe de área de algún contrato activo. Se calcula en cada
+// consulta (no se guarda) para que siga a RRHH cuando cambia la jerarquía.
+async function esJefeDeEquipo(usersCompanyId) {
+    if (!usersCompanyId) return false;
+    return equipoRepo.tieneEmpleadosACargo(usersCompanyId);
+}
+
 async function equipo(directorUsersCompanyId) {
     requireUsersCompanyId(directorUsersCompanyId);
     const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
@@ -65,6 +72,7 @@ async function trazabilidadDe({ directorUsersCompanyId, empleadoId, fecha }) {
             ocurrido_en: e.ocurrido_en.toISOString(),
             origen: e.origen,
             registrado_por_user_id: e.registrado_por_user_id,
+            registrado_por_cuenta_id: e.registrado_por_cuenta_id ?? null,
             nota: e.nota
         }))
     };
@@ -93,7 +101,7 @@ async function estadisticasEquipo({ directorUsersCompanyId, desde, hasta }) {
     return { desde, hasta, empleados: porEmpleado };
 }
 
-async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, nota, registradoPorUserId }) {
+async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, nota, registradoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
 
     const conn = await db.getConnection();
@@ -105,7 +113,7 @@ async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, 
         await assertEmpleadoACargo(directorUsersCompanyId, jornada.users_company_id, conn);
 
         await eventoRepo.insertar(
-            { jornadaId: jornada.idjornada, tipo, origen: 'director', registradoPorUserId, nota },
+            { jornadaId: jornada.idjornada, tipo, origen: 'director', registradoPor, nota },
             conn
         );
 
@@ -125,6 +133,7 @@ async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, 
 
 module.exports = {
     assertEmpleadoACargo,
+    esJefeDeEquipo,
     equipo,
     jornadasDe,
     trazabilidadDe,

@@ -7,9 +7,9 @@ function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
 }
 
-async function solicitar({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPorUserId }) {
+async function solicitar({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor }) {
     requireUsersCompanyId(usersCompanyId);
-    const idhoraExtra = await horaExtraRepo.insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPorUserId });
+    const idhoraExtra = await horaExtraRepo.insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor });
     return { success: true, idhora_extra: idhoraExtra };
 }
 
@@ -24,13 +24,13 @@ async function bandeja({ directorUsersCompanyId, estado }) {
     return horaExtraRepo.findPorEquipo(empleados.map((e) => e.users_company_id), { estado });
 }
 
-async function aprobar({ directorUsersCompanyId, idhoraExtra, minutosAprobados, comentario, aprobadoPorUserId }) {
+async function aprobar({ directorUsersCompanyId, idhoraExtra, minutosAprobados, comentario, aprobadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
     const solicitud = await horaExtraRepo.findById(idhoraExtra);
     if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
     await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
 
-    await resolverPendiente(solicitud, { estado: 'aprobada', minutosAprobados, comentario, aprobadoPorUserId });
+    await resolverPendiente(solicitud, { estado: 'aprobada', minutosAprobados, comentario, aprobadoPor });
     return { success: true };
 }
 
@@ -43,23 +43,23 @@ async function resolverPendiente(solicitud, decision) {
     if (!resuelta) throw conflicto();
 }
 
-async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprobadoPorUserId }) {
+async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprobadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
     const solicitud = await horaExtraRepo.findById(idhoraExtra);
     if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
     await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
 
-    await resolverPendiente(solicitud, { estado: 'rechazada', minutosAprobados: null, comentario, aprobadoPorUserId });
+    await resolverPendiente(solicitud, { estado: 'rechazada', minutosAprobados: null, comentario, aprobadoPor });
     return { success: true };
 }
 
-async function asignar({ directorUsersCompanyId, empleados, fecha, minutos, motivo, aprobadoPorUserId }) {
+async function asignar({ directorUsersCompanyId, empleados, fecha, minutos, motivo, aprobadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
     for (const empleadoId of empleados) {
         await equipoService.assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
     }
     const ids = await Promise.all(empleados.map((empleadoId) =>
-        horaExtraRepo.insertarAsignada({ usersCompanyId: empleadoId, fecha, minutos, motivo, aprobadoPorUserId })
+        horaExtraRepo.insertarAsignada({ usersCompanyId: empleadoId, fecha, minutos, motivo, aprobadoPor })
     ));
     return { success: true, ids };
 }
