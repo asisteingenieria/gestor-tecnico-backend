@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const CuentaEmpleado = require('./CuentaEmpleado');
+const pantallaGrisService = require('../services/asistencia/pantallaGrisService');
 
 const SELECT_EMPLEADO = `
     SELECT
@@ -504,6 +505,15 @@ class UserCompany {
             cedula: data.numero_identificacion
         });
 
+        // Y su usuario de la pantalla gris de AsisLock (credencial aparte, cédula / cédula), con el
+        // aviso de alta a AsisLock en la misma transacción. Ver asistencia.md §31.
+        await pantallaGrisService.crearEnConexion(conn, {
+            usersCompanyId: ucId,
+            cedula: data.numero_identificacion,
+            nombre: [data.primer_nombre, data.segundo_nombre, data.primer_apellido, data.segundo_apellido]
+                .map((p) => String(p ?? '').trim()).filter(Boolean).join(' ')
+        });
+
         return ucId;
     }
 
@@ -629,6 +639,8 @@ class UserCompany {
         try {
             await conn.beginTransaction();
             await conn.query('DELETE FROM cuenta_empleado WHERE users_company_id = ?', [id]);
+            // El usuario de la pantalla gris se va con la ficha y AsisLock recibe la baja (§31).
+            await pantallaGrisService.eliminarEnConexion(conn, id);
             await conn.query('UPDATE horario_plantilla SET dueno_users_company_id = NULL WHERE dueno_users_company_id = ?', [id]);
             await conn.query('DELETE FROM contrato WHERE users_company_id = ?', [id]);
             const [result] = await conn.query('DELETE FROM users_company WHERE id = ?', [id]);

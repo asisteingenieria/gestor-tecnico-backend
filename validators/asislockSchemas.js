@@ -54,4 +54,23 @@ function validarEnvioAsislock(body) {
     return [];
 }
 
-module.exports = { validarEnvioAsislock };
+// Pantalla gris (asistencia.md §31). La clave no se recorta: un espacio es parte de ella.
+const esUsuario = (v) => (typeof v === 'string' && v.trim().length > 0 && v.length <= 50) || (Number.isInteger(v) && v > 0);
+const esClave = (v) => typeof v === 'string' && v.length > 0 && v.length <= 72; // bcrypt usa hasta 72 bytes
+
+function validarCredencialPantallaGris(body) {
+    const errores = [];
+    if (!body || !esUsuario(body.usuario)) errores.push('usuario es requerido (cédula del empleado)');
+    if (!body || !esClave(body.clave)) errores.push('clave es requerida (texto de hasta 72 caracteres)');
+    return errores;
+}
+
+function validarCambioClavePantallaGris(body) {
+    const errores = [];
+    if (!body || !esUsuario(body.usuario)) errores.push('usuario es requerido (cédula del empleado)');
+    if (!body || !esClave(body.clave_actual)) errores.push('clave_actual es requerida');
+    if (!body || !esClave(body.clave_nueva)) errores.push('clave_nueva es requerida (texto de hasta 72 caracteres)');
+    return errores;
+}
+
+module.exports = { validarEnvioAsislock, validarCredencialPantallaGris, validarCambioClavePantallaGris };
