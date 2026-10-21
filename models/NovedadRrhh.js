@@ -11,7 +11,12 @@ const SELECT_NOVEDAD = `
         car.nombre AS cargo_nombre,
         cam.nombre AS campania_nombre,
         cc.nombre AS centro_costo_nombre,
-        CONCAT_WS(' ', resp.primer_nombre, resp.segundo_nombre, resp.primer_apellido, resp.segundo_apellido) AS responsable_nombre
+        CONCAT_WS(' ', resp.primer_nombre, resp.segundo_nombre, resp.primer_apellido, resp.segundo_apellido) AS responsable_nombre,
+        (SELECT COUNT(*) FROM tipo_novedad_soporte tns WHERE tns.tipo_novedad_id = nr.tipo_novedad_idtipo_novedad) AS soportes_requeridos,
+        (SELECT COUNT(*) FROM novedad_rrhh_soporte nrs
+           JOIN tipo_novedad_soporte tns ON tns.tipo_soporte_novedad_id = nrs.tipo_soporte_novedad_id
+                                        AND tns.tipo_novedad_id = nr.tipo_novedad_idtipo_novedad
+          WHERE nrs.novedad_rrhh_id = nr.idnovedad_rrhh) AS soportes_cargados
     FROM novedad_rrhh nr
     JOIN contrato c ON nr.contrato_idcontrato = c.idcontrato
     JOIN users_company uc ON c.users_company_id = uc.id
@@ -112,6 +117,88 @@ class NovedadRrhh {
     static async delete(id) {
         const [result] = await db.query('DELETE FROM novedad_rrhh WHERE idnovedad_rrhh = ?', [id]);
         return result.affectedRows > 0;
+    }
+
+    // ---- Soportes documentales (migración 069) ----
+
+    // Los soportes que aplican al tipo de la novedad (hoja "Novedades"), con su archivo si ya
+    // se cargó, más los cargados que ya no aplican (si se cambió el tipo) con `aplica = 0`.
+    static async getSoportes(novedadId) {
+        const [rows] = await db.query(
+            `SELECT s.idtipo_soporte_novedad AS tipo_soporte_id, s.nombre, s.orden,
+                    (tns.tipo_novedad_id IS NOT NULL) AS aplica,
+                    nrs.idnovedad_rrhh_soporte AS id, nrs.nombre_original, nrs.mime, nrs.tamano, nrs.updated_at AS cargado_en
+             FROM novedad_rrhh nr
+             JOIN tipo_soporte_novedad s
+             LEFT JOIN tipo_novedad_soporte tns
+                    ON tns.tipo_novedad_id = nr.tipo_novedad_idtipo_novedad AND tns.tipo_soporte_novedad_id = s.idtipo_soporte_novedad
+             LEFT JOIN novedad_rrhh_soporte nrs
+                    ON nrs.novedad_rrhh_id = nr.idnovedad_rrhh AND nrs.tipo_soporte_novedad_id = s.idtipo_soporte_novedad
+             WHERE nr.idnovedad_rrhh = ? AND (tns.tipo_novedad_id IS NOT NULL OR nrs.idnovedad_rrhh_soporte IS NOT NULL)
+             ORDER BY aplica DESC, s.orden`,
+            [novedadId]
+        );
+        return rows;
+    }
+
+    static async soporteAplica(novedadId, tipoSoporteId) {
+        const [rows] = await db.query(
+            `SELECT 1 FROM novedad_rrhh nr
+             JOIN tipo_novedad_soporte tns ON tns.tipo_novedad_id = nr.tipo_novedad_idtipo_novedad
+             WHERE nr.idnovedad_rrhh = ? AND tns.tipo_soporte_novedad_id = ?`,
+            [novedadId, tipoSoporteId]
+        );
+        return rows.length > 0;
+    }
+
+    static async getSoporte(novedadId, tipoSoporteId) {
+        const [rows] = await db.query(
+            'SELECT * FROM novedad_rrhh_soporte WHERE novedad_rrhh_id = ? AND tipo_soporte_novedad_id = ?',
+            [novedadId, tipoSoporteId]
+        );
+        return rows[0];
+    }
+
+    // Guarda (o reemplaza) el archivo de un soporte. Devuelve el nombre del archivo anterior,
+    // si había, para que el controller lo borre del disco después del commit.
+    static async guardarSoporte(novedadId, tipoSoporteId, archivo, userId) {
+        const conn = await db.getConnection();
+        try {
+            await conn.beginTransaction();
+            const [previo] = await conn.query(
+                'SELECT archivo FROM novedad_rrhh_soporte WHERE novedad_rrhh_id = ? AND tipo_soporte_novedad_id = ? FOR UPDATE',
+                [novedadId, tipoSoporteId]
+            );
+            await conn.query(
+                `INSERT INTO novedad_rrhh_soporte
+                    (novedad_rrhh_id, tipo_soporte_novedad_id, archivo, nombre_original, mime, tamano, subido_por_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE archivo = VALUES(archivo), nombre_original = VALUES(nombre_original),
+                    mime = VALUES(mime), tamano = VALUES(tamano), subido_por_user_id = VALUES(subido_por_user_id)`,
+                [novedadId, tipoSoporteId, archivo.nombre, archivo.nombreOriginal, archivo.mime, archivo.tamano, userId ?? null]
+            );
+            await conn.commit();
+            return previo[0]?.archivo || null;
+        } catch (error) {
+            await conn.rollback();
+            throw error;
+        } finally {
+            conn.release();
+        }
+    }
+
+    // Devuelve el nombre del archivo borrado (o null si no había) para quitarlo del disco.
+    static async eliminarSoporte(novedadId, tipoSoporteId) {
+        const actual = await NovedadRrhh.getSoporte(novedadId, tipoSoporteId);
+        if (!actual) return null;
+        await db.query('DELETE FROM novedad_rrhh_soporte WHERE idnovedad_rrhh_soporte = ?', [actual.idnovedad_rrhh_soporte]);
+        return actual.archivo;
+    }
+
+    // Archivos de una novedad, para borrarlos del disco al eliminarla (las filas caen por CASCADE).
+    static async archivosDeNovedad(novedadId) {
+        const [rows] = await db.query('SELECT archivo FROM novedad_rrhh_soporte WHERE novedad_rrhh_id = ?', [novedadId]);
+        return rows.map(r => r.archivo);
     }
 }
 

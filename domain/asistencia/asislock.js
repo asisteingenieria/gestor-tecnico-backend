@@ -200,6 +200,43 @@ function decidirLogout({ eventos, horario, instante, parametros }) {
     return { accion: 'desconexion', eventos: [...previos, 'inicio_desconexion'], motivo: null };
 }
 
+// Cómo entró el empleado, según `conectado_biometrico` del login: 'Presencial' = puso la huella
+// en el biométrico y cruzó el molinete; 'Teletrabajo' = solo se logueó en AsisLock. Cualquier
+// otro valor (p. ej. el 'close' que manda el logout) no dice cómo entró.
+function modalidadIngreso(valor) {
+    const texto = String(valor ?? '').trim().toLowerCase();
+    if (texto === 'presencial') return 'presencial';
+    if (texto === 'teletrabajo') return 'teletrabajo';
+    return null;
+}
+
+/**
+ * Resumen de AsisLock de un día para las pantallas (Mi jornada, Equipo hoy, trazabilidad).
+ * Cuentan los avisos no rechazados: un login ignorado por `ya_conectado` también dice que la
+ * persona estaba conectada.
+ * @param {Array} registros  avisos del día ({ evento, ocurrido_en, resultado, conectado_biometrico,
+ *                           ip_local, ip_publica, aplicativo }), ordenados por ocurrido_en
+ * @returns {Object|null} null si AsisLock no reportó nada válido ese día
+ */
+function resumenDelDia(registros) {
+    const validos = registros.filter((r) => r.resultado !== 'rechazado');
+    if (validos.length === 0) return null;
+    const logins = validos.filter((r) => r.evento === 'login');
+    const ultimo = validos[validos.length - 1];
+    const ultimoLogin = logins[logins.length - 1] ?? null;
+    const referencia = ultimoLogin ?? ultimo;
+    return {
+        modalidad: ultimoLogin ? modalidadIngreso(ultimoLogin.conectado_biometrico) : null,
+        modalidades: [...new Set(logins.map((r) => modalidadIngreso(r.conectado_biometrico)).filter(Boolean))],
+        primer_login: logins[0]?.ocurrido_en ?? null,
+        ultimo_evento: { evento: ultimo.evento, ocurrido_en: ultimo.ocurrido_en },
+        conectado: ultimo.evento === 'login',
+        ip_local: referencia.ip_local ?? null,
+        ip_publica: referencia.ip_publica ?? null,
+        aplicativo: referencia.aplicativo ?? null
+    };
+}
+
 module.exports = {
     PARAMETROS_DEFECTO,
     normalizarCedula,
@@ -212,5 +249,7 @@ module.exports = {
     desconexionAbierta,
     pausaAbierta,
     decidirLogin,
-    decidirLogout
+    decidirLogout,
+    modalidadIngreso,
+    resumenDelDia
 };

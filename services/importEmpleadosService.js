@@ -21,11 +21,33 @@ function normalizar(s) {
 // algunos casos reales del archivo sin matchear por diferencias de nombre menores;
 // se resuelven aquí a mano en vez de con un algoritmo difuso general.
 const SINONIMOS_BANCO = { BBVA: 'BBVA Colombia', 'CAJA SOCIAL': 'Banco Caja Social' };
-const SINONIMOS_ENTIDAD_SS = {
-    'ARL:SURA': 'ARL Sura',
-    'CESANTIAS:PORVENIR': 'Porvenir Cesantías',
-    'CESANTIAS:PROTECCION': 'Protección Cesantías'
-};
+// Entidades de seguridad social: [tipo, nombre como viene en el archivo, nombre en Gestor].
+// Incluye los nombres anteriores a la migración 068 (que dejó los nombres oficiales de la hoja
+// "EPS AFP CESANTIAS") para que un archivo con "Porvenir" siga cayendo en "PORVENIR S.A. AFPC",
+// y los duplicados que la 068 unificó ("SURA", "Compensar EPS", "FNA AHORRO") hacia la oficial. La clave se
+// normaliza igual que el catálogo.
+const SINONIMOS_ENTIDAD_SS = Object.fromEntries([
+    ['ARL', 'SURA', 'ARL SURA'],
+    ['EPS', 'SURA', 'EPS SURA (ANTES SUSALUD)'],
+    ['EPS', 'Coosalud', 'COOSALUD EPS'],
+    ['EPS', 'Salud Total', 'SALUD TOTAL EPS'],
+    ['EPS', 'Sanitas', 'SANITAS EPS'],
+    ['EPS', 'Famisanar', 'FAMISANAR EPS CAFAM - COLSUBSIDIO'],
+    ['EPS', 'SERVICIO OCCIDENTAL DE SALUD S.A. S.O.S.', 'SERVICIO OCCIDENTAL DE SALUD'],
+    ['EPS', 'Compensar EPS', 'COMPENSAR'],
+    ['AFP', 'Colfondos', 'COLFONDOS S.A. AFPC'],
+    ['AFP', 'Porvenir', 'PORVENIR S.A. AFPC'],
+    ['AFP', 'Protección', 'PROTECCIÓN S.A. AFPC'],
+    ['AFP', 'Skandia', 'SKANDIA S.A. AFPC'],
+    ['AFP', 'SKANDIA. AFPC', 'SKANDIA S.A. AFPC'],
+    ['CESANTIAS', 'Colfondos', 'COLFONDOS S.A. AFPC'],
+    ['CESANTIAS', 'Porvenir', 'PORVENIR S.A. AFPC'],
+    ['CESANTIAS', 'Porvenir Cesantías', 'PORVENIR S.A. AFPC'],
+    ['CESANTIAS', 'Protección', 'PROTECCIÓN S.A. AFPC'],
+    ['CESANTIAS', 'Protección Cesantías', 'PROTECCIÓN S.A. AFPC'],
+    ['CESANTIAS', 'FNA AHORRO', 'FONDO NACIONAL DEL AHORRO'],
+    ['CAJA', 'Colsubsidio', 'CAJA COLOMBIANA DE SUBSIDIO FAMILIAR COLSUBSIDIO']
+].map(([tipo, enArchivo, enGestor]) => [`${tipo}:${normalizar(enArchivo)}`, enGestor]));
 
 function mapaDesdeFilas(rows) {
     const m = new Map();
@@ -221,11 +243,13 @@ async function crearResolver({ dryRun }) {
         entidadSeguridadSocial: (tipo, nombre) => buscarOCrear(
             `entidad_seguridad_social:${tipo}`,
             () => db.query('SELECT identidad_seguridad_social AS id, nombre FROM entidad_seguridad_social WHERE tipo = ?', [tipo]).then(([r]) => mapaDesdeFilas(r)),
+            // Una entidad que no está en la lista oficial se crea para no perder la afiliación
+            // del archivo, pero no vigente: no aparece en los selectores del alta (068).
             async (valor) => {
-                const [r] = await db.query('INSERT INTO entidad_seguridad_social (tipo, nombre) VALUES (?, ?)', [tipo, valor]);
+                const [r] = await db.query('INSERT INTO entidad_seguridad_social (tipo, nombre, vigente) VALUES (?, ?, 0)', [tipo, valor]);
                 return r.insertId;
             },
-            SINONIMOS_ENTIDAD_SS[`${tipo}:${nombre?.toUpperCase()}`] || nombre, `entidad_seguridad_social (${tipo})`
+            SINONIMOS_ENTIDAD_SS[`${tipo}:${normalizar(nombre)}`] || nombre, `entidad_seguridad_social (${tipo})`
         ),
 
         // ---- catálogos cerrados (solo lectura, no crean filas) ----

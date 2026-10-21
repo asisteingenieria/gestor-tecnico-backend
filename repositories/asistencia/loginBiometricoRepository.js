@@ -5,8 +5,10 @@ const db = require('../../config/db');
 // login/logout vive en asislock_registro.
 
 // Inserta la fila o la actualiza con lo último recibido. hora_logout no se borra: un
-// reenvío atrasado de la fila (aún sin logout) no deshace un logout ya recibido. Tampoco
-// conectado_biometrico: AsisLock solo lo conoce al login y en el logout lo manda null.
+// reenvío atrasado de la fila (aún sin logout) no deshace un logout ya recibido.
+// conectado_biometrico dice cómo entró: 'Presencial' (huella en el biométrico y molinete) o
+// 'Teletrabajo' (solo login en AsisLock). Solo el login lo sabe; el logout manda null o el
+// motivo del cierre ('close'), así que una fila con logout no pisa el valor del login.
 async function guardar(r, conn = db) {
     await conn.query(
         `INSERT INTO login_biometrico
@@ -19,7 +21,9 @@ async function guardar(r, conn = db) {
             hora_logout = COALESCE(VALUES(hora_logout), hora_logout),
             estado_conexion = VALUES(estado_conexion), ip_local = VALUES(ip_local),
             ip_publica = VALUES(ip_publica), aplicativo = VALUES(aplicativo),
-            conectado_biometrico = COALESCE(VALUES(conectado_biometrico), conectado_biometrico)`,
+            conectado_biometrico = IF(VALUES(hora_logout) IS NULL,
+                COALESCE(VALUES(conectado_biometrico), conectado_biometrico),
+                COALESCE(conectado_biometrico, VALUES(conectado_biometrico)))`,
         [
             r.llave, r.asislockId, r.usuario, r.fecha, r.horaLogin, r.horaLogout, r.estadoConexion,
             r.ipLocal, r.ipPublica, r.aplicativo, r.conectadoBiometrico
@@ -59,7 +63,7 @@ async function cerrarSesion(idloginBiometrico, r, conn = db) {
             SET hora_logout = ?, estado_conexion = ?,
                 ip_local = COALESCE(?, ip_local), ip_publica = COALESCE(?, ip_publica),
                 aplicativo = COALESCE(?, aplicativo),
-                conectado_biometrico = COALESCE(?, conectado_biometrico)
+                conectado_biometrico = COALESCE(conectado_biometrico, ?)
           WHERE idlogin_biometrico = ?`,
         [r.horaLogout, r.estadoConexion, r.ipLocal, r.ipPublica, r.aplicativo, r.conectadoBiometrico, idloginBiometrico]
     );

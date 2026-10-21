@@ -9,6 +9,7 @@ const consultaController = require('../controllers/asistencia/consultaController
 const horaExtraController = require('../controllers/asistencia/horaExtraController');
 const horarioController = require('../controllers/asistencia/horarioController');
 const equipoController = require('../controllers/asistencia/equipoController');
+const alertaController = require('../controllers/asistencia/alertaController');
 
 const {
     iniciarPausaSchema,
@@ -45,6 +46,9 @@ router.get('/mis-jornadas', canRegistrarAsistencia, validar(rangoQuerySchema), a
 router.get('/mis-estadisticas', canRegistrarAsistencia, validar(rangoQuerySchema), asyncHandler(consultaController.misEstadisticas));
 router.post('/horas-extra/solicitar', canRegistrarAsistencia, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
 router.get('/mis-horas-extra', canRegistrarAsistencia, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misHorasExtra));
+// Campana: alertas de traspasos dirigidas a mi ficha (evaluación del encargo, retorno del trabajo en casa)
+router.get('/mis-alertas', canRegistrarAsistencia, asyncHandler(alertaController.misAlertas));
+router.post('/mis-alertas/:id/leida', canRegistrarAsistencia, validar(idParamSchema), asyncHandler(alertaController.marcarLeida));
 
 // --- Jefe de equipo (director_operaciones o ficha con empleados a cargo, §23) ---
 router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));

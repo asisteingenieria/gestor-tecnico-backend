@@ -37,7 +37,7 @@ coverage
 bower_components
 
 # node_modules
-node_modules/
+node_modules
 
 # Optional npm cache directory
 .npm
@@ -59,6 +59,9 @@ node_modules/
 
 # uploads directory (may contain sensitive files)
 uploads/
+
+# Archivos privados (soportes de novedades de RRHH: incapacidades, historias clínicas...)
+storage/
 
 # PM2 ecosystem file
 ecosystem.config.js

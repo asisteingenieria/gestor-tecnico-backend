@@ -1932,3 +1932,294 @@ Efectos sobre lo que hace RRHH:
   defecto solo simula; con `--aplicar`, la crea.
 
 Detalle en `asistencia.md` §19. Estado: probado en local, sin commitear ni desplegar.
+
+## 32. Sesión 2026-10-21 — Jefatura sugerida por Campaña + Cargo al registrar un empleado
+
+Pedido: que al registrar un empleado nuevo los campos "Jefe inmediato", "Jefe de área" y
+"Director de área" se filtren y se sugieran según la Campaña y el Cargo, con la cadena de mando
+real (ej. HOGAR + Agente call center, como Samuel Abaunza: Julian Castro → Mayra Barbosa →
+Andres Nuncira).
+
+**Hallazgo en los datos reales** (corrige lo dicho en §29.2): los tres roles cambian por **cargo**
+dentro de una campaña, no solo el jefe inmediato. Ej. T&T: Agente call center → jefe de área
+Kevin Buitrago; Coordinador call → Nelson Acero. Además la cadena es casi siempre consistente: de
+34 jefes inmediatos, solo 4 tienen más de un jefe de área en la misma campaña, y por pocos casos.
+
+**Backend** (`UserCompany.js::getCatalogos()`):
+- `jefes_area` y `directores_area` traen ahora también `cargo_id` (antes solo `jefes_inmediatos`).
+- Catálogo nuevo `cadenas_jefatura`: `{campania_id, cargo_id, jefe_inmediato_id, jefe_area_id,
+  director_area_id, total}`, agrupado por cadena y solo con contratos que no estén `retirado` ni
+  `inactivo`.
+
+**Frontend** — lógica en `src/utils/catalogosRRHH.js`, que ahora usan los dos formularios
+(`AgentForm.jsx` y Contratación Hydra, `seccionesUI.js`):
+- `jefesCandidatos()` reemplaza a `jefesInmediatos()`/`jefesPorCampania()` y los filtros locales de
+  `AgentForm`: los tres selectores filtran por Campaña + Cargo → si no hay, por Campaña → si no hay,
+  la lista completa.
+- `sugerirJefatura()`: el jefe inmediato se sugiere solo si la combinación tiene uno solo (HOGAR +
+  Agente tiene 5 equipos, ahí no se adivina). El jefe de área y el director salen del equipo del
+  jefe inmediato (elegido o sugerido) o, sin él, de la cadena más común.
+- `aplicarSugerenciaJefatura()`: solo llena campos vacíos o que todavía tienen la sugerencia
+  anterior; **nunca pisa lo elegido a mano**. Al editar un empleado no se sugiere nada.
+- `AgentForm` marca con la etiqueta "Sugerido" los campos que se llenaron solos. En Hydra, la
+  sugerencia corre al cambiar Cliente/Campaña/Cargo/Jefe inmediato y al abrir la sección (solo
+  llena jefes vacíos); `_jefatura_sugerida` es una clave de interfaz, no se envía.
+
+**Verificado** con el catálogo real servido por el backend local (no por el navegador):
+- HOGAR + Agente call center → candidatos JI: los 5 coordinadores reales (incluido Julian Castro);
+  sugiere JA Mayra Barbosa y DIR Andres Nuncira.
+- T&T + Coordinador call (como Laura Acero) → sugiere los tres: Kevin Buitrago / Nelson Acero /
+  Nelson Acero.
+- LEGALIZACION Y CALIDAD + Analista de calidad (como Nury Aldana) → JA y DIR Andres Nuncira.
+- OPERACIÓN + Director de operaciones (como Nelson Acero) → sin cadena real (es la cima): no sugiere
+  nada y muestra la lista completa.
+- Cambiar campaña/cargo reemplaza lo sugerido y conserva lo elegido a mano.
+
+`eslint` sin errores en los 3 archivos frontend; `node -c` en el modelo.
+
+### 32.1 Prueba con un empleado temporal por cada Campaña + Cargo (misma sesión)
+
+Para cada una de las 70 combinaciones reales Campaña + Cargo se creó un empleado temporal por la
+API (`POST /users-company`, cédulas `7770000001`-`7770000070`, como `sharon.pardo`), con los jefes
+que deja el formulario: el flujo de `AgentForm` simulado con las funciones reales de
+`catalogosRRHH.js`; donde hay varios jefes inmediatos, se eligió a mano el del equipo más grande.
+Lo guardado se comparó contra lo esperado calculado directo de los contratos en la BD, y después
+se borró todo (conteos `users_company`/`contrato`/`cuenta_empleado` iguales a los de antes: 398/398/391).
+
+**Primera corrida: 63/70.** Las 7 que fallaron eran cargos de la cima de su campaña (Director
+financiero, Director de tecnología, Jefe de mantenimiento, etc.), que en la realidad no tienen
+jefes: la sugerencia caía a nivel de campaña y le proponía al Director financiero como jefe
+inmediato a alguien de su propio equipo. **Corregido:**
+- `sugerirJefatura()` solo sugiere con la combinación Campaña + Cargo exacta (sin cargo o sin
+  historia, no sugiere). Los selectores sí siguen cayendo a la campaña para no quedar vacíos.
+- `cadenas_jefatura` incluye ahora también las cadenas vacías: "cargo sin jefes" deja de
+  confundirse con "combinación sin historia".
+
+**Segunda corrida: 70/70.**
+
+**Bug encontrado de paso y corregido:** `DELETE /users-company/:id` respondía 500 para cualquier
+empleado con cuenta por cédula (o sea, todos desde la 063): `fk_cuenta_empleado_ficha`
+(migración 065) no tiene `ON DELETE` y `UserCompany.delete()` solo borraba `contrato` y
+`users_company`. Falló en los 70 empleados de la primera prueba (se limpiaron borrando antes su
+`cuenta_empleado` a mano). Mismo problema latente con `fk_horario_plantilla_dueno` (066): no se
+podía borrar a un jefe dueño de una plantilla de horario.
+
+Fix, sin migración, en `UserCompany.delete()` y dentro de la misma transacción:
+- borra la `cuenta_empleado` de la ficha (lo que esa cuenta registró en asistencia queda, con su
+  autor en NULL por los `SET NULL` de la 065);
+- deja sin dueño (`dueno_users_company_id = NULL`) las plantillas del jefe en vez de borrarlas, para
+  no tocar los horarios ya asignados con ellas (la 066 ya contempla plantillas sin dueño).
+
+Verificado: corrida completa con borrado 100 % por la API (0 fallos, conteos iguales), y un caso
+aparte de un empleado con cuenta por cédula y plantilla propia → 200, ficha y cuenta borradas,
+plantilla conservada sin dueño. El resto de FKs hacia `users_company` ya eran `CASCADE`/`SET NULL`;
+las de `contrato` (novedades, traspasos, vacaciones, retiro, historial salarial) son `CASCADE`.
+
+## 33. Sesión 2026-10-21 — EPS, AFP, cesantías, cajas y ARL: solo la lista oficial en el alta
+
+Fuente: hoja **"EPS AFP CESANTIAS"** de `Descargas/Criterios (1).xlsx` (idéntico a `Criterios.xlsx`):
+19 EPS, 6 fondos de pensiones, 4 fondos de cesantías, 2 cajas de compensación y 1 ARL. Son las
+únicas opciones que deben salir en los selectores al registrar un empleado nuevo.
+
+**Migración `068_entidades_seguridad_social_vigentes.sql`** (aplicada en local, **pendiente en
+producción**). No borra nada, porque hay empleados afiliados a entidades fuera de la lista
+(Positiva, Colmena, Cafam, Compensar caja, ANAS WAYUU EPSI, y duplicados como "SURA",
+"Compensar EPS", "FNA AHORRO"):
+- columna nueva `entidad_seguridad_social.vigente`;
+- renombra al nombre exacto del Excel las entidades que ya existían con otro nombre (ej. "Porvenir"
+  → "PORVENIR S.A. AFPC", "Sanitas" → "SANITAS EPS", "Famisanar" → "FAMISANAR EPS CAFAM -
+  COLSUBSIDIO"); son la misma entidad, así que los afiliados no cambian;
+- inserta las 8 que faltaban (ASMET SALUD, ASOCIACION INDIGENA DEL CAUCA, CAJACOPI, COOMEVA,
+  DUSAKAWI, EMSSANAR, FNA como pensión, COMFAMILIAR ATLANTICO);
+- deja `vigente = 1` solo las de la hoja.
+Va todo por (tipo, nombre), nunca por ID (los IDs de producción no coinciden con los de local,
+§29.6), con `COLLATE` explícito contra la tabla temporal (error 1267, CLAUDE.md), y es idempotente.
+"SKANDIA. AFPC" se dejó tal cual viene en el Excel (con el punto).
+
+**Código:**
+- `UserCompany.getCatalogos()` devuelve `vigente` en las entidades (siguen viniendo todas: la ficha
+  y el drawer necesitan el nombre de una entidad no vigente).
+- `entidadesVigentes()` en `src/utils/catalogosRRHH.js`: los 5 selectores de `AgentForm` y de
+  Contratación Hydra ofrecen solo las vigentes, más la ya guardada del empleado si no lo es.
+- Hydra: `catalogoRepository` resuelve EPS/AFP solo contra las vigentes (así "SURA" deja de ser
+  ambiguo con "EPS SURA") y `resolverCatalogo` ignora "S.A." y "AFPC" en AFP, para que "Porvenir"
+  siga encontrando "PORVENIR S.A. AFPC".
+- Import masivo: `SINONIMOS_ENTIDAD_SS` ahora se busca por nombre normalizado y mapea los nombres
+  viejos y los duplicados a la entidad oficial; una entidad que no esté en la lista se crea con
+  `vigente = 0` (se guarda la afiliación, pero no aparece en los selectores).
+
+**Verificado** (backend local, no en el navegador):
+- Migración corrida dos veces: 19/6/4/2/1 vigentes, 0 de las 1987 afiliaciones cambiaron de
+  entidad, 8 entidades insertadas.
+- Los 5 selectores de un empleado nuevo coinciden exactamente con las columnas del Excel.
+- Un empleado con ARL Positiva (no vigente) la sigue viendo al editar: el selector ofrece "ARL SURA" y "Positiva".
+- Hydra resuelve "Porvenir", "PROTECCION", "Sanitas", "SURA", "Coomeva", etc. a la entidad oficial.
+- Alta real con ASMET SALUD / FNA / COMFAMILIAR ATLANTICO guardada y borrada.
+- Previsualización del import con `DATOS (1) (1).xlsx` (389 filas): 0 entidades nuevas.
+- `npm test` 132/132, `eslint` sin errores.
+
+**Para producción:** correr `068` antes o junto con el deploy del código. Si el frontend nuevo sale
+sin la `068`, los selectores muestran todo como antes (sin `vigente` no se filtra); si el backend
+nuevo sale sin la `068`, la consulta de Hydra a EPS/AFP falla por la columna inexistente.
+
+**Ajuste posterior (mismo día, a pedido):** la `068` ahora también
+- renombra "SKANDIA. AFPC" (así venía en la hoja) a **"SKANDIA S.A. AFPC"**, como las demás AFP;
+- **unifica los 3 duplicados** (misma entidad con otro nombre) en la oficial: EPS "SURA" → "EPS SURA
+  (ANTES SUSALUD)", EPS "Compensar EPS" → "COMPENSAR", cesantías "FNA AHORRO" → "FONDO NACIONAL DEL
+  AHORRO". Pasa sus afiliaciones (`entidad_seguridad_social_id` y `entidad_anterior_id`) a la oficial
+  y borra el duplicado si quedó sin referencias (paso 4b).
+- No se tocan las entidades **distintas** fuera de la hoja (Positiva, Colmena, Cafam, Compensar caja,
+  Anas Wayuu…): siguen con `vigente = 0`.
+- Verificado en local (corrida dos veces): 1987 afiliaciones antes y después, 12 movidas (1 + 2 + 9),
+  42 → 39 entidades; vigentes EPS 19/1, AFP 6/0, CESANTIAS 4/0, CAJA 2/3, ARL 1/3. El importador
+  (`SINONIMOS_ENTIDAD_SS`) y el resolver de Hydra llevan "Skandia"/"SKANDIA. AFPC" a la oficial.
+
+## 34. Sesión 2026-10-21 — Novedades: soportes documentales por tipo (PDF o imagen) y empleado buscable
+
+**Pedido:** la hoja "Novedades" de `Criterios (1).xlsx` define los 15 tipos de novedad y, por cada
+uno, qué soportes aplican ("SI"/"NO"). Al registrar una novedad solo deben pedirse los que aplican,
+cada uno cargado como PDF o imagen. Además, el campo "Empleado" deja de ser un `<select>`: se
+escribe el nombre o la cédula.
+
+**Migración `069_novedades_soportes_documentales.sql`** (por nombre, idempotente, COLLATE explícito):
+- `tipo_novedad.vigente`. Entran las 4 variantes por días: "Incapacidades origen comun 1- 2 días" /
+  "3 días o mas" y "Incapacidades accidente de transito 1- 2 días" / "3 días o mas". Las 2 genéricas
+  de la 053 quedan `vigente = 0` (no se borran: en producción puede haber novedades que las usan) y
+  conservan como soportes la unión de sus variantes.
+- `tipo_soporte_novedad`: los 10 soportes (columnas de la hoja), con `orden`.
+- `tipo_novedad_soporte`: la matriz SI/NO (39 filas para los 15 vigentes + 5 de las genéricas).
+- `novedad_rrhh_soporte`: un archivo por (novedad, soporte), `ON DELETE CASCADE` desde la novedad.
+- Las columnas `tiene_*` de la 039 (6 checkboxes) siguen en la tabla, pero el formulario ya no
+  las muestra (se conservan al editar).
+
+**Archivos — privados.** Son certificados de incapacidad, historias clínicas, registros civiles:
+NO van en `uploads/` (que `/api/files` sirve **sin login**) sino en `storage/novedades/` (en
+`.gitignore`, se crea solo al arrancar). Nombre en disco generado por el servidor; el original
+solo en BD. Se descargan únicamente por la API con sesión de RRHH/admin.
+`middleware/uploadSoportesRrhh.js` (antes `uploadSoportesNovedad.js`; desde §35 lo comparten novedades y traspasos): PDF, JPG, PNG, WEBP (mime **y** extensión deben coincidir),
+máx. 10 MB, errores → 400 con mensaje claro.
+
+**Endpoints** (`verificarRecursosHumanos`):
+- `GET    /api/users-company/novedades/:id/soportes` — los que aplican al tipo (`aplica = 1`, con
+  archivo si lo hay) + los cargados que ya no aplican si se cambió el tipo (`aplica = 0`).
+- `POST   /api/users-company/novedades/:id/soportes/:tipoSoporteId` — campo `archivo`; reemplaza
+  el anterior (y lo borra del disco). 400 si el soporte no aplica al tipo de la novedad.
+- `GET    /api/users-company/novedades/:id/soportes/:tipoSoporteId/archivo` — descarga (`inline`).
+- `DELETE /api/users-company/novedades/:id/soportes/:tipoSoporteId`.
+- Borrar la novedad borra también sus archivos del disco.
+- `GET /catalogos`: `tipos_novedad` ahora trae `vigente` y `soportes` (ids), y hay
+  `tipos_soporte_novedad`. El listado de novedades trae `soportes_requeridos`/`soportes_cargados`.
+
+**Frontend:**
+- `NovedadForm.jsx`: empleado con `ComboboxBuscable` (texto "Nombre — cédula", así se busca por
+  cualquiera de los dos; deshabilitado al editar). El selector de tipo solo ofrece los vigentes (+ el
+  ya guardado). La sección "Soportes documentales" muestra solo los que aplican al tipo elegido, con
+  Cargar / Ver / Reemplazar / Eliminar. Los archivos se suben **después** de guardar la novedad
+  (necesitan su id); si alguno falla, el modal queda abierto con el error y un segundo "Guardar"
+  actualiza la misma novedad.
+- **No se bloquea guardar sin soportes**: suelen llegar después (para eso está `fecha_recibido`).
+- `NovedadesRRHH.jsx`: el contador pasa de "x/6" a "cargados/requeridos" (verde completo, ámbar
+  parcial) y el detalle lista los soportes que aplican; los cargados se abren con un clic.
+- `src/utils/soportesNovedad.js` (validación en el navegador y apertura con token vía blob) y
+  `ComboboxBuscable` ganó `disabled` y `unidad` (el pie decía siempre "ciudades").
+
+**Verificado** (backend local, no en el navegador):
+- Migración corrida dos veces sin cambios; los 15 tipos vigentes y las 39 celdas "SI" coinciden
+  exactamente con la hoja (comparación por script, 0 faltan, 0 sobran).
+- Prueba de punta a punta por la API (26/26): PDF y PNG → 201; TXT, `.pdf` con mime de texto,
+  `.exe` con mime PDF y PDF de 11 MB → 400; soporte que no aplica → 400; sin token → 401 (subida y
+  descarga); el archivo no se sirve por `/api/files`; descarga devuelve los mismos bytes; reemplazo
+  borra el archivo viejo; cambio de tipo deja los cargados como `aplica = 0` y el listado en 0/3;
+  borrar la novedad deja el disco limpio.
+- `npm test` 132/132, `eslint` del frontend sin errores, `vite build` ok.
+
+**Para producción:** correr `069` antes o junto con el deploy del backend (sin ella, `/catalogos` y
+el listado de novedades fallan por las tablas inexistentes). El proceso de pm2 necesita permiso de
+escritura en `/root/gestor-tecnico-backend/storage/novedades/`, y ese directorio entra en los
+respaldos del servidor (no está en git).
+
+
+## 35. Sesión 2026-10-21 — Traspasos por tipo: campos, documentos y alertas (hoja "TRASPASOS")
+
+**Pedido:** la hoja "TRASPASOS" de `Criterios (1).xlsx` define el flujo: 6 tipos de traspaso, qué
+documentos aplican a cada uno ("SI"/"NO"), qué "información nueva" se llena en cada tipo y dos alertas.
+
+| Tipo | Documento que aplica | Información nueva | Alerta |
+|---|---|---|---|
+| Encargo | — | cargo nuevo, BNP nuevo, fecha inicio, **fecha fin**, destino* | — |
+| Ratificación | Formato de evaluación | cargo nuevo, salario nuevo, fecha inicio, destino* | al director: evaluación de desempeño del encargo |
+| No ratificación | Formato de evaluación | ídem | ídem |
+| Trabajo en casa | Formato de trabajo en casa | modalidad nueva, fechas inicio/fin de trabajo en casa, diadema, equipo de cómputo | 7 días antes del retorno |
+| Cambio de cargo | Otro sí al contrato | cargo nuevo, salario nuevo, fecha inicio, destino* | — |
+| Cambio de salario | Otro sí al contrato | cargo, salario nuevo, fecha inicio, destino* | — |
+
+\*destino = área, campaña, centro de costo, cargo SuccessFactors, usuario SSFF, jefe de área, jefe
+inmediato y modalidad. "Información actual" es igual para todos: tipo de contrato, ciudad donde labora,
+fecha de ingreso, área, campaña, centro de costo, cargo SF y usuario SSFF anteriores, cargo, salario,
+BNP, jefe de área, jefe inmediato y modalidad.
+
+**Migración `070_traspasos_por_tipo.sql`** (por código, idempotente):
+- `tipo_traspaso` (con `codigo`: ENCARGO, RATIFICACION, NO_RATIFICACION, TRABAJO_CASA, CAMBIO_CARGO,
+  CAMBIO_SALARIO) y `traspaso.tipo_traspaso_id`.
+- Campos que faltaban en `traspaso` para la información actual: `tipo_contrato_anterior_id`,
+  `ciudad_anterior_id`, `fecha_ingreso_anterior`, `modalidad_anterior_id` (la `modalidad_idmodalidad`
+  que ya existía es la nueva).
+- `tipo_soporte_traspaso` (3) + `tipo_traspaso_soporte` (matriz) + `traspaso_soporte` (archivos en
+  `storage/traspasos/`, privados igual que los de novedades, §34).
+- `alerta_traspaso`: destinatario por ficha (`users_company`), `fecha_alerta` (Bogotá), `leida_en`,
+  `resuelta_en`.
+
+**Reglas** — `utils/camposTraspaso.js` (backend, con pruebas en `tests/rrhh/camposTraspaso.test.js`)
+y su copia `src/utils/traspasos.js` (frontend; si cambia una, cambiar la otra):
+- El backend exige el tipo y los obligatorios de cada tipo, y deja en NULL la información nueva que
+  no aplica al tipo (p. ej. salario nuevo en un encargo).
+- Trabajo en casa no tiene "fecha inicio" propia: `fecha_inicio`/`fecha_fin` = las del trabajo en casa.
+- `ratificacion` sale del tipo (1 solo en Ratificación); ya no es un checkbox.
+- No están en la hoja y se ocultan, pero se conservan al editar: `estado` y bono de cafetería.
+
+**Alertas** (`models/Traspaso.js → sincronizarAlertas`, en la misma transacción del guardado):
+- Ratificación / no ratificación: al guardar se crea una alerta para el **director de área** del
+  contrato del empleado (si no tiene, el **jefe de área**). Sigue activa hasta que se carga el formato
+  de evaluación (se resuelve sola; si se borra el formato, se reabre). RRHH puede "Reenviar
+  recordatorio" (la vuelve a dejar sin leer).
+- Trabajo en casa: una alerta para el **jefe inmediato** (el nuevo si se indicó, si no el actual)
+  programada 7 días antes de `fecha_fin_trabajo_casa`; se reprograma si cambia la fecha y deja de
+  mostrarse cuando pasa la fecha de retorno.
+- Si el traspaso cambia de tipo, sus alertas pendientes que ya no corresponden se borran.
+- **Dónde se ven:** el destinatario, en la **campana del portal de asistencia**
+  (`CampanaAlertas.jsx`; `GET /api/asistencia/mis-alertas`, `POST /mis-alertas/:id/leida`, en capas:
+  `alertaTraspasoRepository` → `alertaService` → `alertaController`), entre con su cédula o con su
+  usuario. RRHH, en el panel "Alertas" de la pantalla Traspasos (`GET /users-company/traspasos/alertas`,
+  con estado programada / enviada / leída). **No hay correo:** el backend no tiene SMTP configurado.
+- La campana antes tenía un punto fijo decorativo; ahora el punto (`.ai-bell--con-alertas`) solo sale
+  con alertas sin leer. La campana de `RecursosHumanosLayout` sigue sin función y ya no muestra punto.
+
+**Endpoints nuevos** (RRHH): `GET /traspasos/alertas`, `POST /traspasos/:id/alertas/evaluacion`,
+`GET|POST|DELETE /traspasos/:id/soportes[/:tipoSoporteId]`, `GET .../:tipoSoporteId/archivo`.
+`/catalogos` trae `tipos_traspaso` (con `codigo` y `soportes`) y `tipos_soporte_traspaso`.
+
+**Frontend:** `TraspasoForm.jsx` reescrito — empleado buscable por nombre o cédula, tipo de traspaso,
+"Información actual" precargada del contrato, "Información nueva" solo con los campos del tipo
+(jefes filtrados por campaña + cargo nuevos, como en el alta), aviso de a quién y cuándo llega la
+alerta y la sección "Documentos". `Traspasos.jsx`: columna Tipo, contador de documentos, detalle con
+la información actual y los documentos, y panel de alertas. La sección de soportes de novedades y
+traspasos es un solo componente (`SoportesDocumentales.jsx`, con `SoportesResumen` para el detalle
+de las tablas) y `src/utils/soportesRrhh.js` reemplaza a `soportesNovedad.js`.
+
+**No hace (a propósito):** guardar un traspaso **no modifica el contrato** del empleado (cargo,
+salario, campaña, jefes siguen igual en su ficha); es un registro. El traspaso existente sin tipo
+(anterior a la 070) se lista como "Sin tipo" y al editarlo pide elegir uno.
+
+**Verificado** (backend local, no en el navegador; el backend de desarrollo estaba apagado, así que la
+prueba monta las rutas en un Express dentro del propio script):
+- Migración corrida dos veces sin cambios; matriz igual a la hoja.
+- Prueba de punta a punta (45/45): validación por tipo; NULL de lo que no aplica; alerta de
+  ratificación al jefe de área (cuenta por cédula), invisible e intocable para otro empleado (404),
+  leída/reenviada/resuelta al cargar el formato/reabierta al borrarlo; alerta de trabajo en casa
+  programada 7 días antes, reprogramada al cambiar la fecha y borrada al cambiar de tipo; documentos
+  (PDF/imagen sí, TXT no, documento que no aplica → 400, descarga con token y sin token 401); borrado
+  en cascada y disco limpio; los soportes de novedades siguen funcionando.
+- `npm test` 139/139, `eslint` sin errores nuevos, `vite build` ok.
+
+**Para producción:** correr `070` (después de 068 y 069) junto con el deploy. El proceso de pm2 necesita
+escribir en `storage/traspasos/` además de `storage/novedades/`.

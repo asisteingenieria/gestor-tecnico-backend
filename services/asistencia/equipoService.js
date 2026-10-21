@@ -6,6 +6,7 @@ const { fechaLaboral } = require('../../utils/fechaBogota');
 const { NoAutorizadoError, NoEncontradoError } = require('../../errors/AppError');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const cierreService = require('./cierreService');
+const asislockVista = require('./asislockVista');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -28,6 +29,7 @@ async function equipo(directorUsersCompanyId) {
     const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
     const ahora = new Date();
     const fecha = fechaLaboral(ahora);
+    const asislockPorEmpleado = await asislockVista.resumenesDelDia(empleados.map((e) => e.users_company_id), fecha);
 
     return Promise.all(empleados.map(async (empleado) => {
         const jornada = await jornadaRepo.findPorFecha(empleado.users_company_id, fecha);
@@ -41,7 +43,8 @@ async function equipo(directorUsersCompanyId) {
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             pausa_activa: estadoCalculado.pausaActiva,
             desconexion_activa: estadoCalculado.desconexionActiva,
-            alertas: estadoCalculado.alertas
+            alertas: estadoCalculado.alertas,
+            asislock: asislockPorEmpleado[empleado.users_company_id] ?? null
         };
     }));
 }
@@ -67,6 +70,7 @@ async function trazabilidadDe({ directorUsersCompanyId, empleadoId, fecha }) {
     return {
         fecha,
         jornada: { ...jornada, ...estadoCalculado },
+        asislock: await asislockVista.delDia(empleadoId, fecha),
         eventos: eventos.map((e) => ({
             tipo: e.tipo,
             ocurrido_en: e.ocurrido_en.toISOString(),
