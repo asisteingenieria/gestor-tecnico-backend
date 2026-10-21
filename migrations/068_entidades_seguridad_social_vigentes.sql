@@ -21,6 +21,12 @@
 -- explícito (CLAUDE.md, error 1267). Los WHERE por PK > 0 son para el "safe update mode" de
 -- MySQL Workbench.
 
+-- Workbench corre con SQL_SAFE_UPDATES = 1 y en producción rechazó un UPDATE ... JOIN aunque
+-- tenía `WHERE <pk> > 0` (error 1175: el optimizador no usó la llave). Se apaga solo durante
+-- esta migración y se restaura el valor que tenía la sesión.
+SET @safe_updates_previo := @@SESSION.SQL_SAFE_UPDATES;
+SET SESSION SQL_SAFE_UPDATES = 0;
+
 -- 1. Columna `vigente` ---------------------------------------------------------------------
 SET @existe := (SELECT COUNT(*) FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'entidad_seguridad_social' AND COLUMN_NAME = 'vigente');
@@ -154,3 +160,5 @@ DROP TEMPORARY TABLE IF EXISTS `tmp_entidades_oficiales`;
 -- 6. Verificación: 19 EPS, 6 AFP, 4 CESANTIAS, 2 CAJA, 1 ARL vigentes ------------------------
 SELECT `tipo`, SUM(`vigente`) AS vigentes, SUM(1 - `vigente`) AS no_vigentes
   FROM `entidad_seguridad_social` GROUP BY `tipo` ORDER BY `tipo`;
+
+SET SESSION SQL_SAFE_UPDATES = @safe_updates_previo;

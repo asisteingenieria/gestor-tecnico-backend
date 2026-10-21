@@ -20,6 +20,12 @@
 -- Todo va por nombre, nunca por ID. Comparaciones con COLLATE explícito (CLAUDE.md, error 1267).
 -- Los WHERE por PK > 0 son para el "safe update mode" de MySQL Workbench. Idempotente.
 
+-- Workbench corre con SQL_SAFE_UPDATES = 1 y en producción rechazó un UPDATE ... JOIN aunque
+-- tenía `WHERE <pk> > 0` (error 1175: el optimizador no usó la llave). Se apaga solo durante
+-- esta migración y se restaura el valor que tenía la sesión.
+SET @safe_updates_previo := @@SESSION.SQL_SAFE_UPDATES;
+SET SESSION SQL_SAFE_UPDATES = 0;
+
 -- 1. tipo_novedad.vigente -------------------------------------------------------------------
 SET @existe := (SELECT COUNT(*) FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tipo_novedad' AND COLUMN_NAME = 'vigente');
@@ -134,3 +140,5 @@ SELECT n.`nombre` AS tipo_novedad, n.`vigente`,
   LEFT JOIN `tipo_soporte_novedad` s ON s.`idtipo_soporte_novedad` = tns.`tipo_soporte_novedad_id`
  GROUP BY n.`idtipo_novedad`, n.`nombre`, n.`vigente`
  ORDER BY n.`vigente` DESC, n.`idtipo_novedad`;
+
+SET SESSION SQL_SAFE_UPDATES = @safe_updates_previo;
