@@ -8,7 +8,8 @@ const { soportesNovedad, soportesTraspaso } = require('../middleware/uploadSopor
 
 // Gestión completa del módulo de empleados: exclusiva de Recursos Humanos (y admin).
 const verificarRecursosHumanos = (req, res, next) => {
-    if (!['recursosHumanos', 'admin'].includes(req.user.role)) {
+    // financiera administra RRHH igual que recursosHumanos (asistencia.md §32).
+    if (!['recursosHumanos', 'financiera', 'admin'].includes(req.user.role)) {
         return res.status(403).json({
             success: false,
             message: 'Acceso denegado. Solo Recursos Humanos puede acceder a esta funcionalidad.'
@@ -20,7 +21,7 @@ const verificarRecursosHumanos = (req, res, next) => {
 // Lectura del listado de empleados: además de RRHH, gestorActivos la necesita
 // (solo lectura) para el selector de "agente asignado" al crear/editar un activo.
 const verificarLecturaEmpleados = (req, res, next) => {
-    if (!['gestorActivos', 'recursosHumanos', 'admin'].includes(req.user.role)) {
+    if (!['gestorActivos', 'recursosHumanos', 'financiera', 'admin'].includes(req.user.role)) {
         return res.status(403).json({
             success: false,
             message: 'Acceso denegado.'

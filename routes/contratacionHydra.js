@@ -18,7 +18,7 @@ const {
 } = require('../validators/contratacionHydraSchemas');
 
 // Contratación desde Hydra — lado de RRHH (conexionhydra.md §8). Exclusivo de
-// recursosHumanos (y admin).
+// recursosHumanos, financiera (asistencia.md §32) y admin.
 
 router.use(verifyToken, isRecursosHumanos);
 

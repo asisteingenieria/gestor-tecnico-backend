@@ -75,7 +75,21 @@ async function insertarAsignada({ usersCompanyId, fecha, minutos, motivo, aproba
     return resultado.insertId;
 }
 
+// Minutos de horas extra aprobados por ficha en un rango de fechas (reporte mensual, §32).
+async function minutosAprobadosPorEmpleado(usersCompanyIds, desde, hasta, conn = db) {
+    if (usersCompanyIds.length === 0) return {};
+    const [filas] = await conn.query(
+        `SELECT users_company_id, SUM(COALESCE(minutos_aprobados, minutos_estimados)) AS minutos
+         FROM hora_extra
+         WHERE users_company_id IN (?) AND estado = 'aprobada' AND fecha BETWEEN ? AND ?
+         GROUP BY users_company_id`,
+        [usersCompanyIds, desde, hasta]
+    );
+    return Object.fromEntries(filas.map((f) => [f.users_company_id, Number(f.minutos)]));
+}
+
 module.exports = {
+    minutosAprobadosPorEmpleado,
     findAprobadasPorEmpleadoYFecha,
     insertarSolicitud,
     findPorEmpleado,

@@ -104,10 +104,15 @@ const canDirigirEquipo = async (req, res, next) => {
 };
 // recursosHumanos: su cuenta ya está vinculada a su ficha (es el "analista encargado" de las
 // altas), así que ve su propia asistencia con ella en vez de tener cuenta de empleado aparte.
-const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'recursosHumanos', 'admin']);
+// financiera (§32) también tiene su cuenta vinculada a su ficha y ve su propia asistencia.
+const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'recursosHumanos', 'financiera', 'admin']);
 
 // Middleware para contratación desde Hydra (conexionhydra.md §8)
-const isRecursosHumanos = verifyRole(['recursosHumanos', 'admin']);
+// financiera administra RRHH igual que recursosHumanos (asistencia.md §32).
+const isRecursosHumanos = verifyRole(['recursosHumanos', 'financiera', 'admin']);
+
+// financiera: recibe y revisa los reportes de horas extras y ve la trazabilidad de todos (§32).
+const isFinanciera = verifyRole(['financiera', 'admin']);
 
 module.exports = {
     verifyToken,
@@ -140,6 +145,7 @@ module.exports = {
     isEmpleado,
     canDirigirEquipo,
     canRegistrarAsistencia,
+    isFinanciera,
     // Middleware para contratación desde Hydra
     isRecursosHumanos
 };

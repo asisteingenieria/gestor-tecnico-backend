@@ -133,7 +133,45 @@ const eventoManualSchema = {
     }
 };
 
+// Reporte mensual de horas extras (§32). El formato AAAA-MM del periodo y el contenido de cada
+// fila los valida el dominio, que da mensajes por empleado.
+const periodoQuerySchema = {
+    query: { periodo: { requerido: true, tipo: 'texto' } }
+};
+
+const guardarReporteHorasExtraSchema = {
+    body: {
+        periodo: { requerido: true, tipo: 'texto' },
+        filas: { requerido: true, tipo: 'array' }
+    }
+};
+
+const devolverReporteSchema = {
+    params: { id: { requerido: true, tipo: 'entero' } },
+    body: { observacion: { requerido: true, tipo: 'texto' } }
+};
+
+const fechaLimiteSchema = {
+    params: { periodo: { requerido: true, tipo: 'texto' } },
+    body: { fecha_limite: { requerido: true, tipo: 'fecha' } }
+};
+
+const empleadosFinancieraQuerySchema = {
+    query: { campania_id: { tipo: 'entero' } }
+};
+
+const jornadasEmpleadoSchema = {
+    params: { empleadoId: { requerido: true, tipo: 'entero' } },
+    query: { desde: { tipo: 'fecha' }, hasta: { tipo: 'fecha' } }
+};
+
 module.exports = {
+    periodoQuerySchema,
+    guardarReporteHorasExtraSchema,
+    devolverReporteSchema,
+    fechaLimiteSchema,
+    empleadosFinancieraQuerySchema,
+    jornadasEmpleadoSchema,
     iniciarPausaSchema,
     trazabilidadParamsSchema,
     rangoQuerySchema,

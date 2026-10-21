@@ -78,4 +78,29 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     return filas;
 }
 
-module.exports = { directorUserIdDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };
+// Datos de cada persona del equipo como van en el reporte de horas extras (columnas del formato
+// V.3): documento, nombre completo, campaña, centro de costo y cargo de su contrato activo.
+async function datosParaReporte(directorUsersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT uc.id AS users_company_id, uc.numero_identificacion AS documento,
+                TRIM(CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido)) AS nombre,
+                cam.nombre AS campania, cc.nombre AS centro_costo, car.nombre AS cargo
+         FROM contrato c
+         JOIN users_company uc ON uc.id = c.users_company_id
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
+         LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?)
+           -- si la persona tuviera dos contratos activos con este jefe, el más reciente
+           AND c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2
+                                JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
+                               WHERE c2.users_company_id = c.users_company_id AND c2.jefe_area_id = c.jefe_area_id
+                                 AND ec2.nombre IN (?, ?))
+         ORDER BY nombre`,
+        [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas;
+}
+
+module.exports = { datosParaReporte, directorUserIdDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };

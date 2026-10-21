@@ -1,12 +1,21 @@
 const alertaRepo = require('../../repositories/asistencia/alertaTraspasoRepository');
+const reporteHorasExtraService = require('./reporteHorasExtraService');
 const { fechaLaboral } = require('../../utils/fechaBogota');
 const { NoEncontradoError } = require('../../errors/AppError');
 
-// Campana del portal: las alertas de traspasos dirigidas a la ficha del usuario (migración 070).
+// Campana del portal: las alertas de traspasos dirigidas a la ficha del usuario (migración 070)
+// y los recordatorios del reporte de horas extras (072).
 // Un usuario sin ficha no tiene alertas (no es un error: la campana sale vacía).
 async function misAlertas({ usersCompanyId }) {
     if (!usersCompanyId) return [];
-    return alertaRepo.findVisiblesPara(usersCompanyId, fechaLaboral(new Date()));
+    const hoy = fechaLaboral(new Date());
+    // A los jefes de área, además, los recordatorios del reporte de horas extras (§32). Esos
+    // no se marcan como leídos: desaparecen al enviar el reporte.
+    const [traspasos, recordatorios] = await Promise.all([
+        alertaRepo.findVisiblesPara(usersCompanyId, hoy),
+        reporteHorasExtraService.recordatoriosPara(usersCompanyId, hoy)
+    ]);
+    return [...recordatorios, ...traspasos];
 }
 
 async function marcarLeida({ usersCompanyId, idalerta }) {
