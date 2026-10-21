@@ -20,4 +20,18 @@ function combinarFechaHora(fecha, hora) {
     return new Date(comoSiFueraUTC.getTime() + OFFSET_BOGOTA_MINUTOS * 60 * 1000);
 }
 
-module.exports = { fechaLaboral, combinarFechaHora };
+// Suma (o resta) días a una fecha 'YYYY-MM-DD', sin zona horaria de por medio.
+function sumarDias(fecha, dias) {
+    const d = new Date(`${normalizarFecha(fecha)}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + dias);
+    return d.toISOString().slice(0, 10);
+}
+
+// Primer y último día de un mes 'YYYY-MM'.
+function rangoDelMes(periodo) {
+    const [anio, mes] = periodo.split('-').map(Number);
+    const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+    return { desde: `${periodo}-01`, hasta: `${periodo}-${String(ultimo).padStart(2, '0')}` };
+}
+
+module.exports = { fechaLaboral, combinarFechaHora, sumarDias, rangoDelMes, normalizarFecha };

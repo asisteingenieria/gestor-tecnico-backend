@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, canRegistrarAsistencia, canDirigirEquipo } = require('../middleware/auth');
+const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, isFinanciera } = require('../middleware/auth');
 const validar = require('../middleware/validar');
 const asyncHandler = require('../middleware/asyncHandler');
 
@@ -10,6 +10,8 @@ const horaExtraController = require('../controllers/asistencia/horaExtraControll
 const horarioController = require('../controllers/asistencia/horarioController');
 const equipoController = require('../controllers/asistencia/equipoController');
 const alertaController = require('../controllers/asistencia/alertaController');
+const reporteHorasExtraController = require('../controllers/asistencia/reporteHorasExtraController');
+const financieraController = require('../controllers/asistencia/financieraController');
 
 const {
     iniciarPausaSchema,
@@ -29,7 +31,13 @@ const {
     aprobarHoraExtraSchema,
     rechazarHoraExtraSchema,
     asignarHoraExtraSchema,
-    eventoManualSchema
+    eventoManualSchema,
+    periodoQuerySchema,
+    guardarReporteHorasExtraSchema,
+    devolverReporteSchema,
+    fechaLimiteSchema,
+    empleadosFinancieraQuerySchema,
+    jornadasEmpleadoSchema
 } = require('../validators/asistenciaSchemas');
 
 router.use(verifyToken);
@@ -71,5 +79,21 @@ router.get('/horas-extra', canDirigirEquipo, validar(bandejaHorasExtraQuerySchem
 router.put('/horas-extra/:id/aprobar', canDirigirEquipo, validar(aprobarHoraExtraSchema), asyncHandler(horaExtraController.aprobar));
 router.put('/horas-extra/:id/rechazar', canDirigirEquipo, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
 router.post('/horas-extra/asignar', canDirigirEquipo, validar(asignarHoraExtraSchema), asyncHandler(horaExtraController.asignar));
+
+// Reporte mensual de horas extras a financiera (§32)
+router.get('/reporte-horas-extra', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(reporteHorasExtraController.miReporte));
+router.put('/reporte-horas-extra', canDirigirEquipo, validar(guardarReporteHorasExtraSchema), asyncHandler(reporteHorasExtraController.guardarBorrador));
+router.post('/reporte-horas-extra/enviar', canDirigirEquipo, validar(guardarReporteHorasExtraSchema), asyncHandler(reporteHorasExtraController.enviar));
+
+// --- Financiera (§32): reportes de horas extras y trazabilidad de todos por campaña ---
+router.get('/financiera/reportes-horas-extra', isFinanciera, validar(periodoQuerySchema), asyncHandler(reporteHorasExtraController.resumenDelPeriodo));
+router.get('/financiera/reportes-horas-extra/:id', isFinanciera, validar(idParamSchema), asyncHandler(reporteHorasExtraController.detalle));
+router.put('/financiera/reportes-horas-extra/:id/aprobar', isFinanciera, validar(idParamSchema), asyncHandler(reporteHorasExtraController.aprobar));
+router.put('/financiera/reportes-horas-extra/:id/devolver', isFinanciera, validar(devolverReporteSchema), asyncHandler(reporteHorasExtraController.devolver));
+router.put('/financiera/periodos/:periodo', isFinanciera, validar(fechaLimiteSchema), asyncHandler(reporteHorasExtraController.fijarFechaLimite));
+router.get('/financiera/campanias', isFinanciera, asyncHandler(financieraController.campanias));
+router.get('/financiera/empleados', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.empleados));
+router.get('/financiera/empleados/:empleadoId/jornadas', isFinanciera, validar(jornadasEmpleadoSchema), asyncHandler(financieraController.jornadasDe));
+router.get('/financiera/empleados/:empleadoId/jornada/:fecha/trazabilidad', isFinanciera, validar(trazabilidadEquipoParamsSchema), asyncHandler(financieraController.trazabilidadDe));
 
 module.exports = router;

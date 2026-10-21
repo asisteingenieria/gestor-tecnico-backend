@@ -52,13 +52,23 @@ async function equipo(directorUsersCompanyId) {
 async function jornadasDe({ directorUsersCompanyId, empleadoId, desde, hasta }) {
     requireUsersCompanyId(directorUsersCompanyId);
     await assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
-    await cierreService.normalizarRangoSiEsPasado(empleadoId, desde, hasta, new Date());
-    return jornadaRepo.findRango(empleadoId, desde, hasta);
+    return jornadasDeEmpleado(empleadoId, desde, hasta);
 }
 
 async function trazabilidadDe({ directorUsersCompanyId, empleadoId, fecha }) {
     requireUsersCompanyId(directorUsersCompanyId);
     await assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
+    return trazabilidadDeEmpleado(empleadoId, fecha);
+}
+
+// Sin chequeo de permisos: quien llama ya validó que puede ver a este empleado (el jefe con
+// assertEmpleadoACargo, financiera por su rol).
+async function jornadasDeEmpleado(empleadoId, desde, hasta) {
+    await cierreService.normalizarRangoSiEsPasado(empleadoId, desde, hasta, new Date());
+    return jornadaRepo.findRango(empleadoId, desde, hasta);
+}
+
+async function trazabilidadDeEmpleado(empleadoId, fecha) {
     await cierreService.normalizarSiEsPasada(empleadoId, fecha, new Date());
 
     const jornada = await jornadaRepo.findPorFecha(empleadoId, fecha);
@@ -141,6 +151,8 @@ module.exports = {
     equipo,
     jornadasDe,
     trazabilidadDe,
+    jornadasDeEmpleado,
+    trazabilidadDeEmpleado,
     estadisticasEquipo,
     registrarEventoManual
 };

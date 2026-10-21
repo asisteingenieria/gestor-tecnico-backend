@@ -2,7 +2,7 @@ const User = require('../models/User');
 const UserCompany = require('../models/UserCompany');
 const CuentaEmpleado = require('../models/CuentaEmpleado');
 
-const ROLES_VINCULADOS_A_EMPLEADO = ['director_operaciones', 'empleado', 'recursosHumanos'];
+const ROLES_VINCULADOS_A_EMPLEADO = ['director_operaciones', 'empleado', 'recursosHumanos', 'financiera'];
 
 // @desc    Obtener todos los usuarios
 // @route   GET /api/users
@@ -96,10 +96,10 @@ exports.createUser = async (req, res) => {
 
     // director_operaciones ya no se crea (asistencia.md §26); updateUser lo sigue aceptando
     // para editar las cuentas que ya existen.
-    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'empleado'];
+    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'financiera', 'empleado'];
     if (!validRoles.includes(role)) {
         return res.status(400).json({
-            msg: 'Rol no válido. Debe ser: admin, coordinador, supervisor, technician, jefe_operaciones, administrativo, gestorActivos, tecnicoInventario, disenador, recursosHumanos, director_operaciones o empleado'
+            msg: 'Rol no válido. Debe ser: admin, coordinador, supervisor, technician, jefe_operaciones, administrativo, gestorActivos, tecnicoInventario, disenador, recursosHumanos, financiera, director_operaciones o empleado'
         });
     }
 
@@ -158,8 +158,8 @@ exports.createUser = async (req, res) => {
             role
         };
 
-        // Para gestorActivos, tecnicoInventario, disenador y recursosHumanos, no asignar sede ni departamento
-        if (role === 'gestorActivos' || role === 'tecnicoInventario' || role === 'disenador' || role === 'recursosHumanos') {
+        // Para gestorActivos, tecnicoInventario, disenador, recursosHumanos y financiera, no asignar sede ni departamento
+        if (role === 'gestorActivos' || role === 'tecnicoInventario' || role === 'disenador' || role === 'recursosHumanos' || role === 'financiera') {
             userData.sede = null;
             userData.departamento = null;
         } else {
@@ -218,10 +218,10 @@ exports.updateUser = async (req, res) => {
         });
     }
 
-    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'director_operaciones', 'empleado'];
+    const validRoles = ['admin', 'coordinador', 'supervisor', 'technician', 'jefe_operaciones', 'administrativo', 'gestorActivos', 'tecnicoInventario', 'disenador', 'recursosHumanos', 'financiera', 'director_operaciones', 'empleado'];
     if (!validRoles.includes(role)) {
         return res.status(400).json({
-            msg: 'Rol no válido. Debe ser: admin, coordinador, supervisor, technician, jefe_operaciones, administrativo, gestorActivos, tecnicoInventario, disenador, recursosHumanos, director_operaciones o empleado'
+            msg: 'Rol no válido. Debe ser: admin, coordinador, supervisor, technician, jefe_operaciones, administrativo, gestorActivos, tecnicoInventario, disenador, recursosHumanos, financiera, director_operaciones o empleado'
         });
     }
 
@@ -282,8 +282,8 @@ exports.updateUser = async (req, res) => {
             role
         };
         
-        // Para gestorActivos, tecnicoInventario, disenador y recursosHumanos, no asignar sede ni departamento
-        if (role === 'gestorActivos' || role === 'tecnicoInventario' || role === 'disenador' || role === 'recursosHumanos') {
+        // Para gestorActivos, tecnicoInventario, disenador, recursosHumanos y financiera, no asignar sede ni departamento
+        if (role === 'gestorActivos' || role === 'tecnicoInventario' || role === 'disenador' || role === 'recursosHumanos' || role === 'financiera') {
             updateData.sede = null;
             updateData.departamento = null;
         } else {
