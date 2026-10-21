@@ -6,7 +6,7 @@ const validarCuerpo = require('../middleware/validarCuerpo');
 const asyncHandler = require('../middleware/asyncHandler');
 const { AppError, ValidacionError } = require('../errors/AppError');
 const asislockController = require('../controllers/asistencia/asislockController');
-const { validarEnvioAsislock } = require('../validators/asislockSchemas');
+const { validarEnvioAsislock, validarCredencialPantallaGris, validarCambioClavePantallaGris } = require('../validators/asislockSchemas');
 
 // API máquina-a-máquina para AsisLock (asistencia.md §18). Se autentica antes de parsear el
 // cuerpo, con su propio límite de tamaño (un reenvío de 500 registros supera el límite por
@@ -17,6 +17,11 @@ router.use(express.json({ limit: config.limiteCuerpo }));
 
 router.get('/salud', asyncHandler(asislockController.salud));
 router.post('/registros', validarCuerpo(validarEnvioAsislock), asyncHandler(asislockController.recibirRegistros));
+
+// Usuarios de la pantalla gris: AsisLock valida cada inicio de sesión contra Gestor (§31).
+router.post('/pantalla-gris/validar', validarCuerpo(validarCredencialPantallaGris), asyncHandler(asislockController.validarPantallaGris));
+router.post('/pantalla-gris/cambiar-clave', validarCuerpo(validarCambioClavePantallaGris), asyncHandler(asislockController.cambiarClavePantallaGris));
+router.get('/pantalla-gris/usuarios', asyncHandler(asislockController.listarUsuariosPantallaGris));
 
 router.use((err, req, res, next) => {
     if (err.type === 'entity.too.large') {

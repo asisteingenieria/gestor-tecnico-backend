@@ -1888,3 +1888,65 @@ servidor aparte y pasar `E2E_BASE`: con poca memoria tarda más de los 10 s que 
 `eslint` sin errores y `vite build` ok. No se probó en el navegador.
 
 **Para producción:** solo código (backend + frontend con rebuild), sin migración.
+
+## 31. Sesión 2026-10-21 — Usuarios de la pantalla gris de AsisLock (migración 071)
+
+**Pedido:** todo empleado que se contrate debe quedar con un usuario para la pantalla gris de
+AsisLock, enviado a AsisLock por API, y AsisLock debe validar contra Gestor el inicio de sesión.
+**Son credenciales distintas** de la cuenta por cédula del portal (`cuenta_empleado`, §24): cada
+una tiene su propia clave.
+
+**Decisiones:**
+- Tabla propia `usuario_pantalla_gris` (una por ficha): usuario = cédula (la misma que AsisLock ya
+  envía en `registros`), clave inicial = cédula en bcrypt, `debe_cambiar_password = 1`.
+- **AsisLock no guarda claves**: valida cada inicio de sesión con `POST /pantalla-gris/validar`.
+  El aviso a AsisLock nunca lleva la clave.
+- 5 claves erradas seguidas bloquean 15 minutos (`config/integracionAsislock.js` → `pantallaGris`;
+  son de la integración, no de `asistencia_parametro`). Usuario inexistente y clave errada
+  responden igual (`credenciales_invalidas`) y tardan igual (bcrypt contra un hash señuelo).
+- Quien no tiene contrato vigente (retirado/inactivo/sin contrato) responde `usuario_inactivo`, y
+  solo si dio la clave correcta. Se calcula en vivo desde el último contrato: no hay columna
+  `activo` que mantener.
+
+**Backend:**
+- `domain/asistencia/pantallaGris.js`: `contratoVigente`, `estaBloqueado`, `decidirValidacion`,
+  `motivoClaveNuevaInvalida`, `cuerpoAviso`.
+- `repositories/asistencia/usuarioPantallaGrisRepository.js` y `asislockEnvioRepository.js`
+  (outbox `asislock_envio_saliente`, mismo esquema que el de Hydra).
+- `services/asistencia/pantallaGrisService.js`: `crearEnConexion` (crea y encola `alta`; no lanza,
+  devuelve el motivo, como `CuentaEmpleado.crearEnConexion`), `avisarEnConexion` (`baja`/
+  `reactivacion`), `eliminarEnConexion`, `validar`, `cambiarClave`, `listarUsuarios`.
+- `services/asistencia/asislockDespachoService.js`: `POST <ASISLOCK_CALLBACK_URL>/usuarios` con
+  `x-api-key` e `Idempotency-Key`; reutiliza `decidirResultadoEnvio` del outbox de Hydra.
+- Ganchos, todos dentro de la transacción existente: `UserCompany.crearEnConexion` (alta manual,
+  Excel e Hydra), `Retiro.registrar` (`baja`), `Retiro.reactivar` (`reactivacion`),
+  `UserCompany.delete` (`baja` y borra el usuario).
+- Endpoints nuevos en `/api/integraciones/asislock/v1` (misma `x-api-key`):
+  `POST /pantalla-gris/validar`, `POST /pantalla-gris/cambiar-clave`, `GET /pantalla-gris/usuarios`.
+- Scripts: `node scripts/crearUsuariosPantallaGris.js [--aplicar]` (fichas vigentes que ya
+  existían; simula por defecto; en local: 398) y `node scripts/despacharEnviosAsislock.js` (cron
+  cada minuto). `.env`: `ASISLOCK_CALLBACK_URL` y `ASISLOCK_CALLBACK_API_KEY`; sin ellas los avisos
+  esperan en el outbox.
+- Contrato y guía de implementación para el equipo de AsisLock: `docs/asislock/API_AsisLock.md` §8
+  (tareas de su lado en §8.1, endpoint de avisos con tabla y ejemplo Flask en §8.3 —el upsert que
+  ignora avisos atrasados se probó en MySQL—, mensajes por motivo en §8.4-§8.5, intercambio de
+  URL/claves y orden de puesta en marcha en §8.8).
+
+**Verificado:** unitarios 150/150 (7 nuevos). Prueba local contra un servidor en 5099 y un AsisLock
+falso, 26/26: alta sin duplicar, validación con clave inicial, inexistente, 400 y 401, bloqueo a
+los 5 fallos (4 no bloquean), reglas de clave nueva, la clave del portal no cambia, lista sin claves,
+retiro → `usuario_inactivo` y reactivación, despacho de alta/baja/reactivación en orden con
+`x-api-key` e `Idempotency-Key` y sin clave, AsisLock caído → queda pendiente. Alta real por
+`UserCompany.crearEnConexion` en una transacción revertida: crea la cuenta del portal, el usuario
+de pantalla gris y el aviso. No se probó contra AsisLock real (su endpoint de avisos no existe aún).
+
+**Para producción — orden obligatorio:** correr la 071 **antes** de subir el código: sin la tabla,
+registrar un empleado falla (el gancho está dentro de la transacción del alta).
+
+**Pendiente:**
+- AsisLock: implementar su `POST /usuarios` (§8.4 del documento) y pasar URL y clave; cambiar la
+  pantalla gris para validar con §8.1/§8.2.
+- Decidir si se corre el backfill en producción (crea usuarios para todos los empleados vigentes
+  y encola un alta por cada uno).
+- Sin pantalla en Gestor todavía: RRHH no puede restablecer la clave de pantalla gris de un
+  empleado que la olvidó (hoy: a mano en la BD).

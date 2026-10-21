@@ -1,7 +1,12 @@
-# API de AsisLock → Gestor Técnico (módulo de asistencia)
+# API entre AsisLock y Gestor Técnico (módulo de asistencia)
 
-Documento para el equipo de AsisLock. Explica cómo enviar a Gestor Técnico los registros de
-`login_biometrico` para que cada login y logout alimente el tiempo laborado del empleado.
+Documento para el equipo de AsisLock. Cubre las dos partes de la integración:
+
+- **§1-§7**: cómo enviar a Gestor Técnico los registros de `login_biometrico` para que cada login
+  y logout alimente el tiempo laborado del empleado. Ya funciona en producción.
+- **§8 (nuevo, 2026-10-21)**: los usuarios de la **pantalla gris**. Gestor los crea al contratar,
+  se los avisa a AsisLock y valida cada inicio de sesión. **Requiere desarrollo del lado de
+  AsisLock**: ver la lista de tareas en §8.1.
 
 ---
 
@@ -22,6 +27,7 @@ Gestor. Gestor lo convierte en eventos de la jornada del empleado:
   de Colombia**.
 - El empleado se identifica por su **cédula** (campo `usuario`).
 - Las pausas de baño y almuerzo se siguen marcando en Gestor; AsisLock no las envía.
+- Los usuarios con los que el empleado entra a la pantalla gris los crea y los valida Gestor (§8).
 - Si el empleado no tiene horario asignado en Gestor ese día, todo logout cuenta como
   desconexión y la jornada se cierra a la hora del último logout.
 
@@ -298,7 +304,300 @@ if __name__ == "__main__":
 
 ---
 
-## 8. Soporte
+## 8. Usuarios de la pantalla gris
+
+Desde ahora **Gestor es el dueño de los usuarios de la pantalla gris**. Cuando RRHH contrata a
+alguien, Gestor le crea su usuario de pantalla gris y le avisa a AsisLock. Cuando el empleado
+inicia sesión en la pantalla gris, AsisLock le pregunta a Gestor si el usuario y la clave son
+correctos. Si RRHH registra el retiro, Gestor avisa y el usuario deja de entrar.
+
+Estas credenciales son **solo de la pantalla gris**. No son las del portal de asistencia de Gestor:
+cambiar una clave no cambia la otra.
+
+### 8.1 Qué tiene que construir AsisLock
+
+| # | Tarea | Dónde | Sección |
+|---|---|---|---|
+| 1 | Endpoint `POST /usuarios` para **recibir** las altas, bajas y reactivaciones que envía Gestor | servidor de AsisLock | 8.3 |
+| 2 | Tabla para guardar esos usuarios (sin claves) | base `asislock` | 8.3 |
+| 3 | Cambiar el inicio de sesión de la pantalla gris para que **valide contra Gestor** | `.exe` → servidor de AsisLock → Gestor | 8.4 |
+| 4 | Pantalla de **cambio de clave** obligatorio en el primer ingreso | `.exe` → servidor de AsisLock → Gestor | 8.5 |
+| 5 | Carga inicial y conciliación diaria con la lista completa | servidor de AsisLock | 8.6 |
+| 6 | Entregar a Gestor la **URL** del endpoint de la tarea 1 y la **clave** con la que Gestor se identifica | — | 8.8 |
+
+```
+  RRHH contrata ─► Gestor crea usuario ──aviso "alta"──► AsisLock POST /usuarios  (tarea 1)
+                                                                  │ guarda usuario/nombre/activo
+  Empleado escribe cédula y clave en la pantalla gris              ▼
+  .exe ──► servidor AsisLock ──POST /pantalla-gris/validar──► Gestor ──► válido / motivo
+                       ◄────────────── respuesta ───────────────────────┘
+  RRHH registra retiro ─► Gestor ──aviso "baja"──► AsisLock marca activo = 0
+```
+
+### 8.2 Las credenciales
+
+| | |
+|---|---|
+| **Usuario** | La **cédula** del empleado: la misma que AsisLock ya envía en `usuario` en `/registros` |
+| **Clave inicial** | **La misma cédula.** Al primer ingreso Gestor responde `debe_cambiar_clave: true` y el empleado tiene que cambiarla (8.5) |
+| **Qué recibe AsisLock en cada aviso** | `usuario`, `nombre`, `users_company_id` (id de la ficha en Gestor), `activo` y `ocurrido_en` |
+| **Qué NO recibe AsisLock** | **La clave.** Nunca viaja en los avisos ni en la lista. La única forma de comprobarla es preguntarle a Gestor (8.4) |
+
+Así, si la base de AsisLock o la red se ven comprometidas, no hay claves que robar, y un cambio de
+clave vale en todos los equipos en el mismo instante.
+
+> ⚠️ Las llamadas de 8.4 a 8.6 llevan la `x-api-key` de Gestor. **Deben salir del servidor de
+> AsisLock, no del `.exe`** de los equipos de los agentes: desde un `.exe` se puede extraer la
+> clave (igual que en el §2). El `.exe` le pide al servidor de AsisLock que valide y este le
+> pregunta a Gestor.
+
+### 8.3 Recibir los avisos de Gestor (tareas 1 y 2)
+
+Gestor llama a este endpoint, que **implementa AsisLock**, una vez por cada alta, baja o reactivación:
+
+```
+POST <URL base que AsisLock le dé a Gestor>/usuarios
+Content-Type: application/json
+x-api-key: <clave que AsisLock le dé a Gestor>
+Idempotency-Key: 3f6c0f6e-8a51-4c1e-9d2b-0f4f8c2a9b11
+
+{
+  "evento": "alta",
+  "usuario": "1000930582",
+  "nombre": "Ana María Pérez Gómez",
+  "users_company_id": 262,
+  "activo": true,
+  "ocurrido_en": "2026-10-21T19:43:38.809Z"
+}
+```
+
+| `evento` | Cuándo lo envía Gestor | `activo` | Qué hace AsisLock |
+|---|---|---|---|
+| `alta` | RRHH registró al empleado (a mano, desde Excel o desde Hydra) | `true` | crea el usuario |
+| `baja` | RRHH registró su retiro, o borró la ficha | `false` | lo marca inactivo; si tiene sesión abierta, puede cerrarla |
+| `reactivacion` | RRHH deshizo el retiro | `true` | lo vuelve a marcar activo |
+
+**Reglas para el endpoint:**
+1. **Comprobar la `x-api-key`**: si no coincide, responder `401`.
+2. **Tratar cada aviso como el estado actual** del usuario, no como una orden: crear el usuario si
+   no existe, o actualizar `nombre` y `activo` si ya existe. Así no importa si llega una `baja` de
+   alguien que AsisLock aún no tenía.
+3. **Ignorar un aviso más viejo** (`ocurrido_en` menor) que el último aplicado a ese `usuario`.
+   Después de una caída, los avisos pueden llegar tarde o desordenados.
+4. **El mismo aviso puede llegar dos veces** (con la misma `Idempotency-Key`): aplicarlo de nuevo
+   no debe dañar nada. Con las reglas 2 y 3 eso ya se cumple.
+5. **Responder rápido**: Gestor espera 10 segundos como máximo.
+
+| Respuesta de AsisLock | Qué hace Gestor |
+|---|---|
+| `2xx` | lo da por entregado |
+| `409` | lo da por entregado ("ya lo tenía") |
+| sin respuesta, `5xx`, `408` o `429` | reintenta a 1, 2, 4, 8… minutos (tope de una hora), hasta 10 intentos |
+| otro `4xx` (`400`, `401`, `404`…) | lo marca fallido y no reintenta: revisar URL o clave |
+
+**Tabla sugerida en la base `asislock`:**
+
+```sql
+CREATE TABLE usuario_gestor (
+  usuario            VARCHAR(50)  NOT NULL PRIMARY KEY,  -- cédula
+  nombre             VARCHAR(200) NULL,
+  users_company_id   INT          NOT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  ocurrido_en        DATETIME(3)  NOT NULL,              -- del último aviso aplicado (UTC)
+  actualizado_en     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
+
+**Ejemplo del endpoint (Python + Flask):**
+
+```python
+"""recibir_usuarios_gestor.py — endpoint POST /usuarios que llama Gestor Técnico."""
+import hmac
+import os
+from datetime import datetime
+
+import mysql.connector
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+CLAVE_DE_GESTOR = os.environ["CLAVE_QUE_USA_GESTOR"]  # la que AsisLock le entrega a Gestor
+EVENTOS = {"alta", "baja", "reactivacion"}
+
+
+def conectar():
+    return mysql.connector.connect(
+        host=os.environ["ASISLOCK_DB_HOST"], user=os.environ["ASISLOCK_DB_USER"],
+        password=os.environ["ASISLOCK_DB_PASSWORD"], database=os.environ.get("ASISLOCK_DB_NAME", "asislock"),
+    )
+
+
+@app.post("/api/gestor/usuarios")
+def recibir_usuario():
+    if not hmac.compare_digest(request.headers.get("x-api-key", ""), CLAVE_DE_GESTOR):
+        return jsonify(success=False, message="Credenciales inválidas"), 401
+
+    aviso = request.get_json(silent=True) or {}
+    if aviso.get("evento") not in EVENTOS or not aviso.get("usuario") or not aviso.get("ocurrido_en"):
+        return jsonify(success=False, message="Aviso incompleto"), 400
+
+    ocurrido = datetime.fromisoformat(aviso["ocurrido_en"].replace("Z", "+00:00")).replace(tzinfo=None)
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        # Crea o actualiza, pero nunca con un aviso más viejo que el último aplicado.
+        cursor.execute(
+            """INSERT INTO usuario_gestor (usuario, nombre, users_company_id, activo, ocurrido_en)
+               VALUES (%s, %s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE
+                 nombre           = IF(VALUES(ocurrido_en) >= ocurrido_en, VALUES(nombre), nombre),
+                 users_company_id = IF(VALUES(ocurrido_en) >= ocurrido_en, VALUES(users_company_id), users_company_id),
+                 activo           = IF(VALUES(ocurrido_en) >= ocurrido_en, VALUES(activo), activo),
+                 ocurrido_en      = GREATEST(ocurrido_en, VALUES(ocurrido_en))""",
+            (str(aviso["usuario"]), aviso.get("nombre"), aviso["users_company_id"],
+             1 if aviso["activo"] else 0, ocurrido),
+        )
+        conexion.commit()
+    finally:
+        conexion.close()
+    return jsonify(success=True)
+```
+
+La ruta `/api/gestor/usuarios` es un ejemplo: puede ser cualquiera, siempre que termine en
+`/usuarios` y se le entregue a Gestor la parte anterior como URL base.
+
+### 8.4 Inicio de sesión en la pantalla gris (tarea 3)
+
+El servidor de AsisLock llama a Gestor con lo que el empleado escribió:
+
+```
+POST http://31.97.138.23:5001/api/integraciones/asislock/v1/pantalla-gris/validar
+x-api-key: <la misma clave del §2>
+Content-Type: application/json
+
+{ "usuario": "1000930582", "clave": "lo que escribió el empleado" }
+```
+
+Clave correcta → `200`:
+```json
+{
+  "success": true,
+  "valido": true,
+  "usuario": { "usuario": "1000930582", "nombre": "Ana María Pérez Gómez", "users_company_id": 262, "debe_cambiar_clave": true }
+}
+```
+
+No puede entrar → también `200`, con `valido: false` y un motivo:
+```json
+{ "success": true, "valido": false, "motivo": "credenciales_invalidas" }
+```
+
+| Respuesta | Qué hace la pantalla gris |
+|---|---|
+| `valido: true`, `debe_cambiar_clave: false` | desbloquea el equipo y registra el login como hoy (y lo envía en `/registros`) |
+| `valido: true`, `debe_cambiar_clave: true` | **no desbloquea**: muestra la pantalla de cambio de clave (8.5) |
+| `credenciales_invalidas` | "Usuario o clave incorrectos". Sale igual si la cédula no existe: Gestor no revela cuál de los dos falló |
+| `bloqueado` | "Demasiados intentos fallidos. Intente en 15 minutos". 5 claves erradas seguidas bloquean 15 minutos |
+| `usuario_inactivo` | "Usuario inactivo. Comuníquese con Recursos Humanos". Retirado o sin contrato vigente |
+| `400` | la petición vino sin `usuario` o sin `clave` |
+| `401` | la `x-api-key` es incorrecta o la IP no está permitida |
+| sin respuesta / `5xx` | "Sin conexión con el servidor. Intente de nuevo". **No desbloquear** |
+
+> Sin conexión con Gestor nadie puede entrar a la pantalla gris. Si AsisLock necesita un modo de
+> contingencia (por ejemplo, permitir al último usuario que entró en ese equipo), hay que
+> acordarlo con el equipo de Gestor antes de implementarlo.
+
+### 8.5 Cambio de clave (tarea 4)
+
+```
+POST http://31.97.138.23:5001/api/integraciones/asislock/v1/pantalla-gris/cambiar-clave
+x-api-key: <la misma clave del §2>
+Content-Type: application/json
+
+{ "usuario": "1000930582", "clave_actual": "1000930582", "clave_nueva": "MiClave2026" }
+```
+
+Cambiada → `{ "success": true, "cambiada": true, "usuario": { ...igual que 8.4, "debe_cambiar_clave": false } }`.
+El equipo ya se puede desbloquear.
+
+No cambiada → `{ "success": true, "cambiada": false, "motivo": "..." }`:
+
+| `motivo` | Mensaje sugerido |
+|---|---|
+| `credenciales_invalidas` | "La clave actual no es correcta" (cuenta como intento fallido) |
+| `bloqueado`, `usuario_inactivo` | como en 8.4 |
+| `clave_corta` | "La clave nueva debe tener al menos 6 caracteres" |
+| `clave_igual_usuario` | "La clave nueva no puede ser su número de cédula" |
+| `clave_igual_actual` | "La clave nueva debe ser distinta de la actual" |
+
+La clave admite hasta 72 caracteres. No la recorte ni le quite espacios: se compara tal cual.
+
+### 8.6 Lista completa (tarea 5)
+
+Para la **carga inicial** (antes de activar la tarea 3) y como **conciliación diaria**, por si se
+perdió algún aviso. No trae claves.
+
+```
+GET http://31.97.138.23:5001/api/integraciones/asislock/v1/pantalla-gris/usuarios
+x-api-key: <la misma clave del §2>
+```
+
+```json
+{
+  "success": true,
+  "total": 398,
+  "usuarios": [
+    { "usuario": "1000930582", "nombre": "Ana María Pérez Gómez", "users_company_id": 262,
+      "activo": true, "debe_cambiar_clave": true, "actualizado_en": "2026-10-21T19:43:38.000Z" }
+  ]
+}
+```
+
+Con cada elemento, aplicar la misma lógica de crear o actualizar de 8.3, con `activo` tal como viene.
+
+### 8.7 Pruebas con curl
+
+```bash
+BASE=http://31.97.138.23:5001/api/integraciones/asislock/v1
+
+# Validar (con la cédula de prueba que indique el equipo de Gestor)
+curl -s -X POST $BASE/pantalla-gris/validar -H "x-api-key: <clave>" -H "Content-Type: application/json" \
+  -d '{"usuario":"<cédula de prueba>","clave":"<cédula de prueba>"}'
+
+# Cambiar la clave
+curl -s -X POST $BASE/pantalla-gris/cambiar-clave -H "x-api-key: <clave>" -H "Content-Type: application/json" \
+  -d '{"usuario":"<cédula de prueba>","clave_actual":"<cédula de prueba>","clave_nueva":"Prueba2026"}'
+
+# Lista completa
+curl -s $BASE/pantalla-gris/usuarios -H "x-api-key: <clave>"
+
+# Probar su propio endpoint de avisos tal como lo llamará Gestor
+curl -s -X POST <su URL base>/usuarios -H "x-api-key: <clave que usará Gestor>" \
+  -H "Content-Type: application/json" -H "Idempotency-Key: prueba-0001" \
+  -d '{"evento":"alta","usuario":"1234567890","nombre":"Prueba Gestor","users_company_id":1,"activo":true,"ocurrido_en":"2026-10-21T15:00:00.000Z"}'
+```
+
+Cambiar la clave de la cédula de prueba la deja cambiada: coordinarlo con el equipo de Gestor.
+
+### 8.8 Qué se intercambian los equipos
+
+| AsisLock entrega a Gestor | Gestor entrega a AsisLock |
+|---|---|
+| URL base del endpoint de avisos (Gestor llama a `<URL>/usuarios`) | La misma `x-api-key` que ya usan para `/registros` sirve para `/pantalla-gris/*` |
+| Clave con la que Gestor se identifica en ese endpoint (`x-api-key`) | Una cédula de prueba |
+| Si filtran por IP: permitir la IP de Gestor `31.97.138.23` | Aviso de cuándo se activa en producción |
+
+Las claves se comparten por un canal privado, nunca en este documento ni en un chat del equipo.
+
+**Orden de puesta en marcha:**
+1. AsisLock publica su endpoint de avisos y entrega URL y clave.
+2. Gestor los configura. Desde ese momento, cada contratación nueva llega como `alta`.
+3. Si se decide crear usuarios para los empleados que ya existen, Gestor los crea y envía un
+   `alta` por cada uno. Si no, AsisLock puede hacer la carga inicial con la lista completa (8.6).
+4. AsisLock activa el nuevo inicio de sesión (8.4) y el cambio de clave (8.5) en la pantalla gris.
+
+---
+
+## 9. Soporte
 
 Si un registro queda `rechazado` o la integración responde `401`/`503`, contactar al equipo de
 Gestor Técnico con el `id` del registro y la hora del envío. Gestor guarda cada aviso recibido

@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const pantallaGrisService = require('../services/asistencia/pantallaGrisService');
 
 const SELECT_RETIRO = `
     SELECT
@@ -68,6 +69,9 @@ class Retiro {
                     [ucId]
                 );
             }
+
+            // Retirado ya no entra a la pantalla gris: AsisLock recibe la baja (asistencia.md §31).
+            await pantallaGrisService.avisarEnConexion(conn, ucId, 'baja');
 
             await conn.commit();
             return true;
@@ -147,6 +151,8 @@ class Retiro {
                 'UPDATE contrato SET estado_contrato_idestado_contrato = ?, updated_at = CURRENT_TIMESTAMP WHERE idcontrato = ?',
                 [estadoActivo[0].idestado_contrato, contratoId]
             );
+
+            await pantallaGrisService.avisarEnConexion(conn, ucId, 'reactivacion');
 
             await conn.commit();
             return true;
