@@ -38,4 +38,22 @@ async function guardar(r, conn = db) {
     );
 }
 
-module.exports = { findParaActualizar, guardar };
+// Avisos de AsisLock de un día laboral para una o varias fichas: los asociados a la jornada de
+// ese día (incluye un logout pasada la medianoche) y los que no tienen jornada pero se
+// reportaron con esa fecha (p. ej. un logout ignorado por `sin_entrada`).
+async function findDelDia(usersCompanyIds, fecha, conn = db) {
+    if (usersCompanyIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT ar.users_company_id, ar.evento, ar.ocurrido_en, ar.resultado, ar.accion, ar.motivo,
+                ar.estado_conexion, ar.ip_local, ar.ip_publica, ar.aplicativo, ar.conectado_biometrico
+         FROM asislock_registro ar
+         LEFT JOIN jornada j ON j.idjornada = ar.jornada_id
+         WHERE ar.users_company_id IN (?)
+           AND (j.fecha = ? OR (ar.jornada_id IS NULL AND ar.fecha_reportada = ?))
+         ORDER BY ar.ocurrido_en, ar.idasislock_registro`,
+        [usersCompanyIds, fecha, fecha]
+    );
+    return filas;
+}
+
+module.exports = { findParaActualizar, guardar, findDelDia };

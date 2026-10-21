@@ -222,3 +222,47 @@ test('no se puede iniciar una pausa en Gestor estando desconectado de AsisLock',
     const r = calcularJornada(eventos, HORARIO, h('10:05:00'));
     assert.throws(() => assertPuedeIniciarPausa(r, 'bano'), /desconectado de AsisLock/);
 });
+
+// --- Resumen para las pantallas (conectado_biometrico: Presencial / Teletrabajo) ---
+const { modalidadIngreso, resumenDelDia } = require('../../domain/asistencia/asislock');
+
+const aviso = (evento, hora, extra = {}) => ({
+    evento, ocurrido_en: h(hora), resultado: 'registrado', conectado_biometrico: null,
+    ip_local: '10.0.0.1', ip_publica: '200.1.1.1', aplicativo: 'Asislock', ...extra
+});
+
+test('modalidadIngreso: Presencial / Teletrabajo sin importar mayúsculas; close y vacío no dicen nada', () => {
+    assert.equal(modalidadIngreso('Presencial'), 'presencial');
+    assert.equal(modalidadIngreso(' TELETRABAJO '), 'teletrabajo');
+    assert.equal(modalidadIngreso('close'), null);
+    assert.equal(modalidadIngreso(null), null);
+});
+
+test('resumenDelDia: sin avisos válidos devuelve null', () => {
+    assert.equal(resumenDelDia([]), null);
+    assert.equal(resumenDelDia([aviso('login', '08:00:00', { resultado: 'rechazado' })]), null);
+});
+
+test('resumenDelDia: el logout con close no borra cómo entró; queda desconectado', () => {
+    const r = resumenDelDia([
+        aviso('login', '08:00:00', { conectado_biometrico: 'Presencial' }),
+        aviso('logout', '12:00:00', { conectado_biometrico: 'close', ip_local: '10.0.0.9' })
+    ]);
+    assert.equal(r.modalidad, 'presencial');
+    assert.deepEqual(r.modalidades, ['presencial']);
+    assert.equal(r.primer_login.toISOString(), h('08:00:00').toISOString());
+    assert.equal(r.conectado, false);
+    assert.equal(r.ultimo_evento.evento, 'logout');
+    assert.equal(r.ip_local, '10.0.0.1', 'las IP son las del último login');
+});
+
+test('resumenDelDia: si cambia de modalidad en el día manda el último login y se listan las dos', () => {
+    const r = resumenDelDia([
+        aviso('login', '08:00:00', { conectado_biometrico: 'Teletrabajo' }),
+        aviso('logout', '10:00:00', { conectado_biometrico: 'close' }),
+        aviso('login', '11:00:00', { conectado_biometrico: 'Presencial', resultado: 'ignorado' })
+    ]);
+    assert.equal(r.modalidad, 'presencial');
+    assert.deepEqual(r.modalidades, ['teletrabajo', 'presencial']);
+    assert.equal(r.conectado, true);
+});

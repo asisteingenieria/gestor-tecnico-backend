@@ -6,6 +6,37 @@ const Retiro = require('../models/Retiro');
 const importEmpleadosExcel = require('../utils/importEmpleadosExcel');
 const importEmpleadosService = require('../services/importEmpleadosService');
 const { validarObligatorios } = require('../utils/validarEmpleado');
+const fs = require('fs');
+const { soportesNovedad, soportesTraspaso } = require('../middleware/uploadSoportesRrhh');
+const { fechaLaboral } = require('../utils/fechaBogota');
+
+const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
+
+// Valida un traspaso según su tipo (hoja "TRASPASOS", migración 070) y deja en NULL lo que no
+// aplica. Devuelve { error } o { datos }.
+async function prepararPayloadTraspaso(body) {
+    if (!body.contrato_id) return { error: 'Selecciona un empleado con contrato' };
+    if (!body.tipo_traspaso_id) return { error: 'El tipo de traspaso es obligatorio' };
+    const codigo = await Traspaso.codigoDeTipo(body.tipo_traspaso_id);
+    if (!codigo) return { error: 'Tipo de traspaso inválido' };
+    const { datos, faltantes } = prepararTraspaso(codigo, body);
+    if (faltantes.length) return { error: `Faltan datos para este tipo de traspaso: ${faltantes.map(f => ETIQUETAS_TRASPASO[f] || f).join(', ')}` };
+    return { datos };
+}
+
+const rutaArchivoSoporte = soportesNovedad.ruta;
+const borrarArchivoSoporte = soportesNovedad.borrar;
+
+// Envía un archivo de soporte (novedad o traspaso) con su nombre original, para verlo en el navegador.
+function enviarSoporte(res, soporte, ruta) {
+    if (!ruta || !fs.existsSync(ruta)) {
+        return res.status(404).json({ success: false, message: 'Soporte no encontrado' });
+    }
+    res.setHeader('Content-Type', soporte.mime);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(soporte.nombre_original)}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(ruta);
+}
 
 const CAMPOS_PERSONALES = [
     'numero_identificacion', 'tipo_identificacion_id',
@@ -295,13 +326,79 @@ const userCompanyController = {
 
     async deleteNovedad(req, res) {
         try {
+            const archivos = await NovedadRrhh.archivosDeNovedad(req.params.novedadId);
             const ok = await NovedadRrhh.delete(req.params.novedadId);
             if (!ok) {
                 return res.status(404).json({ success: false, message: 'Novedad no encontrada' });
             }
+            archivos.forEach(borrarArchivoSoporte);
             res.json({ success: true, message: 'Novedad eliminada exitosamente' });
         } catch (error) {
             console.error('Error al eliminar novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ---- Soportes documentales de una novedad (PDF o imagen, migración 069) ----
+
+    async getSoportesNovedad(req, res) {
+        try {
+            if (!await NovedadRrhh.getById(req.params.novedadId)) {
+                return res.status(404).json({ success: false, message: 'Novedad no encontrada' });
+            }
+            res.json({ soportes: await NovedadRrhh.getSoportes(req.params.novedadId) });
+        } catch (error) {
+            console.error('Error al obtener soportes de la novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async subirSoporteNovedad(req, res) {
+        const { novedadId, tipoSoporteId } = req.params;
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'Falta el archivo del soporte' });
+            }
+            if (!await NovedadRrhh.getById(novedadId)) {
+                borrarArchivoSoporte(req.file.filename);
+                return res.status(404).json({ success: false, message: 'Novedad no encontrada' });
+            }
+            if (!await NovedadRrhh.soporteAplica(novedadId, tipoSoporteId)) {
+                borrarArchivoSoporte(req.file.filename);
+                return res.status(400).json({ success: false, message: 'Ese soporte no aplica al tipo de esta novedad' });
+            }
+            const anterior = await NovedadRrhh.guardarSoporte(novedadId, tipoSoporteId, {
+                nombre: req.file.filename, nombreOriginal: req.file.originalname, mime: req.file.mimetype, tamano: req.file.size
+            }, req.user?.id);
+            if (anterior) borrarArchivoSoporte(anterior);
+            res.status(201).json({ success: true, message: 'Soporte cargado', soportes: await NovedadRrhh.getSoportes(novedadId) });
+        } catch (error) {
+            if (req.file) borrarArchivoSoporte(req.file.filename);
+            console.error('Error al cargar soporte de la novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async descargarSoporteNovedad(req, res) {
+        try {
+            const soporte = await NovedadRrhh.getSoporte(req.params.novedadId, req.params.tipoSoporteId);
+            enviarSoporte(res, soporte, soporte && rutaArchivoSoporte(soporte.archivo));
+        } catch (error) {
+            console.error('Error al descargar soporte de la novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async eliminarSoporteNovedad(req, res) {
+        try {
+            const archivo = await NovedadRrhh.eliminarSoporte(req.params.novedadId, req.params.tipoSoporteId);
+            if (!archivo) {
+                return res.status(404).json({ success: false, message: 'Soporte no encontrado' });
+            }
+            borrarArchivoSoporte(archivo);
+            res.json({ success: true, message: 'Soporte eliminado', soportes: await NovedadRrhh.getSoportes(req.params.novedadId) });
+        } catch (error) {
+            console.error('Error al eliminar soporte de la novedad:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -334,11 +431,9 @@ const userCompanyController = {
 
     async createTraspaso(req, res) {
         try {
-            const { contrato_id, fecha_inicio } = req.body;
-            if (!contrato_id || !fecha_inicio) {
-                return res.status(400).json({ success: false, message: 'contrato_id y fecha_inicio son obligatorios' });
-            }
-            const traspaso = await Traspaso.create(req.body);
+            const { error, datos } = await prepararPayloadTraspaso(req.body);
+            if (error) return res.status(400).json({ success: false, message: error });
+            const traspaso = await Traspaso.create(datos, { hoy: fechaLaboral(new Date()), userId: req.user?.id });
             res.status(201).json({ success: true, message: 'Traspaso creado exitosamente', traspaso });
         } catch (error) {
             console.error('Error al crear traspaso:', error);
@@ -348,11 +443,9 @@ const userCompanyController = {
 
     async updateTraspaso(req, res) {
         try {
-            const { contrato_id, fecha_inicio } = req.body;
-            if (!contrato_id || !fecha_inicio) {
-                return res.status(400).json({ success: false, message: 'contrato_id y fecha_inicio son obligatorios' });
-            }
-            const ok = await Traspaso.update(req.params.traspasoId, req.body);
+            const { error, datos } = await prepararPayloadTraspaso(req.body);
+            if (error) return res.status(400).json({ success: false, message: error });
+            const ok = await Traspaso.update(req.params.traspasoId, datos, { hoy: fechaLaboral(new Date()), userId: req.user?.id });
             if (!ok) {
                 return res.status(404).json({ success: false, message: 'Traspaso no encontrado' });
             }
@@ -365,13 +458,106 @@ const userCompanyController = {
 
     async deleteTraspaso(req, res) {
         try {
+            const archivos = await Traspaso.archivosDeTraspaso(req.params.traspasoId);
             const ok = await Traspaso.delete(req.params.traspasoId);
             if (!ok) {
                 return res.status(404).json({ success: false, message: 'Traspaso no encontrado' });
             }
+            archivos.forEach(soportesTraspaso.borrar);
             res.json({ success: true, message: 'Traspaso eliminado exitosamente' });
         } catch (error) {
             console.error('Error al eliminar traspaso:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ---- Alertas de traspasos (migración 070) ----
+
+    async getAlertasTraspasos(req, res) {
+        try {
+            res.json({ alertas: await Traspaso.getAlertas(fechaLaboral(new Date())) });
+        } catch (error) {
+            console.error('Error al obtener alertas de traspasos:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async reenviarAlertaEvaluacion(req, res) {
+        try {
+            if (!await Traspaso.getById(req.params.traspasoId)) {
+                return res.status(404).json({ success: false, message: 'Traspaso no encontrado' });
+            }
+            const ok = await Traspaso.reenviarAlertaEvaluacion(req.params.traspasoId, { hoy: fechaLaboral(new Date()), userId: req.user?.id });
+            if (!ok) {
+                return res.status(409).json({ success: false, message: 'No hay evaluación pendiente: el traspaso no es una ratificación o ya tiene el formato de evaluación' });
+            }
+            res.json({ success: true, message: 'Recordatorio enviado al director' });
+        } catch (error) {
+            console.error('Error al reenviar alerta de evaluación:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ---- Documentos de un traspaso (PDF o imagen, migración 070) ----
+
+    async getSoportesTraspaso(req, res) {
+        try {
+            if (!await Traspaso.getById(req.params.traspasoId)) {
+                return res.status(404).json({ success: false, message: 'Traspaso no encontrado' });
+            }
+            res.json({ soportes: await Traspaso.getSoportes(req.params.traspasoId) });
+        } catch (error) {
+            console.error('Error al obtener documentos del traspaso:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async subirSoporteTraspaso(req, res) {
+        const { traspasoId, tipoSoporteId } = req.params;
+        try {
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'Falta el archivo del documento' });
+            }
+            if (!await Traspaso.getById(traspasoId)) {
+                soportesTraspaso.borrar(req.file.filename);
+                return res.status(404).json({ success: false, message: 'Traspaso no encontrado' });
+            }
+            if (!await Traspaso.soporteAplica(traspasoId, tipoSoporteId)) {
+                soportesTraspaso.borrar(req.file.filename);
+                return res.status(400).json({ success: false, message: 'Ese documento no aplica al tipo de este traspaso' });
+            }
+            const anterior = await Traspaso.guardarSoporte(traspasoId, tipoSoporteId, {
+                nombre: req.file.filename, nombreOriginal: req.file.originalname, mime: req.file.mimetype, tamano: req.file.size
+            }, req.user?.id);
+            if (anterior) soportesTraspaso.borrar(anterior);
+            res.status(201).json({ success: true, message: 'Documento cargado', soportes: await Traspaso.getSoportes(traspasoId) });
+        } catch (error) {
+            if (req.file) soportesTraspaso.borrar(req.file.filename);
+            console.error('Error al cargar documento del traspaso:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async descargarSoporteTraspaso(req, res) {
+        try {
+            const soporte = await Traspaso.getSoporte(req.params.traspasoId, req.params.tipoSoporteId);
+            enviarSoporte(res, soporte, soporte && soportesTraspaso.ruta(soporte.archivo));
+        } catch (error) {
+            console.error('Error al descargar documento del traspaso:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async eliminarSoporteTraspaso(req, res) {
+        try {
+            const archivo = await Traspaso.eliminarSoporte(req.params.traspasoId, req.params.tipoSoporteId);
+            if (!archivo) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+            soportesTraspaso.borrar(archivo);
+            res.json({ success: true, message: 'Documento eliminado', soportes: await Traspaso.getSoportes(req.params.traspasoId) });
+        } catch (error) {
+            console.error('Error al eliminar documento del traspaso:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },

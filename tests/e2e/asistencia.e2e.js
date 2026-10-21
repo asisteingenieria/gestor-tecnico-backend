@@ -414,6 +414,24 @@ async function main() {
     [sesionesE5] = await db.query('SELECT 1 FROM login_biometrico WHERE usuario = ? AND fecha = ? AND asislock_id IS NULL', [CEDULA_E5, HOY]);
     check('login_biometrico: la segunda sesión es otra fila (2)', sesionesE5.length === 2, sesionesE5.length);
 
+    seccion('6c. Lo que reporta AsisLock en las pantallas (§30)');
+    r = await http('GET', '/api/asistencia/equipo', { token: sesiones.director });
+    const e5Equipo = r.body.find?.((e) => e.users_company_id === EMP.e5);
+    const e4Equipo = r.body.find?.((e) => e.users_company_id === EMP.e4);
+    check('Equipo hoy: empleado5 entró en teletrabajo y está conectado',
+        e5Equipo?.asislock?.modalidad === 'teletrabajo' && e5Equipo.asislock.conectado === true && horaBog(new Date(e5Equipo.asislock.primer_login)) === loginSinId, e5Equipo?.asislock);
+    check('Equipo hoy: empleado4 (sin dato de biométrico) aparece desconectado tras su logout',
+        e4Equipo?.asislock?.modalidad === null && e4Equipo.asislock.conectado === false && e4Equipo.asislock.aplicativo === 'E2E', e4Equipo?.asislock);
+    check('Equipo hoy: quien no tiene registros de AsisLock lleva asislock null',
+        r.body.find?.((e) => e.users_company_id === EMP.e1)?.asislock === null, r.body.find?.((e) => e.users_company_id === EMP.e1)?.asislock);
+    r = await http('GET', `/api/asistencia/equipo/${EMP.e5}/jornada/${HOY}/trazabilidad`, { token: sesiones.director });
+    const regE5 = r.body.asislock?.registros ?? [];
+    check('trazabilidad del jefe: los 3 avisos de empleado5 (login, logout, login) con su resultado',
+        regE5.map((x) => `${x.evento}:${x.accion}`).join(',') === 'login:entrada,logout:desconexion,login:reconexion', regE5);
+    check('trazabilidad: el login lleva la modalidad y el logout no', regE5[0]?.modalidad === 'teletrabajo' && regE5[1]?.modalidad === null, regE5);
+    hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e4 });
+    check('Mi jornada: empleado4 ve su último evento de AsisLock (logout)', hoy.body.asislock?.ultimo_evento?.evento === 'logout', hoy.body.asislock);
+
     seccion('7. Cuenta de empleado por cédula (063, en cuenta_empleado desde la 065)');
     const [[enUsers]] = await db.query(
         `SELECT COUNT(*) AS n FROM users u JOIN users_company uc ON uc.id = u.users_company_id

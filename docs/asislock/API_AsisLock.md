@@ -91,7 +91,7 @@ con los **mismos nombres de columna**:
 | `estado_conexion` | No | texto (hasta 20), número o `null` | Solo se guarda como referencia |
 | `ip_local`, `ip_publica` | No | texto, hasta 50 | Se guardan como evidencia del marcaje |
 | `aplicativo` | No | texto, hasta 80 | Se guarda como referencia |
-| `conectado_biometrico` | No | texto, hasta 15 | Se guarda como referencia |
+| `conectado_biometrico` | No | texto, hasta 15 | En el login: `Presencial` (puso la huella en el biométrico y cruzó el molinete) o `Teletrabajo` (solo se logueó en AsisLock). En el logout AsisLock manda `close`; Gestor lo guarda en el registro del evento pero conserva en la sesión el valor del login |
 
 #### Cuándo enviar
 

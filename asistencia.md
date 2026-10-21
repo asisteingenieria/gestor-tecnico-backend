@@ -1,14 +1,17 @@
 # Módulo de Asistencia — Plan de implementación
 
-Estado: **implementado**. Backend (Fases 0-4 y 6) y frontend (Fase 5) completos y probados
-contra el servidor real — ver §14 para el detalle de qué se construyó y en qué se desvió del
-plan original, §15 para el fix del 2026-09-16 a la creación de usuarios `director_operaciones`/
-`empleado` desde el panel de admin, §16 para la corrección de jerarquía a `jefe_area_id`, y §17
-para el rediseño visual del frontend (Opción C) + el endpoint `mis-jornadas` + dos bugs de
-backend corregidos (2026-09-24/25), §18 para la integración con AsisLock (login biométrico →
-jornada, migración 062, commit 7bce3e9; en producción falta confirmar la 062) y §19 para las
-cuentas de empleado automáticas por cédula con cambio obligatorio de contraseña (migración 063,
-probado en local, sin commitear ni desplegar a 2026-10-12) (ambas del 2026-10-11), y §20 para la prueba end-to-end (`npm run test:e2e`) y sus tres correcciones (2026-10-19).
+Estado: **implementado y en producción**. Backend (Fases 0-4 y 6) y frontend (Fase 5) completos y
+probados contra el servidor real. Mapa de las sesiones posteriores al plan:
+- §14 qué se construyó y en qué se desvió del plan · §15 creación de `director_operaciones`/`empleado`
+  desde el admin (2026-09-16) · §16 la jerarquía es `jefe_area_id` (2026-09-23) · §17 rediseño
+  "Opción C", endpoint `mis-jornadas` y dos bugs (2026-09-24/25).
+- §18 integración AsisLock (062) · §19 cuentas de empleado por cédula (063) · §20 prueba E2E ·
+  §21 copia de `login_biometrico` e id opcional (064) · §22 despliegue del 2026-10-19 y ficha 1010.
+- **2026-10-20:** §23 todo jefe de área gestiona su equipo sin rol · §24 cuentas de empleado en su
+  propia tabla `cuenta_empleado` (065) · §25 plantillas por jefe (066) y tres arreglos de interfaz ·
+  §26 fin de las cuentas `director_operaciones` (067) y **despliegue en producción** · §27
+  "Seleccionar todos" y asignación masiva en una transacción.
+- **Pendientes vigentes: §28** (reemplaza la lista de §22).
 Fecha del plan: 2026-09-15 · Fecha de implementación: 2026-09-15
 Repos involucrados:
 - Backend: `C:\Users\juan.acosta\Desktop\BackGestor\gestor-tecnico-backend`
@@ -1493,7 +1496,7 @@ la retira (estado `retirado`, sin borrarla: su jornada y los registros de AsisLo
   pasadas (más de 5 min adelante = `hora_futura`) y posteriores al último evento
   (si no, `fuera_de_orden`).
 
-**Pendientes (consolidado al 2026-10-20):**
+**Pendientes (consolidado al 2026-10-20, mañana) — superada por §28:**
 
 *Prueba y despliegue*
 1. Terminar la prueba de la 1010 (logout → `desconexion`, login → `reconexion`) y luego retirar la
@@ -1777,3 +1780,111 @@ empleados que su usuario y clave inicial son su cédula.
 medias), filtra y suma con "los 3 de la búsqueda", y asigna 25 horarios. Con el servicio en local,
 la ficha de Kevin (106 personas) por un mes: 2.438 horarios en 0,18 s; con una persona ajena en la
 lista, 403 y 0 filas. E2E 119/119, unitarios 132/132.
+
+
+## 28. Pendientes vigentes (consolidado al 2026-10-20, noche)
+
+Reemplaza la lista de §22. Estado de producción a esta fecha: migraciones hasta la 067; backend `main`
+con `ed09eae` (merge #14) y el frontend reconstruido; 389 cuentas por cédula creadas en
+`cuenta_empleado`; la cuenta `director_operaciones` que había, desactivada.
+
+*Despliegue en curso*
+1. §27 ("Seleccionar todos" y asignación masiva en transacción): backend `f75d87c` y frontend
+   `c178dab` en `sebas-branch`; el usuario hace el merge, luego `git pull` + `pm2 restart` y
+   rebuild del frontend. Sin migración. El merge del backend lleva también `07389cc` (corrección
+   de collation de la 065), que no estaba en `main`.
+2. El primer ingreso con la cuenta por cédula de Kevin lo hizo el usuario: que Kevin conozca o
+   cambie esa contraseña.
+3. Avisar a todos los empleados: usuario y clave inicial = cédula, cambio obligatorio al entrar.
+
+*Prueba y AsisLock*
+4. Ficha 1010: terminar la prueba (logout → `desconexion`, login → `reconexion`) y retirarla con
+   el `UPDATE` comentado de `Descargas\empleado_prueba_asislock_1010.sql`.
+5. Portar a la copia real de AsisLock los dos arreglos de `block` (envío del `id` y del logout).
+6. Baño/almuerzo desde AsisLock (`asislock.conexion_asislock`): falta decidir Break y Capacitación.
+
+*Seguridad*
+7. **Rotar la `ASISLOCK_API_KEY` de producción**: se pegó en el chat el 2026-10-20. Usar
+   `ASISLOCK_API_KEY_ANTERIOR` mientras AsisLock cambia la suya.
+8. `block`: credenciales y API key quemadas en el código; SQL armado con `.format()`.
+9. Rotar el `JWT_SECRET` de producción y de pruebas y las claves pegadas antes
+   (`claude/contextoriginal.md` §12.5).
+10. Login sin límite de intentos: ahora son 389 cuentas cuyo usuario es la cédula.
+11. Un token de una cuenta desactivada vale hasta que expire (5 h): `verifyToken` no consulta la BD.
+12. Nadie puede restablecer la contraseña de una cuenta de empleado desde la interfaz (el admin ya
+    no las ve en `/users`): hoy es por SQL. Propuesta: "Restablecer acceso" en la ficha de RRHH.
+
+*Funcionalidad*
+13. Marcaje automático de entrada al abrir "Mi jornada" para quien marca por AsisLock.
+14. Sincronizar `cuenta_empleado.usuario` cuando RRHH corrige una cédula.
+15. Salida anticipada: se guarda pero no viaja en `/mi-jornada/hoy` ni genera alerta.
+16. Notificaciones por socket al jefe: `directorUserIdDe` solo encuentra cuentas de `users`, así que
+    a un jefe con cuenta por cédula no le llegan (hoy ninguna pantalla las escucha).
+17. Una cuenta de RRHH u otro rol con gente a cargo pasa `canDirigirEquipo` en el backend, pero su
+    interfaz no muestra la vista de equipo (decisión de §23).
+
+*Interfaz (frontend)*
+18. Contadores que saltan hasta ±30 s (`useJornada.js`); tarjeta "En pausa" que no cuenta al
+    desconectado de AsisLock; jornada finalizada que sigue mostrando "Salida programada"; scroll
+    horizontal en "Horas extra"; plantilla que acepta un almuerzo fuera del turno.
+19. `HorasExtra.jsx` arranca la fecha del formulario en UTC: entre 19:00 y 23:59 de Bogotá propone
+    el día siguiente.
+
+*Arrastrado*
+20. Hydra: confirmar las migraciones 059-061 en producción (`conexionhydra.md` §14.8).
+
+## 29. Sesión 2026-10-21 — Significado de `conectado_biometrico`
+
+El usuario aclaró qué manda AsisLock en `conectado_biometrico`: en el **login**, `Presencial` (el
+empleado puso la huella en el biométrico y cruzó el molinete) o `Teletrabajo` (solo se logueó en
+AsisLock); en el **logout**, `close` (motivo del cierre: el logout no sabe cómo entró). Los registros
+del 19-oct con el campo vacío son de la versión de prueba de AsisLock.
+
+**Corrección:** en la copia por sesión (`login_biometrico`), el logout pisaba el valor del login con
+`close`. `loginBiometricoRepository.guardar` y `cerrarSesion` ahora conservan el valor del login
+cuando llega el logout (un reenvío del propio login sí puede corregirlo). `asislock_registro` sigue
+guardando lo que trae cada evento. El dato no entra en el cálculo de la jornada. Contrato actualizado
+en `docs/asislock/API_AsisLock.md`. Probado contra la BD local en una transacción revertida
+(sesión sin id y con id); unitarios 139/139.
+
+**Producción:** las sesiones ya guardadas con `close` se recuperan desde el login de la misma llave:
+`UPDATE login_biometrico lb JOIN asislock_registro ar ON ar.llave = lb.llave AND ar.evento = 'login'
+SET lb.conectado_biometrico = ar.conectado_biometrico WHERE lb.conectado_biometrico = 'close' AND
+ar.conectado_biometrico IS NOT NULL AND lb.idlogin_biometrico > 0;`
+
+## 30. Sesión 2026-10-21 — Lo que reporta AsisLock, visible para el empleado y su jefe
+
+**Pedido:** mostrar los datos que envía AsisLock en la pantalla de cada empleado y en las de los
+jefes que les asignan horario y los monitorean. (Las cédulas que llegan con `empleado_no_encontrado`
+son personas que aún no tienen ficha; RRHH las agregará y AsisLock puede reenviar.)
+
+**Backend (solo lectura, no cambia el cálculo de la jornada):**
+- `domain/asistencia/asislock.js`: `modalidadIngreso` (`Presencial`/`Teletrabajo` → `presencial`/
+  `teletrabajo`; `close` u otro → null) y `resumenDelDia(registros)` → `{ modalidad` (del último
+  login), `modalidades` (si cambió en el día), `primer_login`, `ultimo_evento`, `conectado`,
+  `ip_local`, `ip_publica`, `aplicativo }`, o null sin avisos válidos (los rechazados no cuentan).
+- `asislockRegistroRepository.findDelDia(ids, fecha)`: avisos de la jornada de ese día (incluye un
+  logout pasada la medianoche) o, sin jornada, los de esa fecha reportada. Una consulta para todo el
+  equipo.
+- `services/asistencia/asislockVista.js` (`resumenesDelDia`, `delDia`), usado por:
+  - `GET /mi-jornada/hoy` → `asislock: resumen | null`;
+  - `GET /equipo` → `asislock` por empleado;
+  - las dos trazabilidades → `asislock: { resumen, registros }` (cada login/logout con resultado,
+    acción o motivo, modalidad, `conectado_biometrico` crudo, estado, aplicativo e IP).
+
+**Frontend:** `IngresoAsislock.jsx` (`BadgeIngreso`, `ResumenAsislock`, `RegistrosAsislock`) y
+`src/utils/asislock.js` (`MODALIDAD_INGRESO`, `textoConexion`).
+- Mi jornada: franja "AsisLock · Presencial/Teletrabajo · Primer login · Conectado/Desconectado desde".
+- Equipo hoy: columna "Ingreso" (badge + hora del primer login; al pasar el mouse, el estado de
+  conexión), conteo "X presencial · Y teletrabajo" bajo "En turno" y tres columnas más en el CSV.
+- Trazabilidad (empleado y jefe): "Ingreso (AsisLock)" en la franja de KPIs, con "(cambió en el día)"
+  si hubo las dos modalidades, y la tabla "Registros de AsisLock".
+- Gestión de horarios no cambió: el monitoreo diario es Equipo hoy.
+
+**Verificado:** unitarios 143/143 (4 nuevos); E2E 125/125 (sección 6c nueva: Equipo hoy con
+teletrabajo/conectado, sin dato/desconectado y sin registros = null; trazabilidad con los 3 avisos y
+su acción; Mi jornada con el último evento). Para correr la E2E en este equipo hubo que levantar el
+servidor aparte y pasar `E2E_BASE`: con poca memoria tarda más de los 10 s que espera la prueba.
+`eslint` sin errores y `vite build` ok. No se probó en el navegador.
+
+**Para producción:** solo código (backend + frontend con rebuild), sin migración.

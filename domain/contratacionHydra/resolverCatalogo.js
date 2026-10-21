@@ -14,6 +14,8 @@
 // mayúsculas y todo lo no alfanumérico), con dos ajustes por catálogo:
 //   - grupo_sanguineo: el signo es el dato ("O+" ≠ "O-"); la normalización genérica lo borra.
 //   - eps: Hydra dice "Sanitas EPS" y Gestor "Sanitas"; la palabra EPS no distingue nada.
+//   - afp: Gestor usa los nombres oficiales ("PORVENIR S.A. AFPC", migración 068) y Hydra el
+//     corto ("Porvenir"); "S.A." y "AFPC" tampoco distinguen nada.
 function normalizarBase(texto) {
     return String(texto ?? '')
         .replace(/\([^)]*\)/g, '')
@@ -24,7 +26,8 @@ function normalizarBase(texto) {
 
 const AJUSTES = {
     grupo_sanguineo: (texto) => String(texto ?? '').replace(/\+/g, 'pos').replace(/-/g, 'neg'),
-    eps: (texto) => String(texto ?? '').replace(/\beps\b/gi, ' ')
+    eps: (texto) => String(texto ?? '').replace(/\beps\b/gi, ' '),
+    afp: (texto) => String(texto ?? '').replace(/\bs\.\s*a\.?(?=\s|$)/gi, ' ').replace(/\bafpc\b/gi, ' ')
 };
 
 function normalizar(catalogo, texto) {

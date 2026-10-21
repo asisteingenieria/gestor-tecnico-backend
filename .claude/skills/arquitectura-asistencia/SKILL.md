@@ -74,6 +74,25 @@ nadie — ni `db`, ni `config`, ni otro servicio.
     asistencia.md §16: en el negocio real es el jefe de área quien crea horarios y aprueba
     horas extra de su equipo, no el jefe inmediato). No hay tabla propia de equipos.
 
+14. **Quién gestiona un equipo no lo dice un rol.** Las rutas de equipo, horarios y horas
+    extra usan `canDirigirEquipo` (`middleware/auth.js`): pasa quien sea `jefe_area_id` de un
+    contrato activo, consultado en cada petición. No vuelvas a `isDirectorOperaciones` ni a
+    `verifyRole(['director_operaciones'])` para eso (asistencia.md §23 y §26).
+15. **Hay dos tipos de sesión.** Una cuenta de `cuenta_empleado` (cédula) llega con
+    `req.user.tipo_cuenta === 'empleado'` y su `req.user.id` es un `idcuenta_empleado`, **no un
+    `users.id`**. Para guardar quién hizo algo usa `autorDe(req)` (`controllers/asistencia/autor.js`)
+    → `{ userId, cuentaId }`, y escribe las dos columnas (`*_por_user_id` y `*_por_cuenta_id`).
+    Nunca metas `req.user.id` directo en una columna que apunta a `users` (§24).
+16. **Lo que es "del jefe" se guarda por su ficha** (`users_company_id`), no por su cuenta, para que
+    la misma persona lo vea entre con su usuario o con su cédula. Ejemplo: las plantillas
+    (`dueno_users_company_id`); la ajena responde 404, no 403 (§25).
+17. **Operaciones masivas en una consulta y una transacción.** Un jefe puede tener 100+ personas:
+    valida el equipo de una vez (`equipoRepository.subordinadosDe`) e inserta en lotes
+    (`horarioAsignadoRepository.insertarVarios`), no un `await` por empleado y por día (§27).
+18. **En SQL de migraciones, compara texto entre tablas con `BINARY` o `COLLATE`.** En producción
+    `users`/`users_company` son `utf8mb4_unicode_ci` y las tablas nuevas `utf8mb4_0900_ai_ci`:
+    el `=` directo da el error 1267 (§26).
+
 ## Zona horaria
 
 La BD corre en UTC (`config/db.js` fuerza `+00:00`); el negocio opera en UTC-5.
@@ -150,3 +169,6 @@ async function iniciarPausa({ usersCompanyId, tipo, contexto }) {
 - ¿Un literal numérico que debería estar en `asistencia_parametro`?
 - ¿Un endpoint del director sin `assertEmpleadoACargo`?
 - ¿Aritmética de fechas fuera de `utils/fechaBogota.js`?
+- ¿Una ruta de equipo con un `verifyRole` de rol en vez de `canDirigirEquipo`?
+- ¿Un `req.user.id` guardado como autor sin pasar por `autorDe(req)`?
+- ¿Un bucle con `await` por empleado donde cabría una consulta o un lote?

@@ -8,8 +8,10 @@ const CONSULTAS = {
     genero: ['SELECT idgenero AS id, nombre FROM genero'],
     estado_civil: ['SELECT idestado_civil AS id, nombre FROM estado_civil'],
     grupo_sanguineo: ['SELECT idgrupo_sanguineo AS id, nombre FROM grupo_sanguineo'],
-    eps: ['SELECT identidad_seguridad_social AS id, nombre FROM entidad_seguridad_social WHERE tipo = ?', ['EPS']],
-    afp: ['SELECT identidad_seguridad_social AS id, nombre FROM entidad_seguridad_social WHERE tipo = ?', ['AFP']],
+    // Solo las vigentes (migración 068): un candidato nuevo se afilia a una entidad de la lista
+    // oficial, y así los duplicados viejos ("SURA" / "EPS SURA") no vuelven ambigua la búsqueda.
+    eps: ['SELECT identidad_seguridad_social AS id, nombre FROM entidad_seguridad_social WHERE tipo = ? AND vigente = 1', ['EPS']],
+    afp: ['SELECT identidad_seguridad_social AS id, nombre FROM entidad_seguridad_social WHERE tipo = ? AND vigente = 1', ['AFP']],
     parentesco: ['SELECT idparentesco AS id, nombre FROM parentesco'],
     cargo: ['SELECT idcargo AS id, nombre FROM cargo'],
     tipo_direccion: ['SELECT idtipo_direccion AS id, nombre FROM tipo_direccion']

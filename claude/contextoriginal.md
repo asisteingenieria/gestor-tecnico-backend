@@ -632,3 +632,46 @@ La lista completa y numerada está en `asistencia.md` §22. Lo principal:
   sincronizar el usuario si cambia la cédula, exponer la salida anticipada.
 - Cuatro errores de interfaz de la prueba en Chrome (contadores ±30 s, tarjeta "En pausa", contadores
   del menú, "Salida programada" en jornada finalizada), sin corregir.
+
+---
+
+## 14. Sesión 2026-10-20 — Jefes de equipo sin rol, cuentas de empleado separadas y despliegue
+
+Detalle completo en `asistencia.md` §23-§27; pendientes vigentes en §28.
+
+### 14.1 Qué cambió
+
+- **Jefe de equipo sin rol (§23):** quien sea `contrato.jefe_area_id` de un contrato activo gestiona
+  su equipo (horarios, horas extra, trazabilidad) sin importar el rol de su cuenta. Middleware
+  `canDirigirEquipo`, consultado en cada petición; el frontend lo sabe por `esJefeEquipo` (login) /
+  `es_jefe_equipo` (`/auth/me`) y entra a `/operaciones` rotulado "Jefe de equipo".
+- **Cuentas de empleado fuera de `users` (§24, migración 065):** tabla `cuenta_empleado` (usuario y
+  clave inicial = cédula, cambio obligatorio). Mismo login: primero `users`, luego `cuenta_empleado`.
+  La sesión lleva `tipo_cuenta: 'empleado'` y solo entra a `/api/auth` y `/api/asistencia`. La
+  autoría en asistencia va en columnas `*_por_cuenta_id` paralelas a `*_por_user_id`.
+- **Plantillas por jefe (§25, migración 066):** `horario_plantilla.dueno_users_company_id`; la de
+  otro jefe responde 404. Además: cuenta regresiva de salida en horas, aviso al pedir horas extra y
+  contadores del menú que se recargan.
+- **Fin de `director_operaciones` (§26, migración 067):** `users.activo`; las cuentas de ese rol se
+  desactivan (no se borran) y el rol ya no se crea desde `/users`. Kevin Buitrago y todo jefe entran
+  con su cédula.
+- **"Seleccionar todos" (§27):** en la asignación de horarios; el backend valida el equipo en una
+  consulta e inserta en lotes dentro de una transacción (106 personas × un mes en 0,18 s).
+
+### 14.2 Producción
+
+- Respaldo `/root/respaldo_antes_065_2026-10-20.sql` (el primer intento con `-u root` dio un archivo
+  vacío; funcionó con las credenciales del `.env` del backend).
+- `Descargas\migraciones_produccion_065_067.sql` en Workbench. El primer intento paró con el error 1267
+  (collation `utf8mb4_unicode_ci` de `users`/`users_company` contra `0900` de la tabla nueva) antes
+  de mover nada; corregido con `BINARY` y el segundo intento terminó bien.
+- Backend `main` con el merge #14, `pm2 restart`; frontend reconstruido.
+  `crearCuentasEmpleados.js --aplicar`: 389 cuentas creadas (producción no tenía ninguna por cédula).
+- Commits en `sebas-branch`: backend `ed09eae`, `07389cc`, `f75d87c`; frontend `7f8da9e`, `c178dab`.
+  `f75d87c`/`c178dab` (§27) quedaron pendientes de merge y despliegue.
+
+### 14.3 Riesgos señalados
+
+- La `ASISLOCK_API_KEY` de producción se pegó en el chat: rotarla.
+- El login no tiene límite de intentos y ahora hay 389 cuentas cuyo usuario es la cédula.
+- Nadie puede restablecer desde la interfaz la clave de una cuenta de empleado.

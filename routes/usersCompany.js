@@ -4,6 +4,7 @@ const userCompanyController = require('../controllers/userCompanyController');
 const { verifyToken } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
+const { soportesNovedad, soportesTraspaso } = require('../middleware/uploadSoportesRrhh');
 
 // Gestión completa del módulo de empleados: exclusiva de Recursos Humanos (y admin).
 const verificarRecursosHumanos = (req, res, next) => {
@@ -44,13 +45,26 @@ router.post('/novedades',                verificarRecursosHumanos, userCompanyCo
 router.get('/novedades/:novedadId',      verificarRecursosHumanos, userCompanyController.getNovedadById);
 router.put('/novedades/:novedadId',      verificarRecursosHumanos, userCompanyController.updateNovedad);
 router.delete('/novedades/:novedadId',   verificarRecursosHumanos, userCompanyController.deleteNovedad);
+// Soportes documentales (PDF o imagen) de una novedad, uno por tipo de soporte (migración 069)
+router.get('/novedades/:novedadId/soportes',                               verificarRecursosHumanos, userCompanyController.getSoportesNovedad);
+router.post('/novedades/:novedadId/soportes/:tipoSoporteId',               verificarRecursosHumanos, soportesNovedad.middleware, userCompanyController.subirSoporteNovedad);
+router.get('/novedades/:novedadId/soportes/:tipoSoporteId/archivo',        verificarRecursosHumanos, userCompanyController.descargarSoporteNovedad);
+router.delete('/novedades/:novedadId/soportes/:tipoSoporteId',             verificarRecursosHumanos, userCompanyController.eliminarSoporteNovedad);
 
 // Traspasos
 router.get('/traspasos',                 verificarRecursosHumanos, userCompanyController.getTraspasos);
+// Alertas de traspasos (evaluación del encargo, retorno del trabajo en casa — migración 070)
+router.get('/traspasos/alertas',         verificarRecursosHumanos, userCompanyController.getAlertasTraspasos);
 router.post('/traspasos',                verificarRecursosHumanos, userCompanyController.createTraspaso);
 router.get('/traspasos/:traspasoId',     verificarRecursosHumanos, userCompanyController.getTraspasoById);
 router.put('/traspasos/:traspasoId',     verificarRecursosHumanos, userCompanyController.updateTraspaso);
 router.delete('/traspasos/:traspasoId',  verificarRecursosHumanos, userCompanyController.deleteTraspaso);
+router.post('/traspasos/:traspasoId/alertas/evaluacion',                   verificarRecursosHumanos, userCompanyController.reenviarAlertaEvaluacion);
+// Documentos (PDF o imagen) de un traspaso, uno por tipo de documento (migración 070)
+router.get('/traspasos/:traspasoId/soportes',                              verificarRecursosHumanos, userCompanyController.getSoportesTraspaso);
+router.post('/traspasos/:traspasoId/soportes/:tipoSoporteId',              verificarRecursosHumanos, soportesTraspaso.middleware, userCompanyController.subirSoporteTraspaso);
+router.get('/traspasos/:traspasoId/soportes/:tipoSoporteId/archivo',       verificarRecursosHumanos, userCompanyController.descargarSoporteTraspaso);
+router.delete('/traspasos/:traspasoId/soportes/:tipoSoporteId',            verificarRecursosHumanos, userCompanyController.eliminarSoporteTraspaso);
 
 // Pasivo vacacional
 router.get('/vacaciones',                verificarRecursosHumanos, userCompanyController.getVacaciones);

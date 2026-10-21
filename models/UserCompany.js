@@ -621,10 +621,15 @@ class UserCompany {
     }
 
     static async delete(id) {
-        // contrato tiene FK RESTRICT hacia users_company: eliminar primero la cadena laboral
+        // contrato, cuenta_empleado (065) y horario_plantilla.dueno (066) no tienen ON DELETE hacia
+        // users_company: se resuelven primero. La cuenta por cédula se borra con la ficha (lo que
+        // registró en asistencia queda, con su autor en NULL por SET NULL); las plantillas de horario
+        // de un jefe quedan sin dueño en vez de borrarse, para no tocar los horarios ya asignados.
         const conn = await db.getConnection();
         try {
             await conn.beginTransaction();
+            await conn.query('DELETE FROM cuenta_empleado WHERE users_company_id = ?', [id]);
+            await conn.query('UPDATE horario_plantilla SET dueno_users_company_id = NULL WHERE dueno_users_company_id = ?', [id]);
             await conn.query('DELETE FROM contrato WHERE users_company_id = ?', [id]);
             const [result] = await conn.query('DELETE FROM users_company WHERE id = ?', [id]);
             await conn.commit();
@@ -655,14 +660,39 @@ class UserCompany {
         const [modalidades] = await db.query('SELECT idmodalidad AS id, nombre FROM modalidad ORDER BY idmodalidad');
         const [oleadas] = await db.query('SELECT idoleada AS id, nombre, fecha_inicio FROM oleada ORDER BY fecha_inicio DESC');
         const [estadosContrato] = await db.query('SELECT idestado_contrato AS id, nombre FROM estado_contrato ORDER BY idestado_contrato');
-        const [entidades] = await db.query('SELECT identidad_seguridad_social AS id, tipo, nombre FROM entidad_seguridad_social ORDER BY tipo, nombre');
+        // Todas, con `vigente`: los selectores del alta solo ofrecen las vigentes (hoja "EPS AFP
+        // CESANTIAS", migración 068), pero un empleado ya afiliado a una no vigente debe seguir
+        // viéndola en su ficha y al editarlo.
+        const [entidades] = await db.query('SELECT identidad_seguridad_social AS id, tipo, nombre, vigente FROM entidad_seguridad_social ORDER BY tipo, nombre');
         const [bancos] = await db.query('SELECT idbanco AS id, nombre FROM banco ORDER BY nombre');
         const [tiposCuenta] = await db.query('SELECT idtipo_cuenta AS id, nombre FROM tipo_cuenta ORDER BY idtipo_cuenta');
         const [tiposDireccion] = await db.query('SELECT idtipo_direccion AS id, nombre FROM tipo_direccion ORDER BY idtipo_direccion');
         const [zonasDireccion] = await db.query('SELECT idzona_direccion AS id, nombre FROM zona_direccion ORDER BY idzona_direccion');
         const [tiposVivienda] = await db.query('SELECT idtipo_vivienda AS id, nombre FROM tipo_vivienda ORDER BY nombre');
         const [parentescos] = await db.query('SELECT idparentesco AS id, nombre FROM parentesco ORDER BY idparentesco');
-        const [tiposNovedad] = await db.query('SELECT idtipo_novedad AS id, categoria, nombre FROM tipo_novedad ORDER BY categoria, nombre');
+        // Con `vigente` (los selectores solo ofrecen los de la hoja "Novedades", migración 069) y
+        // `soportes`: los ids de tipos_soporte_novedad que aplican a cada tipo.
+        const [tiposNovedad] = await db.query(`
+            SELECT tn.idtipo_novedad AS id, tn.categoria, tn.nombre, tn.vigente,
+                   GROUP_CONCAT(tns.tipo_soporte_novedad_id) AS soportes
+            FROM tipo_novedad tn
+            LEFT JOIN tipo_novedad_soporte tns ON tns.tipo_novedad_id = tn.idtipo_novedad
+            GROUP BY tn.idtipo_novedad, tn.categoria, tn.nombre, tn.vigente
+            ORDER BY tn.idtipo_novedad
+        `);
+        for (const t of tiposNovedad) t.soportes = t.soportes ? t.soportes.split(',').map(Number) : [];
+        const [tiposSoporteNovedad] = await db.query('SELECT idtipo_soporte_novedad AS id, nombre, orden FROM tipo_soporte_novedad ORDER BY orden');
+        // Tipos de traspaso (hoja "TRASPASOS", migración 070) con los ids de los documentos que aplican.
+        const [tiposTraspaso] = await db.query(`
+            SELECT tt.idtipo_traspaso AS id, tt.codigo, tt.nombre, tt.vigente,
+                   GROUP_CONCAT(tts.tipo_soporte_traspaso_id) AS soportes
+            FROM tipo_traspaso tt
+            LEFT JOIN tipo_traspaso_soporte tts ON tts.tipo_traspaso_id = tt.idtipo_traspaso
+            GROUP BY tt.idtipo_traspaso, tt.codigo, tt.nombre, tt.vigente, tt.orden
+            ORDER BY tt.orden
+        `);
+        for (const t of tiposTraspaso) t.soportes = t.soportes ? t.soportes.split(',').map(Number) : [];
+        const [tiposSoporteTraspaso] = await db.query('SELECT idtipo_soporte_traspaso AS id, codigo, nombre, orden FROM tipo_soporte_traspaso ORDER BY orden');
         const [tiposRetiro] = await db.query('SELECT idtipo_retiro AS id, nombre, motivo_sugerido, requiere_justificacion FROM tipo_retiro ORDER BY idtipo_retiro');
         const [salariosReferencia] = await db.query('SELECT Cliente_idCliente AS cliente_id, cargo_idcargo AS cargo_id, salario FROM salario_referencia');
         const [tiposVacuna] = await db.query('SELECT idtipo_vacuna AS id, nombre FROM tipo_vacuna ORDER BY nombre');
@@ -684,30 +714,41 @@ class UserCompany {
         // contrato real (34/8/4 personas respectivamente, no 397). Se deriva de los propios datos
         // de contrato en vez de mantener un catalogo aparte.
         //
-        // Cada fila trae además la campaña (y, para jefe inmediato, el cargo) del contrato real
-        // que sustenta esa relación -- una misma persona puede aparecer en varias filas si es
-        // jefe en más de una campaña. El frontend usa esto para filtrar los 3 selectores según
-        // la Campaña/Cargo ya elegidos del empleado que se está registrando, en vez de ofrecer
-        // los 34/8/4 candidatos completos sin importar a qué campaña pertenecen. Verificado contra
-        // datos reales: "Jefe inmediato" varía por Campaña+Cargo (ej. T&T+Agente call center trae
-        // 7 candidatos distintos, T&T+Coordinador Call trae solo 1), mientras que "Jefe de área" y
-        // "Director de área" varían casi siempre solo por Campaña (1 persona cubre toda la
-        // campaña sin importar el cargo del subordinado) -- por eso el cargo solo se expone para
-        // jefe inmediato. Ver claude/modulo recursoshumanos.md para el detalle de la sesión.
-        const empleadosPorRol = async (columna, incluirCargo) => {
+        // Cada fila trae además la campaña y el cargo del contrato real que sustenta esa relación
+        // -- una misma persona puede aparecer en varias filas si es jefe en más de una campaña o
+        // cargo. El frontend filtra los 3 selectores por la Campaña+Cargo ya elegidos del
+        // empleado que se está registrando. Los 3 roles varían por cargo dentro de la campaña,
+        // no solo jefe inmediato (ej. T&T: Agente call center → jefe de área Kevin Buitrago,
+        // Coordinador call → Nelson Acero). Ver claude/modulo recursoshumanos.md §29.2 y §32.
+        const empleadosPorRol = async (columna) => {
             const [rows] = await db.query(`
                 SELECT DISTINCT u.id, CONCAT_WS(' ', u.primer_nombre, u.segundo_nombre, u.primer_apellido, u.segundo_apellido) AS nombre_completo,
-                       c.campania_idcampania AS campania_id${incluirCargo ? ', c.cargo_idcargo AS cargo_id' : ''}
+                       c.campania_idcampania AS campania_id, c.cargo_idcargo AS cargo_id
                 FROM contrato c JOIN users_company u ON u.id = c.${columna}
                 WHERE c.${columna} IS NOT NULL
                 ORDER BY nombre_completo
             `);
             return rows;
         };
+        // Cadenas de mando reales (Campaña + Cargo → jefe inmediato → jefe de área → director)
+        // con cuántos contratos vigentes las siguen. El frontend sugiere con esto la jefatura de
+        // un empleado nuevo: la cadena más común para su Campaña+Cargo, y al elegir el jefe
+        // inmediato, el jefe de área y director de ese mismo equipo. Los contratos retirados o
+        // inactivos no cuentan, para no sugerir equipos que ya no existen. Las cadenas vacías
+        // (cargos de la cima, como un director, sin jefes) se incluyen a propósito: dicen "este
+        // cargo no tiene jefes", distinto de "combinación sin historia".
+        const [cadenasJefatura] = await db.query(`
+            SELECT c.campania_idcampania AS campania_id, c.cargo_idcargo AS cargo_id,
+                   c.jefe_inmediato_id, c.jefe_area_id, c.director_area_id, COUNT(*) AS total
+            FROM contrato c
+            JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+            WHERE ec.nombre NOT IN ('retirado', 'inactivo')
+            GROUP BY c.campania_idcampania, c.cargo_idcargo, c.jefe_inmediato_id, c.jefe_area_id, c.director_area_id
+        `);
         const [jefesInmediatos, jefesArea, directoresArea] = await Promise.all([
-            empleadosPorRol('jefe_inmediato_id', true),
-            empleadosPorRol('jefe_area_id', false),
-            empleadosPorRol('director_area_id', false)
+            empleadosPorRol('jefe_inmediato_id'),
+            empleadosPorRol('jefe_area_id'),
+            empleadosPorRol('director_area_id')
         ]);
 
         return {
@@ -736,6 +777,9 @@ class UserCompany {
             tipos_vivienda: tiposVivienda,
             parentescos,
             tipos_novedad: tiposNovedad,
+            tipos_soporte_novedad: tiposSoporteNovedad,
+            tipos_traspaso: tiposTraspaso,
+            tipos_soporte_traspaso: tiposSoporteTraspaso,
             tipos_retiro: tiposRetiro,
             salarios_referencia: salariosReferencia,
             tipos_vacuna: tiposVacuna,
@@ -750,7 +794,8 @@ class UserCompany {
             empleados,
             jefes_inmediatos: jefesInmediatos,
             jefes_area: jefesArea,
-            directores_area: directoresArea
+            directores_area: directoresArea,
+            cadenas_jefatura: cadenasJefatura
         };
     }
 
