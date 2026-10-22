@@ -1951,6 +1951,15 @@ registrar un empleado falla (el gancho está dentro de la transacción del alta)
 - Sin pantalla en Gestor todavía: RRHH no puede restablecer la clave de pantalla gris de un
   empleado que la olvidó (hoy: a mano en la BD).
 
+**Revisión 2026-10-22 (migración 075) — sin cambio de contraseña obligatorio:** los usuarios de
+pantalla gris se crean con clave por defecto = cédula y **ya no se les pide cambiarla**
+(`debe_cambiar_password` DEFAULT 0, y apagada en los ~390 ya creados), para que el agente no quede
+bloqueado si la olvida; quien quiera, igual puede cambiarla. El cambio es de una línea en
+`usuarioPantallaGrisRepository.insertar` (0 en vez de 1) más la migración 075. **No toca
+`cuenta_empleado`**, que sí sigue pidiendo el cambio al primer ingreso. Esto cubre en parte el
+pendiente de arriba: al no caducar, se olvida menos; falta igual la pantalla de RRHH para
+restablecerla. Pendiente en producción (va después de la 071, ya aplicada).
+
 ## 32. Sesión 2026-10-21 — Rol `financiera` y reporte de horas extras (migraciones 072 y 073)
 
 **Pedido y evolución.** Primero se montó un flujo manual (072): el jefe armaba el reporte del mes
@@ -2016,3 +2025,61 @@ rutas viejas → 404, campana sin recordatorios). El script quedó fuera del rep
 **Para producción:** aplicar 072 (si falta) y 073, desplegar backend y frontend (con
 `npm run build`), y crear el usuario `financiera` desde `/users`. Para que el dinero cuadre, las
 fichas deben tener salario en `historial_salarial`.
+
+## 33. Sesión 2026-10-22 — Clasificación automática de la hora extra (migración 074)
+
+El agente ya **no elige** la clase: ingresa la **franja** (fecha + hora inicio/fin) y el servidor la
+clasifica solo. Quita el error humano de la 073 (donde el agente escogía la clase a ojo). Acotado a
+lo que el agente solicita (los recargos de turnos nocturnos "automáticos" desde la jornada real
+quedan como posible fase futura).
+
+**Regla (confirmada con el usuario):** para cada minuto de la franja —festivo/domingo (tabla
+`festivo_colombia` o día de la semana), dentro/fuera del turno asignado, y de día/noche según la
+`ventana_nocturna` vigente— se mapea a una de las 5 clases:
+- Festivo/domingo: dentro del turno → `dominicales_festivas` (90%); fuera → `extras_dominicales_festivas` (115%).
+- Ordinario, dentro del turno: de noche → `recargo_nocturno`; de día → no aplica (jornada ordinaria).
+- Ordinario, fuera del turno: de día → `extras_diurnas`; de noche → `extras_nocturnas`.
+Sin turno asignado o día de descanso: todo cuenta como fuera del turno (extra). Una franja puede
+cruzar límites (día↔noche, medianoche hacia un festivo) y partirse en **varios tramos**.
+
+**Umbral nocturno:** `ventana_nocturna(vigente_desde, hora_inicio, hora_fin)`. Se siembra `21:00`
+(histórico) y `19:00` desde la reforma (Ley 2466/2025); se toma la vigencia aplicable a la fecha,
+para que un mes viejo se recalcule con el umbral que regía. **Confirmar la fecha exacta de entrada
+en vigencia del tramo de las 7 p.m. y ajustarla si cambia.**
+
+**Festivos:** `festivo_colombia` con 2025-2030, generados con Pascua (algoritmo gregoriano) + Ley
+Emiliani (traslado al lunes). Los domingos no se guardan: salen del día de la semana.
+
+**Migración 074:** `hora_extra.hora_inicio/hora_fin` (TIME), tabla `hora_extra_tramo`
+(`idhora_extra`, `clase`, `minutos`; UNIQUE por clase, ON DELETE CASCADE), `festivo_colombia`,
+`ventana_nocturna`, y backfill de un tramo por cada hora extra aprobada existente. Idempotente salvo
+los `ALTER`. **Va DESPUÉS de 072+073. Aplicada en local el 2026-10-22; pendiente en producción.**
+
+**Backend (cuatro capas):**
+- `domain/asistencia/clasificarHoraExtra.js`: puro. `clasificarHoraExtra({ inicio, fin, turno,
+  dia0EsFestivo, dia1EsFestivo, ventanaNocturna })` → `[{clase, minutos}]`; helpers `totalMinutos`,
+  `claseDominante`, `aMinutos`. El servicio resuelve antes turno/festivos/ventana y se los pasa.
+- `repositories/asistencia`: nuevos `festivoRepository.sonFestivos`, `ventanaNocturnaRepository.vigenteEn`;
+  `horaExtraRepository` gana `hora_inicio/hora_fin` en la solicitud y `insertarTramos`/`reemplazarTramos`/
+  `findTramos`/`findTramosPorHorasExtra`. El reporte (`reporteHorasExtraRepository`) suma desde
+  `hora_extra_tramo` (LEFT JOIN) en vez de `he.clase`.
+- `services/asistencia/horaExtraService.js`: `solicitar` clasifica y guarda solicitud + tramos en
+  transacción; `previsualizar` (sin guardar); `aprobar` acepta `tramos` (ajuste del jefe) o conserva
+  los calculados; `asignar` guarda un tramo único; `misHorasExtra`/`bandeja` adjuntan los tramos.
+- Rutas: `POST /horas-extra/previsualizar` (nueva); `solicitar` pide `hora_inicio/hora_fin`; `aprobar`
+  recibe `tramos`. Validador: tipo `hora` (`HH:MM`).
+
+**Frontend:**
+- `HorasExtra.jsx`: el agente ingresa franja y ve la **clasificación sugerida** (llamada a
+  `previsualizar`), ya no un selector de clase. El jefe aprueba aceptando la propuesta o con un editor
+  de **tramos** (clase + minutos, con agregar/quitar). `api.js`: `previsualizarHoraExtra`.
+- `utils/reporteHorasExtra.js`: `etiquetaClase` para mostrar los tramos.
+
+**Pruebas:** 12 tests unitarios del dominio (cruce día/noche, umbral parametrizado, turno nocturno =
+recargo, sin turno, descanso, festivo dentro/fuera del turno, cruce de medianoche a festivo; total
+**172**) y e2e (previsualizar, solicitar con franja que se clasifica sola, aprobar ajustando tramos,
+reporte del jefe desde tramos; **127 checks**).
+
+**Para producción:** aplicar 074 (después de 072+073), desplegar backend y frontend (con
+`npm run build`). Para clasificar bien, los empleados deben tener **horario asignado** (si no, todo
+cuenta como extra) y la `ventana_nocturna`/festivos ya quedan sembrados por la migración.
