@@ -6,6 +6,7 @@ async function solicitar(req, res) {
         usersCompanyId: req.user.users_company_id,
         fecha: req.body.fecha,
         minutosEstimados: req.body.minutos_estimados,
+        clase: req.body.clase,
         motivo: req.body.motivo,
         solicitadoPor: autorDe(req)
     });
@@ -33,6 +34,7 @@ async function aprobar(req, res) {
         directorUsersCompanyId: req.user.users_company_id,
         idhoraExtra: Number(req.params.id),
         minutosAprobados: req.body.minutos_aprobados,
+        clase: req.body.clase,
         comentario: req.body.comentario,
         aprobadoPor: autorDe(req)
     });
@@ -55,6 +57,7 @@ async function asignar(req, res) {
         empleados: req.body.empleados,
         fecha: req.body.fecha,
         minutos: req.body.minutos,
+        clase: req.body.clase,
         motivo: req.body.motivo,
         aprobadoPor: autorDe(req)
     });

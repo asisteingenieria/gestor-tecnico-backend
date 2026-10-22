@@ -13,10 +13,14 @@ const rangoQuerySchema = {
     }
 };
 
+// Las 5 clases del formato V.3; la elige el agente al solicitar y el jefe la ajusta al aprobar.
+const CLASES_HORA_EXTRA = ['recargo_nocturno', 'extras_diurnas', 'extras_nocturnas', 'dominicales_festivas', 'extras_dominicales_festivas'];
+
 const solicitarHoraExtraSchema = {
     body: {
         fecha: { requerido: true, tipo: 'fecha' },
         minutos_estimados: { requerido: true, tipo: 'entero' },
+        clase: { requerido: true, enum: CLASES_HORA_EXTRA },
         motivo: { tipo: 'texto' }
     }
 };
@@ -104,6 +108,7 @@ const aprobarHoraExtraSchema = {
     params: { id: { requerido: true, tipo: 'entero' } },
     body: {
         minutos_aprobados: { requerido: true, tipo: 'entero' },
+        clase: { enum: CLASES_HORA_EXTRA },
         comentario: { tipo: 'texto' }
     }
 };
@@ -118,6 +123,7 @@ const asignarHoraExtraSchema = {
         empleados: { requerido: true, tipo: 'array', minimo: 1 },
         fecha: { requerido: true, tipo: 'fecha' },
         minutos: { requerido: true, tipo: 'entero' },
+        clase: { requerido: true, enum: CLASES_HORA_EXTRA },
         motivo: { tipo: 'texto' }
     }
 };
@@ -139,21 +145,9 @@ const periodoQuerySchema = {
     query: { periodo: { requerido: true, tipo: 'texto' } }
 };
 
-const guardarReporteHorasExtraSchema = {
-    body: {
-        periodo: { requerido: true, tipo: 'texto' },
-        filas: { requerido: true, tipo: 'array' }
-    }
-};
-
-const devolverReporteSchema = {
-    params: { id: { requerido: true, tipo: 'entero' } },
-    body: { observacion: { requerido: true, tipo: 'texto' } }
-};
-
-const fechaLimiteSchema = {
-    params: { periodo: { requerido: true, tipo: 'texto' } },
-    body: { fecha_limite: { requerido: true, tipo: 'fecha' } }
+// Reporte de financiera: el periodo y, opcionalmente, una campaña.
+const reporteFinancieraQuerySchema = {
+    query: { periodo: { requerido: true, tipo: 'texto' }, campania_id: { tipo: 'entero' } }
 };
 
 const empleadosFinancieraQuerySchema = {
@@ -167,9 +161,7 @@ const jornadasEmpleadoSchema = {
 
 module.exports = {
     periodoQuerySchema,
-    guardarReporteHorasExtraSchema,
-    devolverReporteSchema,
-    fechaLimiteSchema,
+    reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
     jornadasEmpleadoSchema,
     iniciarPausaSchema,
