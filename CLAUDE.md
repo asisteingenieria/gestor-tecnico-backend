@@ -162,9 +162,15 @@ nombres** (está pensado para el formulario de edición). Para mostrarlos hay qu
 - Producción: servidor `srv845606`. Backend en `/root/gestor-tecnico-backend` bajo **pm2**
   (`gestor-backend`); frontend en `/var/www/gestor-tecnico-frontend` servido por **nginx**
   desde `dist/`.
-- ⚠️ **El `dist/` del frontend está commiteado.** Un `git pull` en producción **sin**
-  `npm install && npm run build` deja servida una versión vieja. Ya causó un bug real con el
-  rol `disenador`. Todo pull al frontend va seguido de rebuild, sin excepción.
+- ⚠️ **El `dist/` del frontend YA NO se versiona** (desde el 2026-10-22, frontend `9bcc5a6`, aún
+  pendiente de merge/despliegue): está en `.gitignore` y lo genera `npm run build`. Esto quitó el
+  choque de cada despliegue (`local changes to dist/index.html would be overwritten by merge`).
+  **Todo pull al frontend sigue yendo seguido de `npm install && npm run build`, sin excepción**: sin
+  el rebuild, nginx sirve el `dist/` viejo que quedó en el server (antes el pull sin build ya causó
+  un bug real con el rol `disenador`). En el primer despliegue de este cambio, el server todavía
+  tiene el `dist/` viejo trackeado y con cambios locales: hacer `git reset --hard HEAD` antes del
+  pull, luego el pull (que borra el `dist/` versionado) y `npm run build` (que lo regenera). De ahí
+  en adelante el pull no vuelve a tocar `dist/`.
 
 ## Documentación del proyecto
 
