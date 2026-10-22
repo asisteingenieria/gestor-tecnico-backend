@@ -2,8 +2,9 @@ const db = require('../../config/db');
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
-const { fechaLaboral } = require('../../utils/fechaBogota');
-const { NoAutorizadoError, NoEncontradoError } = require('../../errors/AppError');
+const { fechaLaboral, rangoDelMes } = require('../../utils/fechaBogota');
+const { NoAutorizadoError, NoEncontradoError, ValidacionError } = require('../../errors/AppError');
+const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/resumenMensual');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const cierreService = require('./cierreService');
 const asislockVista = require('./asislockVista');
@@ -115,6 +116,34 @@ async function estadisticasEquipo({ directorUsersCompanyId, desde, hasta }) {
     return { desde, hasta, empleados: porEmpleado };
 }
 
+// Resumen mensual del equipo (asistencia.md §35): por empleado, los totales del mes y la grilla
+// día a día, para que el jefe lleve la traza mes a mes. Normaliza los días pasados (cierre) para
+// que las ausencias queden bien antes de agregar.
+async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo || '')) {
+        throw new ValidacionError('El periodo debe tener el formato AAAA-MM');
+    }
+    const { desde, hasta } = rangoDelMes(periodo);
+    const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    const ahora = new Date();
+
+    const filas = await Promise.all(empleados.map(async (empleado) => {
+        await cierreService.normalizarRangoSiEsPasado(empleado.users_company_id, desde, hasta, ahora);
+        const jornadas = await jornadaRepo.findRango(empleado.users_company_id, desde, hasta);
+        return {
+            users_company_id: empleado.users_company_id,
+            nombre: empleado.nombre_propio,
+            documento: empleado.numero_identificacion,
+            cargo: empleado.cargo,
+            ...resumenDeJornadas(jornadas)
+        };
+    }));
+    filas.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+
+    return { periodo, desde, hasta, empleados: filas, totales: totalesEquipo(filas) };
+}
+
 async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, nota, registradoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
 
@@ -154,5 +183,6 @@ module.exports = {
     jornadasDeEmpleado,
     trazabilidadDeEmpleado,
     estadisticasEquipo,
+    resumenMensualEquipo,
     registrarEventoManual
 };

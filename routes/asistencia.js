@@ -63,6 +63,7 @@ router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));
 router.get('/equipo/:empleadoId/jornadas', canDirigirEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
 router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canDirigirEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
 router.get('/equipo/estadisticas', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
+router.get('/equipo/resumen-mensual', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(equipoController.resumenMensual));
 router.post('/equipo/jornada/:id/evento', canDirigirEquipo, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
 
 router.get('/horarios/plantillas', canDirigirEquipo, asyncHandler(horarioController.listarPlantillas));
@@ -85,6 +86,7 @@ router.get('/reporte-horas-extra', canDirigirEquipo, validar(periodoQuerySchema)
 
 // --- Financiera (§32): reportes de horas extras y trazabilidad de todos por campaña ---
 router.get('/financiera/reporte-horas-extra', isFinanciera, validar(reporteFinancieraQuerySchema), asyncHandler(financieraController.reporte));
+router.get('/financiera/resumen-mensual', isFinanciera, validar(reporteFinancieraQuerySchema), asyncHandler(financieraController.resumenMensual));
 router.get('/financiera/campanias', isFinanciera, asyncHandler(financieraController.campanias));
 router.get('/financiera/empleados', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.empleados));
 router.get('/financiera/empleados/:empleadoId/jornadas', isFinanciera, validar(jornadasEmpleadoSchema), asyncHandler(financieraController.jornadasDe));

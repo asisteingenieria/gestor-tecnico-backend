@@ -34,6 +34,14 @@ async function estadisticasEquipo(req, res) {
     res.json(resultado);
 }
 
+async function resumenMensual(req, res) {
+    const resultado = await equipoService.resumenMensualEquipo({
+        directorUsersCompanyId: req.user.users_company_id,
+        periodo: req.query.periodo
+    });
+    res.json(resultado);
+}
+
 async function registrarEventoManual(req, res) {
     const resultado = await equipoService.registrarEventoManual({
         directorUsersCompanyId: req.user.users_company_id,
@@ -45,4 +53,4 @@ async function registrarEventoManual(req, res) {
     res.json(resultado);
 }
 
-module.exports = { equipo, jornadasDe, trazabilidadDe, estadisticasEquipo, registrarEventoManual };
+module.exports = { equipo, jornadasDe, trazabilidadDe, estadisticasEquipo, resumenMensual, registrarEventoManual };

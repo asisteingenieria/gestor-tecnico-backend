@@ -11,6 +11,13 @@ async function reporte(req, res) {
     }));
 }
 
+async function resumenMensual(req, res) {
+    res.json(await financieraService.resumenMensual({
+        periodo: req.query.periodo,
+        campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null
+    }));
+}
+
 async function campanias(req, res) {
     res.json(await financieraService.campanias());
 }
@@ -31,4 +38,4 @@ async function trazabilidadDe(req, res) {
     res.json(await financieraService.trazabilidadDe({ empleadoId: Number(req.params.empleadoId), fecha: req.params.fecha }));
 }
 
-module.exports = { reporte, campanias, empleados, jornadasDe, trazabilidadDe };
+module.exports = { reporte, resumenMensual, campanias, empleados, jornadasDe, trazabilidadDe };

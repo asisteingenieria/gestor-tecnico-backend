@@ -2135,3 +2135,40 @@ regresión.
 `decidirLogin` reabre con HE aprobada y la ignora sin ella; `decidirLogout` cierra con `fin_extra`)
 — total **192**; e2e 127 sin regresión; prueba de integración real (entrada→salida→login en franja
 →logout) que confirma `inicio_extra`/`fin_extra` y el resumen con la hora real de ingreso.
+
+## 35. Sesión 2026-10-22 — Vista mensual del equipo para el jefe
+
+El jefe tenía solo "Equipo hoy" (foto del día) y la trazabilidad de un empleado día a día; faltaba
+un consolidado mes a mes del equipo. Se agrega una vista mensual (sin cambios de BD: usa las
+jornadas ya calculadas).
+
+**Backend:** `GET /asistencia/equipo/resumen-mensual?periodo=AAAA-MM` (`canDirigirEquipo`,
+`periodoQuerySchema`). `equipoService.resumenMensualEquipo` normaliza los días pasados (cierre) por
+empleado y agrega con el dominio puro `domain/asistencia/resumenMensual.js` (`resumenDeJornadas`,
+`totalesEquipo`). Devuelve, por empleado: días trabajados, ausencias, días tarde, puntualidad %,
+minutos trabajados/tarde/extra y por pausa (baño, break, almuerzo, capacitación), salida anticipada,
+y la grilla `dias` (fecha + estado + tarde/trabajado/extra). Más los totales del equipo.
+
+**Frontend:** `EquipoMensual.jsx` (`/operaciones/equipo/mes`, en el nav del jefe como "Equipo ·
+mes"): KPIs del mes, un **calendario tipo heatmap** día × empleado (verde puntual, ámbar tarde, rojo
+ausente, azul en curso, gris pendiente; cada celda enlaza a la trazabilidad de ese día vía
+`?fecha=`), y la tabla detallada por empleado con totales y export CSV. `TrazabilidadEmpleado`
+ahora acepta `?fecha=` para abrir un día concreto desde el calendario.
+
+**Probado:** dominio `resumenMensual` (196 unitarias) + prueba de integración del endpoint contra la
+BD. Sin migración.
+
+**Financiera / admin (misma sesión):** la misma idea a nivel organización.
+`GET /asistencia/financiera/resumen-mensual?periodo=&campania_id=` (`isFinanciera`): comparativo de
+TODAS las campañas (empleados, puntualidad %, días trabajados, ausencias, horas trabajadas/extra) y,
+si se pasa `campania_id`, el detalle de esa campaña (empleados + grilla día a día, como el jefe).
+Hecho con consultas AGREGADAS (`repositories/asistencia/resumenMensualRepository.js`:
+`agregadosPorEmpleado` con un `SUM(CASE…)` sobre `jornada` + contrato activo + campaña, y
+`jornadasDiaPorCampania` para la grilla), no un recorrido por empleado; no normaliza (confía en el
+cron diario). `financieraService.resumenMensual` agrupa con `totalesEquipo`. Frontend:
+`financiera/AsistenciaMensual.jsx` (`/recursos-humanos/asistencia-mensual`, nav "Asistencia
+mensual"): KPIs globales, comparativo por campaña con barras de puntualidad, y al abrir una campaña
+su calendario + tabla; las celdas enlazan a la trazabilidad por campaña con `?fecha=`.
+Verificado con prueba de integración (comparativo de 2 campañas + detalle). Sin migración.
+
+**Tendencia mes contra mes:** el resumen de financiera también trae `periodo_anterior` y, por campaña, `anterior` (los mismos totales del mes previo, consulta agregada aparte), para mostrar la variación de puntualidad en puntos porcentuales.
