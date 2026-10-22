@@ -52,55 +52,83 @@ async function resumenMensual({ periodo, campaniaId = null }) {
     const periodoAnterior = mesAnterior(periodo);
     const rangoPrev = rangoDelMes(periodoAnterior);
 
-    // Una consulta agregada por mes (actual y anterior) para el comparativo y la tendencia.
-    const [todos, todosPrev] = await Promise.all([
+    // Todas las campañas con empleados activos (aunque no tengan jornadas ese mes) + sus agregados.
+    const [campaniasActivas, todos, todosPrev] = await Promise.all([
+        empleadoRepo.findCampaniasConEmpleados(),
         resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde, hasta }),
         resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde: rangoPrev.desde, hasta: rangoPrev.hasta })
     ]);
 
-    const totalesPorCampania = (filas) => {
+    const agruparPorCampania = (filas) => {
         const mapa = new Map();
         for (const e of filas) {
             const clave = e.idcampania ?? 'sin_campania';
-            if (!mapa.has(clave)) mapa.set(clave, { idcampania: e.idcampania ?? null, campania: e.campania || 'Sin campaña', filas: [] });
-            mapa.get(clave).filas.push(e);
+            if (!mapa.has(clave)) mapa.set(clave, []);
+            mapa.get(clave).push(e);
         }
         return mapa;
     };
-    const prevMapa = totalesPorCampania(todosPrev);
+    const aggMapa = agruparPorCampania(todos);
+    const prevMapa = agruparPorCampania(todosPrev);
 
-    const por_campania = [...totalesPorCampania(todos).values()]
-        .map((g) => {
-            const anterior = prevMapa.get(g.idcampania ?? 'sin_campania');
-            return {
-                idcampania: g.idcampania,
-                campania: g.campania,
-                totales: totalesEquipo(g.filas),
-                anterior: anterior ? totalesEquipo(anterior.filas) : null
-            };
-        })
-        .sort((a, b) => String(a.campania).localeCompare(String(b.campania)));
+    // Base: todas las campañas con dotación activa; se les pega el agregado del mes (0 si no hubo).
+    const por_campania = campaniasActivas.map((cam) => {
+        const clave = cam.idcampania ?? 'sin_campania';
+        const totales = totalesEquipo(aggMapa.get(clave) || []);
+        totales.empleados = cam.empleados; // dotación activa real, no solo quienes marcaron
+        let anterior = null;
+        if (prevMapa.has(clave)) { anterior = totalesEquipo(prevMapa.get(clave)); anterior.empleados = cam.empleados; }
+        return { idcampania: cam.idcampania, campania: cam.nombre, totales, anterior };
+    }).sort((a, b) => String(a.campania).localeCompare(String(b.campania)));
 
-    // Detalle de una campaña: sus empleados con la grilla día a día.
+    const totales = totalesEquipo(todos);
+    totales.empleados = campaniasActivas.reduce((acc, c) => acc + c.empleados, 0);
+
+    // Detalle de una campaña: TODOS sus empleados activos (los que no marcaron van con ceros) + grilla.
     let campania = null;
     if (campaniaId != null) {
-        const empleadosCampania = todos.filter((e) => String(e.idcampania) === String(campaniaId));
-        const dias = await resumenMensualRepo.jornadasDiaPorCampania({ campaniaId, desde, hasta });
-        const porEmpleado = new Map();
+        const [roster, dias] = await Promise.all([
+            empleadoRepo.findActivosPorCampania(campaniaId),
+            resumenMensualRepo.jornadasDiaPorCampania({ campaniaId, desde, hasta })
+        ]);
+        const aggPorEmp = new Map((aggMapa.get(Number(campaniaId)) || aggMapa.get(String(campaniaId)) || []).map((e) => [e.users_company_id, e]));
+        const diasPorEmp = new Map();
         for (const d of dias) {
-            if (!porEmpleado.has(d.users_company_id)) porEmpleado.set(d.users_company_id, []);
-            porEmpleado.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
+            if (!diasPorEmp.has(d.users_company_id)) diasPorEmp.set(d.users_company_id, []);
+            diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
         }
-        const empleadosConDias = empleadosCampania.map((e) => ({ ...e, dias: porEmpleado.get(e.users_company_id) || [] }));
+        const empleadosCampania = roster.map((r) => {
+            const agg = aggPorEmp.get(r.users_company_id) || resumenCero();
+            return {
+                ...agg,
+                users_company_id: r.users_company_id,
+                nombre: r.nombre,
+                documento: r.cedula,
+                cargo: r.cargo,
+                dias: diasPorEmp.get(r.users_company_id) || []
+            };
+        });
+        const totalesCampania = totalesEquipo(empleadosCampania);
+        totalesCampania.empleados = empleadosCampania.length;
         campania = {
             idcampania: Number(campaniaId),
-            nombre: empleadosCampania[0]?.campania || por_campania.find((c) => String(c.idcampania) === String(campaniaId))?.campania || null,
-            empleados: empleadosConDias,
-            totales: totalesEquipo(empleadosCampania)
+            nombre: roster[0]?.campania || por_campania.find((c) => String(c.idcampania) === String(campaniaId))?.campania || null,
+            empleados: empleadosCampania,
+            totales: totalesCampania
         };
     }
 
-    return { periodo, periodo_anterior: periodoAnterior, desde, hasta, por_campania, totales: totalesEquipo(todos), campania };
+    return { periodo, periodo_anterior: periodoAnterior, desde, hasta, por_campania, totales, campania };
+}
+
+// Totales en cero para un empleado activo que no marcó ninguna jornada en el mes.
+function resumenCero() {
+    return {
+        dias_trabajados: 0, dias_puntuales: 0, dias_tarde: 0, ausencias: 0,
+        minutos_trabajados: 0, minutos_tarde: 0, minutos_extra: 0, minutos_bano: 0,
+        minutos_break: 0, minutos_almuerzo: 0, minutos_capacitacion: 0, minutos_salida_anticipada: 0,
+        porcentaje_puntualidad: null
+    };
 }
 
 // Mes anterior de un periodo 'AAAA-MM'.
