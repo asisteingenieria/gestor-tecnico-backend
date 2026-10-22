@@ -1951,72 +1951,68 @@ registrar un empleado falla (el gancho está dentro de la transacción del alta)
 - Sin pantalla en Gestor todavía: RRHH no puede restablecer la clave de pantalla gris de un
   empleado que la olvidó (hoy: a mano en la BD).
 
-## 32. Sesión 2026-10-21 — Rol `financiera` y reporte mensual de horas extras (migración 072)
+## 32. Sesión 2026-10-21 — Rol `financiera` y reporte de horas extras (migraciones 072 y 073)
 
-**Pedido:** el empleado solicita horas extra y su jefe las aprueba (eso ya existía). Cada mes, en
-una fecha límite, cada jefe de área le reporta a financiera las horas extras de su equipo. Hasta
-ahora se hacía con el Excel "FORMATO REPORTE DE HORAS EXTRAS V.3"; **la idea es dejar el Excel y
-hacerlo todo desde Gestor**. Se crea el rol `financiera`, que es como un admin de RRHH y asistencia.
+**Pedido y evolución.** Primero se montó un flujo manual (072): el jefe armaba el reporte del mes
+repartiendo las horas y se lo **enviaba** a financiera, que lo aprobaba o devolvía con fecha
+límite y recordatorios en la campana. El mismo día el usuario lo replanteó: **el reporte se llena
+solo** con las horas extra que el jefe aprueba, **no se envía**, y financiera lo ve **en tiempo
+real**. Además, financiera ve el mismo reporte que el jefe **más el costo en dinero, por campaña y
+totales**. La revisión se implementó en la **073**, que deja sin uso el andamiaje de la 072.
 
-**Decisiones (respondidas por el usuario):**
-- El jefe **reparte** las horas aprobadas del mes en las 5 columnas del formato: recargo nocturno,
-  extras diurnas, extras nocturnas, dominicales/festivas (90%) y extras dominicales/festivas
-  (115%). Gestor valida al **enviar** que extras diurnas + nocturnas + dominicales (115%) sumen las
-  horas extra aprobadas de cada persona en el mes (`COALESCE(minutos_aprobados,
-  minutos_estimados)` de `hora_extra` aprobadas). Los dos recargos son libres: no pasan por la
-  aprobación de horas extra. El borrador se guarda sin cuadrar.
-- Financiera **aprueba o devuelve** con observación (obligatoria, ≤ 500). Un devuelto vuelve a
-  ser editable; al reenviarlo sube `veces_enviado`.
-- Financiera **fija la fecha límite** de cada mes (`periodo_horas_extra`). La bandeja le muestra
-  a todos los jefes de área, incluidos los que no han enviado, y marca los envíos fuera de plazo.
-  La campana del jefe le recuerda desde `dias_aviso_reporte_horas_extra` días antes (parámetro,
-  3 por defecto) hasta un mes después del plazo, y le avisa cuando le devuelven el reporte.
-- Financiera tiene **todo lo de RRHH** (mismos middlewares que `recursosHumanos`), su propia
-  asistencia y la **trazabilidad de cualquier empleado activo, por campaña**.
+**Decisiones (confirmadas con el usuario):**
+- **Clase de cada hora extra:** la elige el agente al solicitarla (las 5 del formato V.3) y el jefe
+  la ajusta al aprobar. Vive en `hora_extra.clase` (073).
+- **Sin envío ni aprobación:** el reporte del mes = agregación en vivo de las horas aprobadas por
+  empleado y clase. Las aclaraciones salen del `motivo` de cada hora.
+- **Dinero (solo financiera):** valor hora = salario vigente (`historial_salarial`,
+  `fecha_vigencia_fin IS NULL`) ÷ 240. Factores de ley por clase: recargo nocturno 0,35; extra
+  diurna 1,25; extra nocturna 1,75; dominical/festiva 0,90; extra dom/fest 2,15 (= 1 + 1,15). Los
+  recargos pagan solo el %, las extras la hora + el %. El dinero se redondea por clase y luego se
+  suma, para que las líneas cuadren con el total. Empleado sin salario → dinero 0.
+- **Financiera = admin de RRHH y asistencia**, con su propia asistencia y la trazabilidad de
+  cualquier empleado por campaña (esto no cambió entre 072 y 073).
 
-**Migración 072** (`072_rol_financiera_reporte_horas_extra.sql`): agrega `financiera` al ENUM de
-`users.role` (reescrito completo), crea `periodo_horas_extra`, `reporte_horas_extra` (único por
-jefe y mes; estados `borrador → enviado → aprobado | devuelto`) y `reporte_horas_extra_detalle`
-(copia documento, nombre, campaña, centro de costo y cargo al guardar, como el Excel, para que el
-reporte no cambie si después cambia la ficha; `users_company_id` queda en NULL si se borra la
-ficha). Siembra el parámetro `dias_aviso_reporte_horas_extra`. **Aplicada en local el 2026-10-21,
-pendiente en producción.**
+**Migración 072** (sigue vigente solo por el rol): agrega `financiera` al ENUM de `users.role`.
+Sus tablas (`periodo_horas_extra`, `reporte_horas_extra`, `reporte_horas_extra_detalle`) y el
+parámetro `dias_aviso_reporte_horas_extra` las **elimina la 073**. Si la 072 no corrió en un
+servidor, se aplica 072 y luego 073 (en ese orden); si ya corrió, basta la 073.
 
-**Backend** (cuatro capas):
-- `domain/asistencia/reporteHorasExtra.js` — reglas puras (cuadre, estados, plazo, recordatorio).
-- `repositories/asistencia/reporteHorasExtraRepository.js`, `periodoHorasExtraRepository.js`;
-  `horaExtraRepository.minutosAprobadosPorEmpleado`, `equipoRepository.datosParaReporte`,
-  `empleadoRepository.findCampaniasConEmpleados/findActivosPorCampania/findActivo`.
-- `services/asistencia/reporteHorasExtraService.js` (guardar y enviar en una transacción con
-  `FOR UPDATE`), `financieraService.js`; `alertaService.misAlertas` suma los recordatorios.
-- Rutas en `routes/asistencia.js`:
-  - jefe (`canDirigirEquipo`): `GET/PUT /reporte-horas-extra?periodo=AAAA-MM`,
-    `POST /reporte-horas-extra/enviar` (400 con `detalles`, un mensaje por persona que no cuadra);
-  - financiera (`isFinanciera` = `financiera` o `admin`): `GET /financiera/reportes-horas-extra`,
-    `GET /financiera/reportes-horas-extra/:id`, `PUT …/:id/aprobar`, `PUT …/:id/devolver`,
-    `PUT /financiera/periodos/:periodo`, `GET /financiera/campanias`,
-    `GET /financiera/empleados?campania_id=`, `GET /financiera/empleados/:id/jornadas`,
-    `GET /financiera/empleados/:id/jornada/:fecha/trazabilidad`.
-- Rol en los cinco lugares de CLAUDE.md: ENUM (072), `middleware/auth.js` (`isFinanciera`; también
-  en `isRecursosHumanos` y `canRegistrarAsistencia`), `routes/usersCompany.js`, `validRoles` y
-  `ROLES_VINCULADOS_A_EMPLEADO` de `userController.js`, y el frontend.
+**Migración 073:** `hora_extra.clase` ENUM (default `extras_diurnas` para las filas viejas) y
+`DROP` de las tres tablas de la 072 + borrado del parámetro. Idempotente. **Aplicada en local el
+2026-10-21; 072 y 073 pendientes en producción.**
+
+**Backend (cuatro capas):**
+- `domain/asistencia/reporteHorasExtra.js`: puro. Clases, `FACTOR_DINERO`, `DIVISOR_HORAS_MES`,
+  `valorHora`, `dineroDeClase/dineroDeFila`, `filaReporte` (minutos→horas y, con `conDinero`, pesos)
+  y `totalesDe`.
+- `repositories/asistencia/reporteHorasExtraRepository.js`: `reporteDelMes({ jefeId?, campaniaId?,
+  desde, hasta })`, una fila por empleado con los minutos sumados por clase (SUM CASE), salario
+  vigente y campaña. `horaExtraRepository` gana `clase` en insertar/resolver. Se eliminaron
+  `periodoHorasExtraRepository`, `equipoRepository.datosParaReporte` y
+  `horaExtraRepository.minutosAprobadosPorEmpleado` (eran del flujo 072).
+- `services/asistencia/reporteHorasExtraService.js`: `miReporte` (jefe, sin dinero) y
+  `reporteFinanciera` (todos/por campaña, con dinero y `por_campania`). `alertaService` volvió a
+  traer solo traspasos.
+- Rutas: jefe `GET /reporte-horas-extra?periodo` (solo lectura); financiera
+  `GET /financiera/reporte-horas-extra?periodo&campania_id`, más campañas/empleados/trazabilidad.
+  El flujo 072 (`PUT/POST /reporte-horas-extra`, `/enviar`, `reportes-horas-extra`, `/aprobar`,
+  `/devolver`, `/periodos/:periodo`) se **quitó**. `solicitar`/`aprobar`/`asignar` aceptan `clase`.
 
 **Frontend:**
-- Jefe: `/operaciones/reporte-horas-extra` (`asistencia/ReporteHorasExtra.jsx`), entrada "Reporte
-  a financiera" en el menú de equipo. La campana abre el reporte (`enlace` de la alerta); estos
-  recordatorios no se marcan como leídos, desaparecen al enviar.
-- Financiera usa el layout de RRHH (`esRRHH` en `App.jsx`; `isRecursosHumanos` es verdadero también
-  para ella y `isFinanciera` solo para ella) con dos entradas más: `/recursos-humanos/reportes-horas-extra`
-  (bandeja, fecha límite, detalle con aprobar/devolver y exportar CSV) y
-  `/recursos-humanos/trazabilidad` (campaña → empleados → `TrazabilidadEmpleado financiera`).
-- `UserManagement.jsx` ofrece el rol y pide la ficha de RRHH.
-- Reglas de las columnas en `src/utils/reporteHorasExtra.js`, copia de las del dominio.
+- Jefe: `/operaciones/reporte-horas-extra` (`asistencia/ReporteHorasExtra.jsx`) solo lectura, se
+  llena solo. `HorasExtra.jsx`: el agente elige la clase al solicitar y el jefe la ajusta al aprobar.
+- Financiera (layout de RRHH): `/recursos-humanos/reportes-horas-extra`
+  (`financiera/ReportesHorasExtra.jsx`) = reporte con dinero, resumen por campaña y totales, filtro
+  por campaña y mes, export CSV; y `/recursos-humanos/trazabilidad`. Se eliminó
+  `DetalleReporteHorasExtra.jsx` (aprobar/devolver) y la campana volvió a su forma simple.
+- `src/utils/reporteHorasExtra.js`: clases, `OPCIONES_CLASE`, `formatearPesos`.
 
-**Pruebas:** 11 tests unitarios nuevos (`tests/asistencia/reporteHorasExtra.test.js`, total 161) y
-una prueba de punta a punta local contra el servidor (44 checks: solicitud y aprobación, borrador,
-envío sin cuadre, fuera del equipo, permisos, fecha límite, bandeja, devolución, campana, reenvío,
-aprobación, acceso de financiera a RRHH y trazabilidad por campaña). El script quedó fuera del repo.
+**Pruebas:** 10 tests unitarios del dominio (dinero por clase, factores, pivot y totales; total
+**160**) y prueba e2e local (solicitar con clase, reclasificar al aprobar, reporte del jefe sin
+dinero, reporte de financiera con dinero por campaña y totales coherentes, filtro por campaña,
+rutas viejas → 404, campana sin recordatorios). El script quedó fuera del repo.
 
-**Para producción:** aplicar la 072, desplegar backend y frontend (con `npm run build`: el `dist/`
-de este cambio no se pudo regenerar en local por falta de memoria) y crear el usuario
-`financiera` desde `/users` vinculado a su ficha.
+**Para producción:** aplicar 072 (si falta) y 073, desplegar backend y frontend (con
+`npm run build`), y crear el usuario `financiera` desde `/users`. Para que el dinero cuadre, las
+fichas deben tener salario en `historial_salarial`.

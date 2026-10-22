@@ -2,19 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const r = require('../../domain/asistencia/reporteHorasExtra');
-const { sumarDias, rangoDelMes } = require('../../utils/fechaBogota');
-
-const contexto = (minutosAprobadosPor = {}) => ({
-    equipo: new Set([7, 8, 9]),
-    minutosAprobadosPor,
-    nombrePor: { 7: 'Ana', 8: 'Beto', 9: 'Caro' }
-});
-const fila = (id, horas = {}, aclaraciones = null) => ({
-    users_company_id: id,
-    recargo_nocturno: 0, extras_diurnas: 0, extras_nocturnas: 0, dominicales_festivas: 0, extras_dominicales_festivas: 0,
-    ...horas,
-    aclaraciones
-});
+const { rangoDelMes } = require('../../utils/fechaBogota');
 
 test('reporte HE: periodo AAAA-MM', () => {
     assert.equal(r.esPeriodo('2026-10'), true);
@@ -22,93 +10,94 @@ test('reporte HE: periodo AAAA-MM', () => {
     assert.equal(r.esPeriodo('2026-1'), false);
     assert.equal(r.esPeriodo(undefined), false);
     assert.equal(r.periodoDe('2026-10-21'), '2026-10');
+    assert.equal(r.esClase('extras_diurnas'), true);
+    assert.equal(r.esClase('otra'), false);
 });
 
-test('reporte HE: rango del mes y suma de días', () => {
+test('reporte HE: rango del mes', () => {
     assert.deepEqual(rangoDelMes('2026-02'), { desde: '2026-02-01', hasta: '2026-02-28' });
     assert.deepEqual(rangoDelMes('2028-02'), { desde: '2028-02-01', hasta: '2028-02-29' });
     assert.deepEqual(rangoDelMes('2026-12'), { desde: '2026-12-01', hasta: '2026-12-31' });
-    assert.equal(sumarDias('2026-10-01', -3), '2026-09-28');
-    assert.equal(sumarDias('2026-12-30', 3), '2027-01-02');
 });
 
 test('reporte HE: total suma las 5 clases; horas extra solo diurnas, nocturnas y dominicales 115%', () => {
     // Fila de Juan Sebastián en el Excel V.3: 2 recargo + 5 diurnas + 6 dominicales 115% = 13.
-    const f = fila(7, { recargo_nocturno: 2, extras_diurnas: 5, extras_dominicales_festivas: 6 });
+    const f = { recargo_nocturno: 2, extras_diurnas: 5, extras_nocturnas: 0, dominicales_festivas: 0, extras_dominicales_festivas: 6 };
     assert.equal(r.totalHoras(f), 13);
     assert.equal(r.horasExtraDe(f), 11);
     assert.equal(r.horasDeMinutos(90), 1.5);
+    assert.equal(r.horasDeMinutos(0), 0);
 });
 
-test('reporte HE: normalizar descarta filas vacías salvo con horas aprobadas o aclaración', () => {
-    const filas = r.normalizarFilas([
-        { users_company_id: '7', extras_diurnas: '1.255' },
-        { users_company_id: 8 },
-        { users_company_id: 9, aclaraciones: '  sin novedad  ' },
-        { users_company_id: 10 }
-    ], { 10: 60 });
-    assert.deepEqual(filas.map((f) => f.users_company_id), [7, 9, 10]);
-    assert.equal(filas[0].extras_diurnas, 1.26);
-    assert.equal(filas[0].recargo_nocturno, 0);
-    assert.equal(filas[1].aclaraciones, 'sin novedad');
+test('reporte HE: valor hora = salario / 240, 0 si no hay salario', () => {
+    assert.equal(r.valorHora(2400000), 10000);
+    assert.equal(r.valorHora(null), 0);
+    assert.equal(r.valorHora(0), 0);
+    assert.equal(r.DIVISOR_HORAS_MES, 240);
 });
 
-test('reporte HE: al guardar no exige cuadre; al enviar sí', () => {
-    const filas = [fila(7, { extras_diurnas: 2 })];
-    assert.deepEqual(r.erroresDelReporte(filas, contexto({ 7: 180 }), { exigirCuadre: false }), []);
-    const errores = r.erroresDelReporte(filas, contexto({ 7: 180 }), { exigirCuadre: true });
-    assert.equal(errores.length, 1);
-    assert.match(errores[0], /Ana: tiene 3 h extra aprobadas.*reparte 2 h/);
+test('reporte HE: dinero por clase con los factores de ley', () => {
+    const vh = 10000; // salario 2.400.000 / 240
+    assert.equal(r.dineroDeClase('recargo_nocturno', 2, vh), 7000); // 2 x 10000 x 0.35
+    assert.equal(r.dineroDeClase('extras_diurnas', 5, vh), 62500); // 5 x 10000 x 1.25
+    assert.equal(r.dineroDeClase('extras_nocturnas', 1, vh), 17500); // 1 x 10000 x 1.75
+    assert.equal(r.dineroDeClase('dominicales_festivas', 3, vh), 27000); // 3 x 10000 x 0.90
+    assert.equal(r.dineroDeClase('extras_dominicales_festivas', 6, vh), 129000); // 6 x 10000 x 2.15
+    assert.equal(r.dineroDeClase('extras_diurnas', 0, vh), 0);
 });
 
-test('reporte HE: cuadra repartiendo entre las 3 clases de extra; los recargos no cuentan', () => {
-    const filas = [fila(7, { extras_diurnas: 1, extras_nocturnas: 1.5, extras_dominicales_festivas: 0.5, recargo_nocturno: 4, dominicales_festivas: 8 })];
-    assert.deepEqual(r.erroresDelReporte(filas, contexto({ 7: 180 }), { exigirCuadre: true }), []);
+test('reporte HE: dinero total de una fila suma las 5 clases', () => {
+    const vh = r.valorHora(2400000);
+    const fila = { recargo_nocturno: 2, extras_diurnas: 5, extras_nocturnas: 0, dominicales_festivas: 0, extras_dominicales_festivas: 6 };
+    // 7000 + 62500 + 0 + 0 + 129000
+    assert.equal(r.dineroDeFila(fila, vh), 198500);
 });
 
-test('reporte HE: solo recargos sin horas aprobadas es válido', () => {
-    const filas = [fila(8, { recargo_nocturno: 6 })];
-    assert.deepEqual(r.erroresDelReporte(filas, contexto({}), { exigirCuadre: true }), []);
+test('reporte HE: filaReporte pasa minutos a horas y, con dinero, agrega pesos', () => {
+    const base = { users_company_id: 8, nombre: 'Ana', salario: 2400000, idcampania: 4, campania: 'Claro' };
+    const minutos = { extras_diurnas: 90, recargo_nocturno: 120 }; // 1.5 h y 2 h
+
+    const sinDinero = r.filaReporte(base, minutos);
+    assert.equal(sinDinero.extras_diurnas, 1.5);
+    assert.equal(sinDinero.recargo_nocturno, 2);
+    assert.equal(sinDinero.extras_nocturnas, 0);
+    assert.equal(sinDinero.total_horas, 3.5);
+    assert.equal(sinDinero.total_dinero, undefined);
+    assert.equal(sinDinero.campania, 'Claro');
+
+    const conDinero = r.filaReporte(base, minutos, { conDinero: true });
+    assert.equal(conDinero.valor_hora, 10000);
+    assert.equal(conDinero.extras_diurnas_dinero, 18750); // 1.5 x 10000 x 1.25
+    assert.equal(conDinero.recargo_nocturno_dinero, 7000); // 2 x 10000 x 0.35
+    assert.equal(conDinero.total_dinero, 25750);
 });
 
-test('reporte HE: quien tiene horas aprobadas no puede faltar al enviar', () => {
-    const errores = r.erroresDelReporte([], contexto({ 9: 120 }), { exigirCuadre: true });
-    assert.deepEqual(errores, ['Caro tiene 2 h extra aprobadas en el mes y no está en el reporte']);
+test('reporte HE: sin salario, las horas salen pero el dinero es 0', () => {
+    const base = { users_company_id: 9, nombre: 'Beto', salario: null };
+    const fila = r.filaReporte(base, { extras_diurnas: 60 }, { conDinero: true });
+    assert.equal(fila.extras_diurnas, 1);
+    assert.equal(fila.valor_hora, 0);
+    assert.equal(fila.total_dinero, 0);
 });
 
-test('reporte HE: fuera del equipo, repetidos y horas inválidas', () => {
-    const errores = r.erroresDelReporte(
-        [fila(99), fila(7), fila(7), fila(8, { extras_diurnas: -1 }), fila(9, { recargo_nocturno: 800 })],
-        contexto({}),
-        { exigirCuadre: false }
-    );
-    assert.equal(errores.length, 4);
-    assert.match(errores[0], /ficha 99 no está a su cargo/);
-    assert.match(errores[1], /Ana está repetido/);
-    assert.match(errores[2], /Beto: las horas/);
-    assert.match(errores[3], /Caro: las horas/);
+test('reporte HE: totales de varias filas (horas y dinero)', () => {
+    const vh = r.valorHora(2400000);
+    const filas = [
+        r.filaReporte({ users_company_id: 1, salario: 2400000 }, { extras_diurnas: 60 }, { conDinero: true }),
+        r.filaReporte({ users_company_id: 2, salario: 2400000 }, { extras_diurnas: 120, recargo_nocturno: 60 }, { conDinero: true })
+    ];
+    const t = r.totalesDe(filas);
+    assert.equal(t.extras_diurnas, 3); // 1 + 2
+    assert.equal(t.recargo_nocturno, 1);
+    assert.equal(t.total_horas, 4);
+    assert.equal(t.empleados, 2);
+    // dinero: (1+2) h diurnas x 1.25 x vh + 1 h recargo x 0.35 x vh
+    assert.equal(t.total_dinero, r.dineroDeClase('extras_diurnas', 3, vh) + r.dineroDeClase('recargo_nocturno', 1, vh));
 });
 
-test('reporte HE: estados que se editan y se revisan', () => {
-    assert.equal(r.puedeEditarse(undefined), true);
-    assert.equal(r.puedeEditarse('borrador'), true);
-    assert.equal(r.puedeEditarse('devuelto'), true);
-    assert.equal(r.puedeEditarse('enviado'), false);
-    assert.equal(r.puedeEditarse('aprobado'), false);
-    assert.equal(r.puedeRevisarse('enviado'), true);
-    assert.equal(r.puedeRevisarse('devuelto'), false);
-});
-
-test('reporte HE: fuera de plazo y recordatorio', () => {
-    assert.equal(r.fueraDePlazo('2026-11-05', '2026-11-05'), false);
-    assert.equal(r.fueraDePlazo('2026-11-06', '2026-11-05'), true);
-    assert.equal(r.fueraDePlazo(null, '2026-11-05'), false);
-    assert.equal(r.fueraDePlazo('2026-11-06', null), false);
-
-    const desdeAviso = '2026-11-02';
-    assert.equal(r.debeRecordar({ estado: undefined, hoy: '2026-11-01', desdeAviso }), false);
-    assert.equal(r.debeRecordar({ estado: undefined, hoy: '2026-11-02', desdeAviso }), true);
-    assert.equal(r.debeRecordar({ estado: 'borrador', hoy: '2026-11-10', desdeAviso }), true);
-    assert.equal(r.debeRecordar({ estado: 'enviado', hoy: '2026-11-10', desdeAviso }), false);
-    assert.equal(r.debeRecordar({ estado: 'aprobado', hoy: '2026-11-10', desdeAviso }), false);
+test('reporte HE: totales sin dinero no incluye total_dinero', () => {
+    const filas = [r.filaReporte({ users_company_id: 1 }, { extras_diurnas: 60 })];
+    const t = r.totalesDe(filas);
+    assert.equal(t.total_horas, 1);
+    assert.equal('total_dinero' in t, false);
 });

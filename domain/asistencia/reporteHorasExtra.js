@@ -1,25 +1,34 @@
-// Reglas del reporte mensual de horas extras que cada jefe de área envía a financiera
-// (asistencia.md §32, migración 072). Reemplaza el Excel "FORMATO REPORTE DE HORAS EXTRAS V.3".
-// Puro: sin E/S; las fechas llegan como 'YYYY-MM-DD' ya calculadas en hora de Colombia.
+// Reglas puras del reporte mensual de horas extras (asistencia.md §32). El reporte ya no se arma
+// ni se envía a mano: se calcula con las horas extra aprobadas del mes. Cada hora extra lleva su
+// clase (las 5 del formato V.3). Financiera ve, además del mismo reporte que el jefe, el costo en
+// dinero por campaña y totales. Puro: sin E/S; las fechas llegan como 'YYYY-MM-DD'.
 
 // Las 5 columnas de horas del formato, en su orden.
 const CLASES = ['recargo_nocturno', 'extras_diurnas', 'extras_nocturnas', 'dominicales_festivas', 'extras_dominicales_festivas'];
 
-// Las que son horas extra propiamente (las que el empleado solicita y el jefe aprueba). El recargo
-// nocturno y el dominical/festivo (90%) son recargos sobre horas ordinarias: no pasan por la
-// aprobación de horas extra y el jefe los reporta libremente.
+// Las que son horas extra propiamente (se pagan la hora completa + el recargo). Las otras dos son
+// recargos sobre horas ordinarias: se paga solo el recargo.
 const CLASES_EXTRA = ['extras_diurnas', 'extras_nocturnas', 'extras_dominicales_festivas'];
 
-const ESTADOS_EDITABLES = ['borrador', 'devuelto'];
-const HORAS_MAXIMAS_POR_CLASE = 31 * 24; // un mes entero
-const TOLERANCIA_HORAS = 0.01;
+// Jornada mensual legal en Colombia para sacar el valor de la hora: salario / 240.
+const DIVISOR_HORAS_MES = 240;
 
-// Por notación exponencial: 1.255 * 100 da 125.4999… en punto flotante y redondearía a 1.25.
+// Factor sobre el valor de la hora ordinaria por clase (ley colombiana, confirmado con el usuario):
+// recargo nocturno +35 %, extra diurna +25 %, extra nocturna +75 %, dominical/festiva +90 % y extra
+// dominical/festiva +115 %. Los recargos pagan solo el %; las extras pagan la hora + el %, por eso
+// su factor es 1 + %.
+const FACTOR_DINERO = {
+    recargo_nocturno: 0.35,
+    extras_diurnas: 1.25,
+    extras_nocturnas: 1.75,
+    dominicales_festivas: 0.90,
+    extras_dominicales_festivas: 2.15
+};
+
 function redondear2(n) {
     const x = Number(n);
-    if (!Number.isFinite(x)) return x;
-    const exacto = Math.round(Number(`${x}e2`)) / 100;
-    return Number.isNaN(exacto) ? Math.round(x * 100) / 100 : exacto;
+    if (!Number.isFinite(x)) return 0;
+    return Math.round(Number(`${x}e2`)) / 100;
 }
 
 function esPeriodo(periodo) {
@@ -27,6 +36,7 @@ function esPeriodo(periodo) {
 }
 
 const periodoDe = (fecha) => String(fecha).slice(0, 7);
+const esClase = (clase) => CLASES.includes(clase);
 
 function horasDeMinutos(minutos) {
     return redondear2((Number(minutos) || 0) / 60);
@@ -39,110 +49,68 @@ function sumar(fila, clases) {
 const totalHoras = (fila) => sumar(fila, CLASES);
 const horasExtraDe = (fila) => sumar(fila, CLASES_EXTRA);
 
-function puedeEditarse(estado) {
-    return !estado || ESTADOS_EDITABLES.includes(estado);
+/** Valor de una hora ordinaria a partir del salario mensual. 0 si no hay salario. */
+function valorHora(salarioMensual) {
+    const s = Number(salarioMensual);
+    return Number.isFinite(s) && s > 0 ? s / DIVISOR_HORAS_MES : 0;
 }
 
-/** Solo un reporte enviado se aprueba o se devuelve. */
-function puedeRevisarse(estado) {
-    return estado === 'enviado';
+/** Dinero de una clase: horas × valorHora × factor de la clase. */
+function dineroDeClase(clase, horas, vh) {
+    return redondear2((Number(horas) || 0) * vh * (FACTOR_DINERO[clase] || 0));
 }
 
-/**
- * Normaliza lo que manda el jefe: números a 2 decimales, aclaraciones recortadas, y descarta las
- * filas vacías (sin horas, sin aclaración y sin horas aprobadas).
- */
-function normalizarFilas(filas, minutosAprobadosPor = {}) {
-    return filas
-        .map((f) => {
-            const fila = { users_company_id: Number(f.users_company_id) };
-            for (const c of CLASES) fila[c] = f[c] === undefined || f[c] === null || f[c] === '' ? 0 : redondear2(f[c]);
-            const aclaraciones = typeof f.aclaraciones === 'string' ? f.aclaraciones.trim() : '';
-            fila.aclaraciones = aclaraciones || null;
-            return fila;
-        })
-        .filter((f) => totalHoras(f) > 0 || f.aclaraciones || (minutosAprobadosPor[f.users_company_id] ?? 0) > 0);
+/** Dinero total de una fila (un empleado) sumando sus 5 clases. */
+function dineroDeFila(fila, vh) {
+    return redondear2(CLASES.reduce((acc, c) => acc + dineroDeClase(c, fila[c], vh), 0));
 }
 
 /**
- * Errores que impiden guardar o enviar el reporte. `equipo` son las fichas a cargo del jefe,
- * `minutosAprobadosPor` las horas extra aprobadas del mes por ficha y `nombrePor` sirve para
- * que el mensaje diga de quién se trata.
- * @param {{ exigirCuadre: boolean }} opciones al guardar un borrador no se exige que cuadre.
+ * Arma una fila del reporte a partir de los minutos aprobados por clase de un empleado.
+ * `conDinero` agrega el valor en pesos (solo para financiera). `base` trae los datos del empleado
+ * (documento, nombre, campania, etc.) ya resueltos por el repositorio.
  */
-function erroresDelReporte(filas, { equipo, minutosAprobadosPor, nombrePor }, { exigirCuadre }) {
-    const errores = [];
-    const quien = (id) => nombrePor[id] || `la ficha ${id}`;
-    const vistos = new Set();
-
-    for (const fila of filas) {
-        const id = fila.users_company_id;
-        if (!Number.isInteger(id) || !equipo.has(id)) {
-            errores.push(`${quien(id)} no está a su cargo`);
-            continue;
-        }
-        if (vistos.has(id)) {
-            errores.push(`${quien(id)} está repetido en el reporte`);
-            continue;
-        }
-        vistos.add(id);
-
-        for (const c of CLASES) {
-            const v = fila[c];
-            if (!Number.isFinite(v) || v < 0 || v > HORAS_MAXIMAS_POR_CLASE) {
-                errores.push(`${quien(id)}: las horas deben ser un número entre 0 y ${HORAS_MAXIMAS_POR_CLASE}`);
-                break;
-            }
-        }
-        if (fila.aclaraciones && fila.aclaraciones.length > 1000) {
-            errores.push(`${quien(id)}: las aclaraciones admiten hasta 1000 caracteres`);
-        }
-
-        if (exigirCuadre) {
-            const aprobadas = horasDeMinutos(minutosAprobadosPor[id] ?? 0);
-            const reportadas = horasExtraDe(fila);
-            if (Math.abs(aprobadas - reportadas) > TOLERANCIA_HORAS) {
-                errores.push(`${quien(id)}: tiene ${aprobadas} h extra aprobadas en el mes y el reporte reparte ${reportadas} h entre extras diurnas, nocturnas y dominicales (115%)`);
-            }
-        }
+function filaReporte(base, minutosPorClase, { conDinero } = {}) {
+    const fila = { ...base };
+    for (const c of CLASES) fila[c] = horasDeMinutos(minutosPorClase[c] ?? 0);
+    fila.total_horas = totalHoras(fila);
+    if (conDinero) {
+        const vh = valorHora(base.salario);
+        fila.valor_hora = redondear2(vh);
+        for (const c of CLASES) fila[`${c}_dinero`] = dineroDeClase(c, fila[c], vh);
+        fila.total_dinero = dineroDeFila(fila, vh);
     }
+    return fila;
+}
 
-    if (exigirCuadre) {
-        for (const [id, minutos] of Object.entries(minutosAprobadosPor)) {
-            if (minutos > 0 && !vistos.has(Number(id))) {
-                errores.push(`${quien(Number(id))} tiene ${horasDeMinutos(minutos)} h extra aprobadas en el mes y no está en el reporte`);
-            }
-        }
+/** Totales (horas y, si las filas traen dinero, pesos) de un conjunto de filas ya armadas. */
+function totalesDe(filas) {
+    const t = Object.fromEntries(CLASES.map((c) => [c, 0]));
+    let totalHorasAcum = 0;
+    let totalDinero = 0;
+    const conDinero = filas.some((f) => f.total_dinero !== undefined);
+    for (const f of filas) {
+        for (const c of CLASES) t[c] = redondear2(t[c] + (Number(f[c]) || 0));
+        totalHorasAcum = redondear2(totalHorasAcum + (Number(f.total_horas) || 0));
+        totalDinero = redondear2(totalDinero + (Number(f.total_dinero) || 0));
     }
-    return errores;
-}
-
-/** ¿Se envió después de la fecha límite? `fechaEnvio` en hora de Colombia. */
-function fueraDePlazo(fechaEnvio, fechaLimite) {
-    return Boolean(fechaEnvio && fechaLimite && fechaEnvio > fechaLimite);
-}
-
-/**
- * ¿La campana le recuerda al jefe? Desde `diasAviso` días antes de la fecha límite (y después,
- * si se le pasó) mientras el reporte no esté enviado ni aprobado. `desdeAviso` = fecha límite
- * menos los días de aviso, ya calculada.
- */
-function debeRecordar({ estado, hoy, desdeAviso }) {
-    return !['enviado', 'aprobado'].includes(estado) && hoy >= desdeAviso;
+    return { ...t, total_horas: totalHorasAcum, ...(conDinero ? { total_dinero: totalDinero } : {}), empleados: filas.length };
 }
 
 module.exports = {
     CLASES,
     CLASES_EXTRA,
+    FACTOR_DINERO,
+    DIVISOR_HORAS_MES,
     esPeriodo,
     periodoDe,
+    esClase,
     horasDeMinutos,
     totalHoras,
     horasExtraDe,
-    puedeEditarse,
-    puedeRevisarse,
-    normalizarFilas,
-    erroresDelReporte,
-    fueraDePlazo,
-    debeRecordar
+    valorHora,
+    dineroDeClase,
+    dineroDeFila,
+    filaReporte,
+    totalesDe
 };

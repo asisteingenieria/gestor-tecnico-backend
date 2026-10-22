@@ -8,11 +8,11 @@ async function findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha, conn = db) 
     return filas;
 }
 
-async function insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor }, conn = db) {
+async function insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, clase, motivo, solicitadoPor }, conn = db) {
     const [resultado] = await conn.query(
-        `INSERT INTO hora_extra (users_company_id, fecha, tipo, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id)
-         VALUES (?, ?, 'solicitada', ?, 'pendiente', ?, ?, ?)`,
-        [usersCompanyId, fecha, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
+        `INSERT INTO hora_extra (users_company_id, fecha, tipo, clase, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id)
+         VALUES (?, ?, 'solicitada', ?, ?, 'pendiente', ?, ?, ?)`,
+        [usersCompanyId, fecha, clase, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
     );
     return resultado.insertId;
 }
@@ -51,45 +51,34 @@ async function findPorEquipo(usersCompanyIds, { estado } = {}, conn = db) {
     return filas;
 }
 
-async function resolver(id, { estado, minutosAprobados, comentario, aprobadoPor }, conn = db) {
+async function resolver(id, { estado, minutosAprobados, clase, comentario, aprobadoPor }, conn = db) {
+    // `clase` solo se toca al aprobar, cuando el jefe la ajusta; si no viene, se deja la que puso
+    // el agente (COALESCE con el valor actual).
     const [resultado] = await conn.query(
         `UPDATE hora_extra
-         SET estado = ?, minutos_aprobados = ?, comentario_director = ?, aprobado_por_user_id = ?, aprobado_por_cuenta_id = ?, fecha_decision = NOW()
+         SET estado = ?, minutos_aprobados = ?, clase = COALESCE(?, clase), comentario_director = ?,
+             aprobado_por_user_id = ?, aprobado_por_cuenta_id = ?, fecha_decision = NOW()
          WHERE idhora_extra = ? AND estado = 'pendiente'`,
-        [estado, minutosAprobados ?? null, comentario ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, id]
+        [estado, minutosAprobados ?? null, clase ?? null, comentario ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, id]
     );
     return resultado.affectedRows > 0;
 }
 
-async function insertarAsignada({ usersCompanyId, fecha, minutos, motivo, aprobadoPor }, conn = db) {
+async function insertarAsignada({ usersCompanyId, fecha, minutos, clase, motivo, aprobadoPor }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO hora_extra
-            (users_company_id, fecha, tipo, minutos_estimados, minutos_aprobados, estado, motivo,
+            (users_company_id, fecha, tipo, clase, minutos_estimados, minutos_aprobados, estado, motivo,
              solicitado_por_user_id, solicitado_por_cuenta_id, aprobado_por_user_id, aprobado_por_cuenta_id, fecha_decision)
-         VALUES (?, ?, 'asignada', ?, ?, 'aprobada', ?, ?, ?, ?, ?, NOW())`,
+         VALUES (?, ?, 'asignada', ?, ?, ?, 'aprobada', ?, ?, ?, ?, ?, NOW())`,
         [
-            usersCompanyId, fecha, minutos, minutos, motivo ?? null,
+            usersCompanyId, fecha, clase, minutos, minutos, motivo ?? null,
             aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null
         ]
     );
     return resultado.insertId;
 }
 
-// Minutos de horas extra aprobados por ficha en un rango de fechas (reporte mensual, §32).
-async function minutosAprobadosPorEmpleado(usersCompanyIds, desde, hasta, conn = db) {
-    if (usersCompanyIds.length === 0) return {};
-    const [filas] = await conn.query(
-        `SELECT users_company_id, SUM(COALESCE(minutos_aprobados, minutos_estimados)) AS minutos
-         FROM hora_extra
-         WHERE users_company_id IN (?) AND estado = 'aprobada' AND fecha BETWEEN ? AND ?
-         GROUP BY users_company_id`,
-        [usersCompanyIds, desde, hasta]
-    );
-    return Object.fromEntries(filas.map((f) => [f.users_company_id, Number(f.minutos)]));
-}
-
 module.exports = {
-    minutosAprobadosPorEmpleado,
     findAprobadasPorEmpleadoYFecha,
     insertarSolicitud,
     findPorEmpleado,

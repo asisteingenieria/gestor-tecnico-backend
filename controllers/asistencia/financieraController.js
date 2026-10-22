@@ -1,6 +1,15 @@
 const financieraService = require('../../services/asistencia/financieraService');
+const reporteService = require('../../services/asistencia/reporteHorasExtraService');
 
-// Trazabilidad de asistencia por campaña para financiera (asistencia.md §32).
+// Reporte de horas extras con dinero y trazabilidad de asistencia por campaña, para financiera
+// (asistencia.md §32).
+
+async function reporte(req, res) {
+    res.json(await reporteService.reporteFinanciera({
+        periodo: req.query.periodo,
+        campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null
+    }));
+}
 
 async function campanias(req, res) {
     res.json(await financieraService.campanias());
@@ -22,4 +31,4 @@ async function trazabilidadDe(req, res) {
     res.json(await financieraService.trazabilidadDe({ empleadoId: Number(req.params.empleadoId), fecha: req.params.fecha }));
 }
 
-module.exports = { campanias, empleados, jornadasDe, trazabilidadDe };
+module.exports = { reporte, campanias, empleados, jornadasDe, trazabilidadDe };

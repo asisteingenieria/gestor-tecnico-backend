@@ -33,9 +33,7 @@ const {
     asignarHoraExtraSchema,
     eventoManualSchema,
     periodoQuerySchema,
-    guardarReporteHorasExtraSchema,
-    devolverReporteSchema,
-    fechaLimiteSchema,
+    reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
     jornadasEmpleadoSchema
 } = require('../validators/asistenciaSchemas');
@@ -80,17 +78,11 @@ router.put('/horas-extra/:id/aprobar', canDirigirEquipo, validar(aprobarHoraExtr
 router.put('/horas-extra/:id/rechazar', canDirigirEquipo, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
 router.post('/horas-extra/asignar', canDirigirEquipo, validar(asignarHoraExtraSchema), asyncHandler(horaExtraController.asignar));
 
-// Reporte mensual de horas extras a financiera (§32)
+// Reporte mensual de horas extras (§32). Se llena solo con las horas aprobadas: solo lectura.
 router.get('/reporte-horas-extra', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(reporteHorasExtraController.miReporte));
-router.put('/reporte-horas-extra', canDirigirEquipo, validar(guardarReporteHorasExtraSchema), asyncHandler(reporteHorasExtraController.guardarBorrador));
-router.post('/reporte-horas-extra/enviar', canDirigirEquipo, validar(guardarReporteHorasExtraSchema), asyncHandler(reporteHorasExtraController.enviar));
 
 // --- Financiera (§32): reportes de horas extras y trazabilidad de todos por campaña ---
-router.get('/financiera/reportes-horas-extra', isFinanciera, validar(periodoQuerySchema), asyncHandler(reporteHorasExtraController.resumenDelPeriodo));
-router.get('/financiera/reportes-horas-extra/:id', isFinanciera, validar(idParamSchema), asyncHandler(reporteHorasExtraController.detalle));
-router.put('/financiera/reportes-horas-extra/:id/aprobar', isFinanciera, validar(idParamSchema), asyncHandler(reporteHorasExtraController.aprobar));
-router.put('/financiera/reportes-horas-extra/:id/devolver', isFinanciera, validar(devolverReporteSchema), asyncHandler(reporteHorasExtraController.devolver));
-router.put('/financiera/periodos/:periodo', isFinanciera, validar(fechaLimiteSchema), asyncHandler(reporteHorasExtraController.fijarFechaLimite));
+router.get('/financiera/reporte-horas-extra', isFinanciera, validar(reporteFinancieraQuerySchema), asyncHandler(financieraController.reporte));
 router.get('/financiera/campanias', isFinanciera, asyncHandler(financieraController.campanias));
 router.get('/financiera/empleados', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.empleados));
 router.get('/financiera/empleados/:empleadoId/jornadas', isFinanciera, validar(jornadasEmpleadoSchema), asyncHandler(financieraController.jornadasDe));
