@@ -266,3 +266,37 @@ test('resumenDelDia: si cambia de modalidad en el día manda el último login y 
     assert.deepEqual(r.modalidades, ['teletrabajo', 'presencial']);
     assert.equal(r.conectado, true);
 });
+
+// --- Estados de pausa que manda AsisLock en estado_conexion ---
+
+test('estado Break abre la pausa de break', () => {
+    const d = decidirLogin({ eventos: [ev('entrada', '08:00:00')], instante: h('10:00:00'), estado: 'Break' });
+    assert.equal(d.accion, 'pausa_break');
+    assert.deepEqual(d.eventos, ['inicio_break']);
+});
+
+test('estado Conectado después de una pausa la cierra', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('inicio_break', '10:00:00')];
+    const d = decidirLogin({ eventos, instante: h('10:10:00'), estado: 'Conectado' });
+    assert.deepEqual(d.eventos, ['fin_break']);
+});
+
+test('cambiar de una pausa a otra cierra la anterior y abre la nueva', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('inicio_bano', '10:00:00')];
+    const d = decidirLogin({ eventos, instante: h('10:05:00'), estado: 'Almuerzo' });
+    assert.deepEqual(d.eventos, ['fin_bano', 'inicio_almuerzo']);
+});
+
+test('repetir el mismo estado de pausa se ignora (ya_en_pausa)', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('inicio_bano', '10:00:00')];
+    assert.equal(decidirLogin({ eventos, instante: h('10:02:00'), estado: 'Baño' }).motivo, 'ya_en_pausa');
+});
+
+test('Capacitación (con acento) se normaliza y abre inicio_capacitacion', () => {
+    const d = decidirLogin({ eventos: [ev('entrada', '08:00:00')], instante: h('10:00:00'), estado: 'Capacitación' });
+    assert.deepEqual(d.eventos, ['inicio_capacitacion']);
+});
+
+test('una pausa sin entrada previa se ignora (sin_entrada)', () => {
+    assert.equal(decidirLogin({ eventos: [], instante: h('10:00:00'), estado: 'Break' }).motivo, 'sin_entrada');
+});

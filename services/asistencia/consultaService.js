@@ -56,6 +56,8 @@ async function estadoDeHoy(usersCompanyId) {
         minutos_trabajados: estado.minutosTrabajados,
         minutos_pausa_bano: estado.minutosPausaBano,
         minutos_pausa_almuerzo: estado.minutosPausaAlmuerzo,
+        minutos_break: estado.minutosBreak,
+        minutos_capacitacion: estado.minutosCapacitacion,
         minutos_desconexion: estado.minutosDesconexion,
         pausa_activa: estado.pausaActiva,
         desconexion_activa: estado.desconexionActiva,

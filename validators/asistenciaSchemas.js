@@ -145,7 +145,7 @@ const eventoManualSchema = {
     body: {
         tipo: {
             requerido: true,
-            enum: ['entrada', 'inicio_bano', 'fin_bano', 'inicio_almuerzo', 'fin_almuerzo', 'salida', 'inicio_extra', 'fin_extra']
+            enum: ['entrada', 'inicio_bano', 'fin_bano', 'inicio_break', 'fin_break', 'inicio_almuerzo', 'fin_almuerzo', 'inicio_capacitacion', 'fin_capacitacion', 'salida', 'inicio_extra', 'fin_extra']
         },
         nota: { requerido: true, tipo: 'texto' }
     }

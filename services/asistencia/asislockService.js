@@ -122,7 +122,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
         const horario = await horarioRepo.findByEmpleadoYFecha(usersCompanyId, fecha, conn);
 
         const decision = evento === 'login'
-            ? asislock.decidirLogin({ eventos, instante })
+            ? asislock.decidirLogin({ eventos, instante, estado: registro.estado_conexion })
             : asislock.decidirLogout({ eventos, horario, instante, parametros });
 
         if (!decision.accion) {

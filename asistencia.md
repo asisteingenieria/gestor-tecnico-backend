@@ -2083,3 +2083,40 @@ reporte del jefe desde tramos; **127 checks**).
 **Para producción:** aplicar 074 (después de 072+073), desplegar backend y frontend (con
 `npm run build`). Para clasificar bien, los empleados deben tener **horario asignado** (si no, todo
 cuenta como extra) y la `ventana_nocturna`/festivos ya quedan sembrados por la migración.
+
+## 34. Sesión 2026-10-22 — Pausas de AsisLock: break y capacitación (migración 076)
+
+AsisLock ya manda un registro por cada cambio de estado (`Conectado`, `Break`, `Almuerzo`,
+`Capacitación`, `Baño`, `Desconectado`) como evento `login`, con el estado en `estado_conexion`
+(confirmado con logs reales de `asislock_registro` en producción). Hasta ahora el Gestor solo usaba
+Conectado/Desconectado y las pausas de baño/almuerzo se marcaban en el portal; los demás estados
+caían como `ya_conectado`. Ahora el Gestor los interpreta.
+
+**Regla de negocio (confirmada):** baño, break y almuerzo son **tiempo libre** y **descuentan** del
+tiempo trabajado; **capacitación cuenta COMO LABORADA** (no descuenta).
+
+**Migración 076:** `jornada_evento.tipo` suma `inicio_break/fin_break` e
+`inicio_capacitacion/fin_capacitacion`; `jornada` suma `minutos_break` y `minutos_capacitacion`.
+Pendiente en producción, va después de la 071.
+
+**Dominio:**
+- `asislock.js`: `normalizarEstado(estado_conexion)` → conectado/desconectado/bano/break/almuerzo/
+  capacitacion; `pausaAbierta` cubre las 4 pausas; `decidirLogin({ eventos, instante, estado })`
+  abre la pausa del estado (cerrando otra que estuviera abierta), y `Conectado` cierra la pausa
+  abierta (o reconecta, o entra). Un estado desconocido/ausente se trata como `Conectado` (compat).
+- `calcularJornada`: acumula las 4 pausas; resta baño+break+almuerzo+desconexión; **no** resta
+  capacitación. Nuevos campos `minutosBreak`/`minutosCapacitacion` (también en `ESTADO_SIN_ENTRADA`,
+  `construirTotales`, `jornadaRepository.actualizarTotales` y la respuesta de `estadoDeHoy`).
+
+**Frontend:** la trazabilidad (`TrazabilidadView.jsx`) distingue break (color de pausa) y
+capacitación (color de trabajo, porque es laborada), con etiquetas propias en la línea de tiempo y
+la tabla de eventos. El agente marca en AsisLock; el portal del Gestor ya no necesita marcar pausas.
+
+**Pruebas:** dominio (break descuenta, capacitación no, mezcla, pausa activa; decidirLogin con cada
+estado, cambio entre pausas, repetición, sin entrada) — total **182** unitarias; e2e 127 sin
+regresión.
+
+**Pendiente (fase 2, sin empezar):** la traza "relato" de la hora extra que pidió el usuario (hora
+real de ingreso al extra, desbordes más allá del fin aprobado) y el login post-salida dentro de una
+franja de hora extra aprobada que hoy se ignora por `jornada_finalizada`. Ver la conversación de
+esta sesión.
