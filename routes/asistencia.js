@@ -63,6 +63,7 @@ router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));
 router.get('/equipo/:empleadoId/jornadas', canDirigirEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
 router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canDirigirEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
 router.get('/equipo/estadisticas', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
+router.get('/equipo/resumen-mensual', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(equipoController.resumenMensual));
 router.post('/equipo/jornada/:id/evento', canDirigirEquipo, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
 
 router.get('/horarios/plantillas', canDirigirEquipo, asyncHandler(horarioController.listarPlantillas));
