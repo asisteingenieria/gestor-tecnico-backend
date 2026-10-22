@@ -2170,3 +2170,5 @@ cron diario). `financieraService.resumenMensual` agrupa con `totalesEquipo`. Fro
 mensual"): KPIs globales, comparativo por campaña con barras de puntualidad, y al abrir una campaña
 su calendario + tabla; las celdas enlazan a la trazabilidad por campaña con `?fecha=`.
 Verificado con prueba de integración (comparativo de 2 campañas + detalle). Sin migración.
+
+**Tendencia mes contra mes:** el resumen de financiera también trae `periodo_anterior` y, por campaña, `anterior` (los mismos totales del mes previo, consulta agregada aparte), para mostrar la variación de puntualidad en puntos porcentuales.

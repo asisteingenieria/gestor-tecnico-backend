@@ -49,20 +49,36 @@ async function resumenMensual({ periodo, campaniaId = null }) {
         throw new ValidacionError('El periodo debe tener el formato AAAA-MM');
     }
     const { desde, hasta } = rangoDelMes(periodo);
+    const periodoAnterior = mesAnterior(periodo);
+    const rangoPrev = rangoDelMes(periodoAnterior);
 
-    // Todos los empleados activos con jornadas en el mes (una consulta), para el comparativo.
-    const todos = await resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde, hasta });
+    // Una consulta agregada por mes (actual y anterior) para el comparativo y la tendencia.
+    const [todos, todosPrev] = await Promise.all([
+        resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde, hasta }),
+        resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde: rangoPrev.desde, hasta: rangoPrev.hasta })
+    ]);
 
-    const porCampaniaMapa = new Map();
-    for (const e of todos) {
-        const clave = e.idcampania ?? 'sin_campania';
-        if (!porCampaniaMapa.has(clave)) {
-            porCampaniaMapa.set(clave, { idcampania: e.idcampania ?? null, campania: e.campania || 'Sin campaña', filas: [] });
+    const totalesPorCampania = (filas) => {
+        const mapa = new Map();
+        for (const e of filas) {
+            const clave = e.idcampania ?? 'sin_campania';
+            if (!mapa.has(clave)) mapa.set(clave, { idcampania: e.idcampania ?? null, campania: e.campania || 'Sin campaña', filas: [] });
+            mapa.get(clave).filas.push(e);
         }
-        porCampaniaMapa.get(clave).filas.push(e);
-    }
-    const por_campania = [...porCampaniaMapa.values()]
-        .map((g) => ({ idcampania: g.idcampania, campania: g.campania, totales: totalesEquipo(g.filas) }))
+        return mapa;
+    };
+    const prevMapa = totalesPorCampania(todosPrev);
+
+    const por_campania = [...totalesPorCampania(todos).values()]
+        .map((g) => {
+            const anterior = prevMapa.get(g.idcampania ?? 'sin_campania');
+            return {
+                idcampania: g.idcampania,
+                campania: g.campania,
+                totales: totalesEquipo(g.filas),
+                anterior: anterior ? totalesEquipo(anterior.filas) : null
+            };
+        })
         .sort((a, b) => String(a.campania).localeCompare(String(b.campania)));
 
     // Detalle de una campaña: sus empleados con la grilla día a día.
@@ -84,7 +100,13 @@ async function resumenMensual({ periodo, campaniaId = null }) {
         };
     }
 
-    return { periodo, desde, hasta, por_campania, totales: totalesEquipo(todos), campania };
+    return { periodo, periodo_anterior: periodoAnterior, desde, hasta, por_campania, totales: totalesEquipo(todos), campania };
+}
+
+// Mes anterior de un periodo 'AAAA-MM'.
+function mesAnterior(periodo) {
+    const [a, m] = periodo.split('-').map(Number);
+    return m === 1 ? `${a - 1}-12` : `${a}-${String(m - 1).padStart(2, '0')}`;
 }
 
 module.exports = { campanias, empleados, jornadasDe, trazabilidadDe, resumenMensual };
