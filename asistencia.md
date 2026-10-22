@@ -2116,7 +2116,22 @@ la tabla de eventos. El agente marca en AsisLock; el portal del Gestor ya no nec
 estado, cambio entre pausas, repetición, sin entrada) — total **182** unitarias; e2e 127 sin
 regresión.
 
-**Pendiente (fase 2, sin empezar):** la traza "relato" de la hora extra que pidió el usuario (hora
-real de ingreso al extra, desbordes más allá del fin aprobado) y el login post-salida dentro de una
-franja de hora extra aprobada que hoy se ignora por `jornada_finalizada`. Ver la conversación de
-esta sesión.
+**Fase 2 (hecha, migración 077 + código):** la traza muestra el relato de la hora extra:
+- `GET /mi-jornada/:fecha/trazabilidad` devuelve `hora_extra` = { solicitudes (franja, tramos,
+  `creado_en`/`fecha_decision`), franja_aprobada, extra (inicio_real, fin_real, minutos, en_curso,
+  contiguo, excedio_min) }. Cálculo puro en `domain/asistencia/resumenHoraExtra.js`.
+- La ingesta de AsisLock reabre la jornada: un login después de la `salida` que cae dentro de una
+  franja de hora extra aprobada (con 15 min de gracia al inicio) genera `inicio_extra` en vez de
+  ignorarse por `jornada_finalizada`; el logout siguiente genera `fin_extra`
+  (`asislock.decidirLogin`/`decidirLogout`, `extraAbierto`, `dentroDeHoraExtra`). Solo se activa si
+  hay hora extra aprobada, así que los días normales no cambian. El bloque extra no toca
+  `calcularJornada` (queda después de la `salida`): el relato se arma aparte en la trazabilidad.
+- `hora_extra.creado_en` (migración 077) guarda cuándo se solicitó; `insertarSolicitud`/
+  `insertarAsignada` lo llenan con `NOW()`.
+- Frontend: `TrazabilidadView.jsx` dibuja el segmento de hora extra en la línea de tiempo y un panel
+  con el relato (solicitud/aprobación, hora real de ingreso, y "siguió N más allá del fin aprobado").
+
+**Probado:** unitarias del dominio (`resumenHoraExtra` contiguo/no contiguo/en curso/desborde;
+`decidirLogin` reabre con HE aprobada y la ignora sin ella; `decidirLogout` cierra con `fin_extra`)
+— total **192**; e2e 127 sin regresión; prueba de integración real (entrada→salida→login en franja
+→logout) que confirma `inicio_extra`/`fin_extra` y el resumen con la hora real de ingreso.

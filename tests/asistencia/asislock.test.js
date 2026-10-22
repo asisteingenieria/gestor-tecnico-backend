@@ -300,3 +300,29 @@ test('Capacitación (con acento) se normaliza y abre inicio_capacitacion', () =>
 test('una pausa sin entrada previa se ignora (sin_entrada)', () => {
     assert.equal(decidirLogin({ eventos: [], instante: h('10:00:00'), estado: 'Break' }).motivo, 'sin_entrada');
 });
+
+// --- Reapertura por hora extra aprobada (fase 2) ---
+
+const HE = (ini, fin) => ({ hora_inicio: ini, hora_fin: fin, minutos_aprobados: 120 });
+
+test('login tras la salida, dentro de una hora extra aprobada, reabre como inicio_extra', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('salida', '17:00:00')];
+    const d = decidirLogin({ eventos, instante: h('19:03:00'), estado: 'Conectado', fecha: FECHA, horasExtraAprobadas: [HE('19:00:00', '21:00:00')] });
+    assert.deepEqual(d, { accion: 'entrada_extra', eventos: ['inicio_extra'], motivo: null });
+});
+
+test('login tras la salida sin hora extra aprobada se ignora (jornada_finalizada)', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('salida', '17:00:00')];
+    assert.equal(decidirLogin({ eventos, instante: h('19:03:00'), estado: 'Conectado', fecha: FECHA, horasExtraAprobadas: [] }).motivo, 'jornada_finalizada');
+});
+
+test('login fuera de la franja de la hora extra aprobada se ignora', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('salida', '17:00:00')];
+    assert.equal(decidirLogin({ eventos, instante: h('22:30:00'), estado: 'Conectado', fecha: FECHA, horasExtraAprobadas: [HE('19:00:00', '21:00:00')] }).motivo, 'jornada_finalizada');
+});
+
+test('logout con la hora extra abierta la cierra (fin_extra)', () => {
+    const eventos = [ev('entrada', '08:00:00'), ev('salida', '17:00:00'), ev('inicio_extra', '19:03:00')];
+    const d = decidirLogout({ eventos, horario: HORARIO, instante: h('21:10:00'), parametros: PARAMETROS });
+    assert.deepEqual(d, { accion: 'fin_extra', eventos: ['fin_extra'], motivo: null });
+});

@@ -6,6 +6,7 @@ const parametroRepo = require('../../repositories/asistencia/parametroRepository
 const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
 const registroRepo = require('../../repositories/asistencia/asislockRegistroRepository');
 const loginBiometricoRepo = require('../../repositories/asistencia/loginBiometricoRepository');
+const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository');
 const { asislock } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
@@ -121,8 +122,12 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
         const eventos = jornada ? await eventoRepo.findByJornada(jornada.idjornada, conn) : [];
         const horario = await horarioRepo.findByEmpleadoYFecha(usersCompanyId, fecha, conn);
 
+        // Para reabrir la jornada en una hora extra aprobada (el agente que vuelve más tarde).
+        const horasExtraAprobadas = evento === 'login'
+            ? await horaExtraRepo.findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha, conn)
+            : [];
         const decision = evento === 'login'
-            ? asislock.decidirLogin({ eventos, instante, estado: registro.estado_conexion })
+            ? asislock.decidirLogin({ eventos, instante, estado: registro.estado_conexion, fecha, horasExtraAprobadas })
             : asislock.decidirLogout({ eventos, horario, instante, parametros });
 
         if (!decision.accion) {

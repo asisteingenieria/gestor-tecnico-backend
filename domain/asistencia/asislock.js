@@ -162,6 +162,33 @@ function pausaAbierta(eventos) {
     return tipo;
 }
 
+/** ¿Hay un bloque de hora extra abierto (inicio_extra sin su fin_extra)? */
+function extraAbierto(eventos) {
+    let abierto = false;
+    for (const e of ordenar(eventos)) {
+        if (e.tipo === 'inicio_extra') abierto = true;
+        else if (e.tipo === 'fin_extra') abierto = false;
+    }
+    return abierto;
+}
+
+// Minutos de gracia para considerar que un login "entra" a la hora extra aunque llegue un poco
+// antes del inicio de la franja aprobada (llegar tarde dentro de la franja siempre cuenta).
+const GRACIA_INGRESO_EXTRA_MIN = 15;
+
+/** ¿El instante cae dentro de alguna franja de hora extra aprobada ese día (con gracia al inicio)? */
+function dentroDeHoraExtra(instante, fecha, horasExtraAprobadas) {
+    if (!instante || !fecha) return false;
+    for (const he of horasExtraAprobadas || []) {
+        if (!he.hora_inicio || !he.hora_fin) continue;
+        const ini = combinarFechaHora(fecha, he.hora_inicio);
+        let fin = combinarFechaHora(fecha, he.hora_fin);
+        if (fin <= ini) fin = new Date(fin.getTime() + 24 * 60 * 60 * 1000); // cruza la medianoche
+        if (instante >= new Date(ini.getTime() - GRACIA_INGRESO_EXTRA_MIN * 60000) && instante <= fin) return true;
+    }
+    return false;
+}
+
 const ignorar = (motivo) => ({ accion: null, eventos: [], motivo });
 
 /**
@@ -170,14 +197,22 @@ const ignorar = (motivo) => ({ accion: null, eventos: [], motivo });
  * estado en `estado_conexion`: por eso aquí se interpreta el estado para abrir/cerrar pausas.
  * @returns {{ accion: string|null, eventos: string[], motivo: string|null }}
  */
-function decidirLogin({ eventos, instante, estado }) {
+function decidirLogin({ eventos, instante, estado, fecha, horasExtraAprobadas = [] }) {
     const ordenados = ordenar(eventos);
     const entrada = ordenados.find((e) => e.tipo === 'entrada');
-    if (ordenados.some((e) => e.tipo === 'salida')) return ignorar('jornada_finalizada');
-
     const estadoNorm = normalizarEstado(estado);
     const pausa = pausaAbierta(ordenados);
     const desde = desconexionAbierta(ordenados);
+
+    // Jornada ya cerrada con salida: solo se reabre si el login cae en una hora extra aprobada
+    // (el agente volvió más tarde para su tiempo extra). Si no, se ignora como hasta ahora.
+    if (ordenados.some((e) => e.tipo === 'salida')) {
+        if (extraAbierto(ordenados)) return ignorar('en_hora_extra');
+        if ((estadoNorm === 'conectado' || estadoNorm === null) && dentroDeHoraExtra(instante, fecha, horasExtraAprobadas)) {
+            return { accion: 'entrada_extra', eventos: ['inicio_extra'], motivo: null };
+        }
+        return ignorar('jornada_finalizada');
+    }
 
     // Un estado de pausa (break/baño/almuerzo/capacitación) abre esa pausa, cerrando antes otra
     // que estuviera abierta. Requiere una jornada en curso (con entrada y sin desconexión).
@@ -212,6 +247,13 @@ function decidirLogout({ eventos, horario, instante, parametros }) {
     const ordenados = ordenar(eventos);
     const entrada = ordenados.find((e) => e.tipo === 'entrada');
     if (!entrada) return ignorar('sin_entrada');
+
+    // Un logout con la hora extra abierta la cierra (no vuelve a "salida": la jornada ya cerró).
+    if (extraAbierto(ordenados)) {
+        if (instante < ordenados[ordenados.length - 1].ocurrido_en) return ignorar('fuera_de_orden');
+        return { accion: 'fin_extra', eventos: ['fin_extra'], motivo: null };
+    }
+
     if (ordenados.some((e) => e.tipo === 'salida')) return ignorar('jornada_finalizada');
     if (desconexionAbierta(ordenados)) return ignorar('ya_desconectado');
     // jornada_evento es append-only: un logout anterior al último evento ya registrado no se
@@ -278,6 +320,8 @@ module.exports = {
     motivoRechazoHora,
     desconexionAbierta,
     pausaAbierta,
+    extraAbierto,
+    dentroDeHoraExtra,
     normalizarEstado,
     decidirLogin,
     decidirLogout,

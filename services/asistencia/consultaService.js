@@ -4,6 +4,7 @@ const horarioRepo = require('../../repositories/asistencia/horarioAsignadoReposi
 const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository');
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
 const { calcularJornada } = require('../../domain/asistencia');
+const { resumenHoraExtra } = require('../../domain/asistencia/resumenHoraExtra');
 const { fechaLaboral } = require('../../utils/fechaBogota');
 const { NoEncontradoError } = require('../../errors/AppError');
 const cierreService = require('./cierreService');
@@ -87,11 +88,19 @@ async function trazabilidad({ usersCompanyId, fecha }) {
     const horasExtraAprobadas = await horaExtraRepo.findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha);
     const parametros = await parametroRepo.obtener();
 
-    const estado = calcularJornada(eventos, horario, new Date(), horasExtraAprobadas, parametros);
+    const ahora = new Date();
+    const estado = calcularJornada(eventos, horario, ahora, horasExtraAprobadas, parametros);
+
+    // Relato de la hora extra del día (franja aprobada, ingreso real, desborde). §34 fase 2.
+    const tramosFilas = await horaExtraRepo.findTramosPorHorasExtra(horasExtraAprobadas.map((h) => h.idhora_extra));
+    const tramosPorHe = {};
+    for (const t of tramosFilas) (tramosPorHe[t.idhora_extra] ||= []).push({ clase: t.clase, minutos: t.minutos });
+    const horaExtra = resumenHoraExtra({ eventos, horario, horasExtraAprobadas, tramosPorHe, fecha, ahora });
 
     return {
         fecha,
         jornada: { ...jornada, ...estado },
+        hora_extra: horaExtra,
         asislock: await asislockVista.delDia(usersCompanyId, fecha),
         eventos: eventos.map((e) => ({
             tipo: e.tipo,
