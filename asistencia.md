@@ -2157,3 +2157,16 @@ ahora acepta `?fecha=` para abrir un día concreto desde el calendario.
 
 **Probado:** dominio `resumenMensual` (196 unitarias) + prueba de integración del endpoint contra la
 BD. Sin migración.
+
+**Financiera / admin (misma sesión):** la misma idea a nivel organización.
+`GET /asistencia/financiera/resumen-mensual?periodo=&campania_id=` (`isFinanciera`): comparativo de
+TODAS las campañas (empleados, puntualidad %, días trabajados, ausencias, horas trabajadas/extra) y,
+si se pasa `campania_id`, el detalle de esa campaña (empleados + grilla día a día, como el jefe).
+Hecho con consultas AGREGADAS (`repositories/asistencia/resumenMensualRepository.js`:
+`agregadosPorEmpleado` con un `SUM(CASE…)` sobre `jornada` + contrato activo + campaña, y
+`jornadasDiaPorCampania` para la grilla), no un recorrido por empleado; no normaliza (confía en el
+cron diario). `financieraService.resumenMensual` agrupa con `totalesEquipo`. Frontend:
+`financiera/AsistenciaMensual.jsx` (`/recursos-humanos/asistencia-mensual`, nav "Asistencia
+mensual"): KPIs globales, comparativo por campaña con barras de puntualidad, y al abrir una campaña
+su calendario + tabla; las celdas enlazan a la trazabilidad por campaña con `?fecha=`.
+Verificado con prueba de integración (comparativo de 2 campañas + detalle). Sin migración.
