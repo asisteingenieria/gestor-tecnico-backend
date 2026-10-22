@@ -157,3 +157,37 @@ test('puedeMarcarSalida se habilita dentro de la ventana de minutos_habilitar_sa
     assert.equal(lejos.puedeMarcarSalida, false);
     assert.equal(cerca.puedeMarcarSalida, true);
 });
+
+test('break es tiempo libre: descuenta del tiempo trabajado', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_break', '10:00:00'), evento('fin_break', '10:15:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('11:00:00'));
+    assert.equal(r.minutosBreak, 15);
+    assert.equal(r.minutosTrabajados, 165); // bruto 180 - 15
+});
+
+test('capacitación cuenta como laborada: NO descuenta', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_capacitacion', '10:00:00'), evento('fin_capacitacion', '11:00:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('11:00:00'));
+    assert.equal(r.minutosCapacitacion, 60);
+    assert.equal(r.minutosTrabajados, 180); // bruto 180, la capacitación no se resta
+});
+
+test('break y capacitación juntos: solo el break descuenta', () => {
+    const eventos = [
+        evento('entrada', '08:00:00'),
+        evento('inicio_break', '09:00:00'), evento('fin_break', '09:10:00'),
+        evento('inicio_capacitacion', '10:00:00'), evento('fin_capacitacion', '11:00:00')
+    ];
+    const r = calcularJornada(eventos, HORARIO, horaDia('12:00:00'));
+    assert.equal(r.minutosBreak, 10);
+    assert.equal(r.minutosCapacitacion, 60);
+    assert.equal(r.minutosTrabajados, 230); // bruto 240 - 10 (break)
+});
+
+test('capacitación abierta queda como pausa activa pero no descuenta', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_capacitacion', '10:00:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('10:30:00'));
+    assert.equal(r.estado, 'en_pausa');
+    assert.equal(r.pausaActiva.tipo, 'capacitacion');
+    assert.equal(r.minutosTrabajados, 150); // bruto 150, no se resta
+});

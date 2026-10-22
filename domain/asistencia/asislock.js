@@ -139,33 +139,98 @@ function desconexionAbierta(eventos) {
     return desde;
 }
 
-/** Tipo de la pausa de baño/almuerzo abierta, o null. */
+// Pausas que AsisLock reporta en `estado_conexion`. Baño, break y almuerzo son tiempo libre;
+// capacitación cuenta como laborada (la distinción de descuento vive en calcularJornada).
+const TIPOS_PAUSA = ['bano', 'break', 'almuerzo', 'capacitacion'];
+
+/** `estado_conexion` de AsisLock → 'conectado' | 'desconectado' | una pausa | null (desconocido). */
+function normalizarEstado(valor) {
+    const t = String(valor ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (t === 'conectado') return 'conectado';
+    if (t === 'desconectado') return 'desconectado';
+    if (TIPOS_PAUSA.includes(t)) return t;
+    return null;
+}
+
+/** Tipo de la pausa (baño/break/almuerzo/capacitación) abierta, o null. */
 function pausaAbierta(eventos) {
     let tipo = null;
     for (const e of ordenar(eventos)) {
-        if (e.tipo === 'inicio_bano' || e.tipo === 'inicio_almuerzo') tipo = e.tipo.slice('inicio_'.length);
-        else if (e.tipo === 'fin_bano' || e.tipo === 'fin_almuerzo') tipo = null;
+        if (e.tipo.startsWith('inicio_') && TIPOS_PAUSA.includes(e.tipo.slice(7))) tipo = e.tipo.slice(7);
+        else if (e.tipo.startsWith('fin_') && TIPOS_PAUSA.includes(e.tipo.slice(4))) tipo = null;
     }
     return tipo;
+}
+
+/** ¿Hay un bloque de hora extra abierto (inicio_extra sin su fin_extra)? */
+function extraAbierto(eventos) {
+    let abierto = false;
+    for (const e of ordenar(eventos)) {
+        if (e.tipo === 'inicio_extra') abierto = true;
+        else if (e.tipo === 'fin_extra') abierto = false;
+    }
+    return abierto;
+}
+
+// Minutos de gracia para considerar que un login "entra" a la hora extra aunque llegue un poco
+// antes del inicio de la franja aprobada (llegar tarde dentro de la franja siempre cuenta).
+const GRACIA_INGRESO_EXTRA_MIN = 15;
+
+/** ¿El instante cae dentro de alguna franja de hora extra aprobada ese día (con gracia al inicio)? */
+function dentroDeHoraExtra(instante, fecha, horasExtraAprobadas) {
+    if (!instante || !fecha) return false;
+    for (const he of horasExtraAprobadas || []) {
+        if (!he.hora_inicio || !he.hora_fin) continue;
+        const ini = combinarFechaHora(fecha, he.hora_inicio);
+        let fin = combinarFechaHora(fecha, he.hora_fin);
+        if (fin <= ini) fin = new Date(fin.getTime() + 24 * 60 * 60 * 1000); // cruza la medianoche
+        if (instante >= new Date(ini.getTime() - GRACIA_INGRESO_EXTRA_MIN * 60000) && instante <= fin) return true;
+    }
+    return false;
 }
 
 const ignorar = (motivo) => ({ accion: null, eventos: [], motivo });
 
 /**
- * Qué produce un login de AsisLock en la jornada de ese día.
- * @returns {{ accion: 'entrada'|'reconexion'|null, eventos: string[], motivo: string|null }}
+ * Qué produce un "login" de AsisLock en la jornada de ese día. AsisLock manda un registro por cada
+ * cambio de estado (Conectado, Break, Almuerzo, Capacitación, Baño) como evento 'login', con el
+ * estado en `estado_conexion`: por eso aquí se interpreta el estado para abrir/cerrar pausas.
+ * @returns {{ accion: string|null, eventos: string[], motivo: string|null }}
  */
-function decidirLogin({ eventos, instante }) {
+function decidirLogin({ eventos, instante, estado, fecha, horasExtraAprobadas = [] }) {
     const ordenados = ordenar(eventos);
     const entrada = ordenados.find((e) => e.tipo === 'entrada');
-    if (ordenados.some((e) => e.tipo === 'salida')) return ignorar('jornada_finalizada');
-
-    // Sin entrada, o un login anterior a la entrada registrada (p. ej. el empleado tocó
-    // "entrada" en Gestor antes de que llegara el aviso del biométrico): el biométrico manda,
-    // y como el cálculo toma la entrada más temprana, basta con agregarla.
-    if (!entrada || instante < entrada.ocurrido_en) return { accion: 'entrada', eventos: ['entrada'], motivo: null };
-
+    const estadoNorm = normalizarEstado(estado);
+    const pausa = pausaAbierta(ordenados);
     const desde = desconexionAbierta(ordenados);
+
+    // Jornada ya cerrada con salida: solo se reabre si el login cae en una hora extra aprobada
+    // (el agente volvió más tarde para su tiempo extra). Si no, se ignora como hasta ahora.
+    if (ordenados.some((e) => e.tipo === 'salida')) {
+        if (extraAbierto(ordenados)) return ignorar('en_hora_extra');
+        if ((estadoNorm === 'conectado' || estadoNorm === null) && dentroDeHoraExtra(instante, fecha, horasExtraAprobadas)) {
+            return { accion: 'entrada_extra', eventos: ['inicio_extra'], motivo: null };
+        }
+        return ignorar('jornada_finalizada');
+    }
+
+    // Un estado de pausa (break/baño/almuerzo/capacitación) abre esa pausa, cerrando antes otra
+    // que estuviera abierta. Requiere una jornada en curso (con entrada y sin desconexión).
+    if (estadoNorm && estadoNorm !== 'conectado' && estadoNorm !== 'desconectado') {
+        if (!entrada) return ignorar('sin_entrada');
+        if (desde) return ignorar('desconectado');
+        if (pausa === estadoNorm) return ignorar('ya_en_pausa');
+        const eventosOut = pausa ? [`fin_${pausa}`] : [];
+        eventosOut.push(`inicio_${estadoNorm}`);
+        return { accion: `pausa_${estadoNorm}`, eventos: eventosOut, motivo: null };
+    }
+
+    // Conectado (o estado desconocido/ausente, por compatibilidad): entrada / fin de pausa /
+    // reconexión. Sin entrada, o un login anterior a la entrada registrada (p. ej. el empleado
+    // tocó "entrada" en Gestor antes de que llegara el biométrico): el biométrico manda y, como
+    // el cálculo toma la entrada más temprana, basta con agregarla.
+    if (!entrada || instante < entrada.ocurrido_en) return { accion: 'entrada', eventos: ['entrada'], motivo: null };
+    if (pausa) return { accion: 'fin_pausa', eventos: [`fin_${pausa}`], motivo: null };
     if (desde) {
         if (instante < desde) return ignorar('fuera_de_orden');
         return { accion: 'reconexion', eventos: ['fin_desconexion'], motivo: null };
@@ -182,6 +247,13 @@ function decidirLogout({ eventos, horario, instante, parametros }) {
     const ordenados = ordenar(eventos);
     const entrada = ordenados.find((e) => e.tipo === 'entrada');
     if (!entrada) return ignorar('sin_entrada');
+
+    // Un logout con la hora extra abierta la cierra (no vuelve a "salida": la jornada ya cerró).
+    if (extraAbierto(ordenados)) {
+        if (instante < ordenados[ordenados.length - 1].ocurrido_en) return ignorar('fuera_de_orden');
+        return { accion: 'fin_extra', eventos: ['fin_extra'], motivo: null };
+    }
+
     if (ordenados.some((e) => e.tipo === 'salida')) return ignorar('jornada_finalizada');
     if (desconexionAbierta(ordenados)) return ignorar('ya_desconectado');
     // jornada_evento es append-only: un logout anterior al último evento ya registrado no se
@@ -248,6 +320,9 @@ module.exports = {
     motivoRechazoHora,
     desconexionAbierta,
     pausaAbierta,
+    extraAbierto,
+    dentroDeHoraExtra,
+    normalizarEstado,
     decidirLogin,
     decidirLogout,
     modalidadIngreso,

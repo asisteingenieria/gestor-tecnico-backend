@@ -13,6 +13,8 @@ const ESTADO_SIN_ENTRADA = {
     minutosTrabajados: 0,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
+    minutosBreak: 0,
+    minutosCapacitacion: 0,
     minutosDesconexion: 0,
     pausaActiva: null,
     desconexionActiva: null,
@@ -45,16 +47,26 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     const salida = ordenados.find((e) => e.tipo === 'salida');
     const fin = salida ? salida.ocurrido_en : ahora;
 
-    let minutosPausaBano = 0;
-    let minutosPausaAlmuerzo = 0;
+    // Pausas que manda AsisLock por `estado_conexion`. Baño, break y almuerzo son tiempo libre y
+    // DESCUENTAN del tiempo trabajado; capacitación cuenta COMO LABORADA (no descuenta), por
+    // decisión del negocio (asistencia.md §18, revisión). Se acumulan por tipo.
+    const minutosPausa = { bano: 0, break: 0, almuerzo: 0, capacitacion: 0 };
+    const DESCUENTA = { bano: true, break: true, almuerzo: true, capacitacion: false };
+    const TIPO_DE_INICIO = { inicio_bano: 'bano', inicio_break: 'break', inicio_almuerzo: 'almuerzo', inicio_capacitacion: 'capacitacion' };
+    const TIPO_DE_FIN = { fin_bano: 'bano', fin_break: 'break', fin_almuerzo: 'almuerzo', fin_capacitacion: 'capacitacion' };
     let inicioAlmuerzoReal = null;
     let pausaActiva = null;
     const duracionesBano = [];
     let pendiente = null;
-    // Desconexión de AsisLock (logout antes del fin de turno): corre aparte de las pausas
-    // de baño/almuerzo y tampoco cuenta como tiempo laborado.
+    // Desconexión de AsisLock (logout antes del fin de turno): corre aparte de las pausas y
+    // tampoco cuenta como tiempo laborado.
     let minutosDesconexion = 0;
     let desconexionDesde = null;
+
+    const acumularPausa = (tipo, duracion) => {
+        minutosPausa[tipo] += duracion;
+        if (tipo === 'bano') duracionesBano.push(duracion);
+    };
 
     for (const evento of ordenados) {
         // Un evento posterior a `fin` (p. ej. una corrección manual registrada después de que
@@ -68,16 +80,14 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
                 minutosDesconexion += Math.max(0, minutosEntre(desconexionDesde, evento.ocurrido_en));
                 desconexionDesde = null;
             }
-        } else if (evento.tipo === 'inicio_bano' || evento.tipo === 'inicio_almuerzo') {
-            const tipo = evento.tipo === 'inicio_bano' ? 'bano' : 'almuerzo';
+        } else if (TIPO_DE_INICIO[evento.tipo]) {
+            const tipo = TIPO_DE_INICIO[evento.tipo];
             pendiente = { tipo, desde: evento.ocurrido_en };
             if (tipo === 'almuerzo' && inicioAlmuerzoReal === null) inicioAlmuerzoReal = evento.ocurrido_en;
-        } else if (evento.tipo === 'fin_bano' || evento.tipo === 'fin_almuerzo') {
-            const tipo = evento.tipo === 'fin_bano' ? 'bano' : 'almuerzo';
+        } else if (TIPO_DE_FIN[evento.tipo]) {
+            const tipo = TIPO_DE_FIN[evento.tipo];
             if (pendiente && pendiente.tipo === tipo) {
-                const duracion = Math.max(0, minutosEntre(pendiente.desde, evento.ocurrido_en));
-                if (tipo === 'bano') { minutosPausaBano += duracion; duracionesBano.push(duracion); }
-                else minutosPausaAlmuerzo += duracion;
+                acumularPausa(tipo, Math.max(0, minutosEntre(pendiente.desde, evento.ocurrido_en)));
                 pendiente = null;
             }
         }
@@ -86,10 +96,16 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     // Una pausa sin cerrar se cierra contra `fin` (evento salida, o `ahora` si sigue abierta)
     if (pendiente) {
         const duracion = Math.max(0, minutosEntre(pendiente.desde, fin));
-        if (pendiente.tipo === 'bano') { minutosPausaBano += duracion; duracionesBano.push(duracion); }
-        else minutosPausaAlmuerzo += duracion;
+        acumularPausa(pendiente.tipo, duracion);
         if (!salida) pausaActiva = { tipo: pendiente.tipo, desde: pendiente.desde, minutosTranscurridos: Math.round(duracion) };
     }
+
+    const minutosPausaBano = minutosPausa.bano;
+    const minutosPausaAlmuerzo = minutosPausa.almuerzo;
+    const minutosBreak = minutosPausa.break;
+    const minutosCapacitacion = minutosPausa.capacitacion;
+    // Lo que descuenta del tiempo trabajado (todo menos capacitación).
+    const minutosLibres = Object.entries(minutosPausa).reduce((acc, [t, m]) => acc + (DESCUENTA[t] ? m : 0), 0);
 
     let desconexionActiva = null;
     if (desconexionDesde !== null) {
@@ -99,7 +115,8 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     }
 
     const bruto = minutosEntre(entrada.ocurrido_en, fin);
-    const minutosTrabajados = Math.max(0, bruto - minutosPausaBano - minutosPausaAlmuerzo - minutosDesconexion);
+    // La capacitación NO se resta (cuenta como laborada); sí baño, break, almuerzo y desconexión.
+    const minutosTrabajados = Math.max(0, bruto - minutosLibres - minutosDesconexion);
 
     let minutosTarde = 0;
     let minutosExtra = 0;
@@ -162,6 +179,8 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         minutosTrabajados: Math.round(minutosTrabajados),
         minutosPausaBano: Math.round(minutosPausaBano),
         minutosPausaAlmuerzo: Math.round(minutosPausaAlmuerzo),
+        minutosBreak: Math.round(minutosBreak),
+        minutosCapacitacion: Math.round(minutosCapacitacion),
         minutosDesconexion: Math.round(minutosDesconexion),
         pausaActiva,
         desconexionActiva,

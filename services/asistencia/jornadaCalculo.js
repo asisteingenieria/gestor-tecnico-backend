@@ -27,6 +27,8 @@ function construirTotales(estadoCalculado, eventos) {
         minutosTrabajados: estadoCalculado.minutosTrabajados,
         minutosPausaBano: estadoCalculado.minutosPausaBano,
         minutosPausaAlmuerzo: estadoCalculado.minutosPausaAlmuerzo,
+        minutosBreak: estadoCalculado.minutosBreak,
+        minutosCapacitacion: estadoCalculado.minutosCapacitacion,
         minutosDesconexion: estadoCalculado.minutosDesconexion,
         minutosExtra: estadoCalculado.minutosExtra,
         minutosSalidaAnticipada: estadoCalculado.minutosSalidaAnticipada,
