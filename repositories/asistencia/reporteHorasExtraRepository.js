@@ -18,7 +18,9 @@ const SALARIO_VIGENTE = `(SELECT hs.salario FROM historial_salarial hs
                           WHERE hs.contrato_idcontrato = c.idcontrato AND hs.fecha_vigencia_fin IS NULL
                           ORDER BY hs.idhistorial_salarial DESC LIMIT 1)`;
 
-const sumaClase = (clase) => `SUM(CASE WHEN he.clase = '${clase}' THEN COALESCE(he.minutos_aprobados, he.minutos_estimados) ELSE 0 END)`;
+// Los minutos por clase salen de los tramos (una hora extra puede repartirse en varias clases,
+// migración 074). El LEFT JOIN multiplica la hora extra por sus tramos; el SUM los recompone.
+const sumaClase = (clase) => `SUM(CASE WHEN het.clase = '${clase}' THEN het.minutos ELSE 0 END)`;
 
 /**
  * Horas extra aprobadas del mes, una fila por empleado con los minutos sumados por clase, sus datos
@@ -53,6 +55,7 @@ async function reporteDelMes({ jefeId = null, campaniaId = null, desde, hasta },
                 ${sumaClase('extras_dominicales_festivas')} AS extras_dominicales_festivas,
                 GROUP_CONCAT(DISTINCT NULLIF(TRIM(he.motivo), '') ORDER BY he.fecha SEPARATOR ' | ') AS aclaraciones
          FROM hora_extra he
+         LEFT JOIN hora_extra_tramo het ON het.idhora_extra = he.idhora_extra
          JOIN users_company uc ON uc.id = he.users_company_id
          JOIN contrato c ON ${CONTRATO_HE}
          LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania

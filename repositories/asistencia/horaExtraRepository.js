@@ -8,13 +8,47 @@ async function findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha, conn = db) 
     return filas;
 }
 
-async function insertarSolicitud({ usersCompanyId, fecha, minutosEstimados, clase, motivo, solicitadoPor }, conn = db) {
+async function insertarSolicitud({ usersCompanyId, fecha, horaInicio, horaFin, minutosEstimados, clase, motivo, solicitadoPor }, conn = db) {
     const [resultado] = await conn.query(
-        `INSERT INTO hora_extra (users_company_id, fecha, tipo, clase, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id)
-         VALUES (?, ?, 'solicitada', ?, ?, 'pendiente', ?, ?, ?)`,
-        [usersCompanyId, fecha, clase, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
+        `INSERT INTO hora_extra (users_company_id, fecha, hora_inicio, hora_fin, tipo, clase, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id)
+         VALUES (?, ?, ?, ?, 'solicitada', ?, ?, 'pendiente', ?, ?, ?)`,
+        [usersCompanyId, fecha, horaInicio ?? null, horaFin ?? null, clase, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
     );
     return resultado.insertId;
+}
+
+// Tramos: la clasificación (1..n clases) de una hora extra. El UNIQUE (idhora_extra, clase) garantiza
+// una fila por clase. `reemplazarTramos` los vuelve a escribir cuando el jefe ajusta al aprobar.
+async function insertarTramos(idhoraExtra, tramos, conn = db) {
+    const filas = (tramos || []).filter((t) => (Number(t.minutos) || 0) > 0);
+    if (filas.length === 0) return;
+    await conn.query(
+        'INSERT INTO hora_extra_tramo (idhora_extra, clase, minutos) VALUES ?',
+        [filas.map((t) => [idhoraExtra, t.clase, t.minutos])]
+    );
+}
+
+async function reemplazarTramos(idhoraExtra, tramos, conn = db) {
+    await conn.query('DELETE FROM hora_extra_tramo WHERE idhora_extra = ?', [idhoraExtra]);
+    await insertarTramos(idhoraExtra, tramos, conn);
+}
+
+async function findTramos(idhoraExtra, conn = db) {
+    const [filas] = await conn.query(
+        'SELECT clase, minutos FROM hora_extra_tramo WHERE idhora_extra = ?',
+        [idhoraExtra]
+    );
+    return filas;
+}
+
+async function findTramosPorHorasExtra(ids, conn = db) {
+    if (!ids || ids.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT idhora_extra, clase, minutos FROM hora_extra_tramo
+         WHERE idhora_extra IN (${ids.map(() => '?').join(',')})`,
+        ids
+    );
+    return filas;
 }
 
 async function findPorEmpleado(usersCompanyId, { estado } = {}, conn = db) {
@@ -81,6 +115,10 @@ async function insertarAsignada({ usersCompanyId, fecha, minutos, clase, motivo,
 module.exports = {
     findAprobadasPorEmpleadoYFecha,
     insertarSolicitud,
+    insertarTramos,
+    reemplazarTramos,
+    findTramos,
+    findTramosPorHorasExtra,
     findPorEmpleado,
     findById,
     findPorEquipo,

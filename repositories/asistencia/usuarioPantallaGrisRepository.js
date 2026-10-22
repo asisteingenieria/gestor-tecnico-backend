@@ -46,8 +46,10 @@ async function findConflicto(usersCompanyId, usuario, conn = db) {
 }
 
 async function insertar({ usersCompanyId, usuario, hash }, conn = db) {
+    // La clave por defecto es la cédula y NO se obliga a cambiarla (debe_cambiar_password = 0):
+    // así el agente no queda bloqueado si la olvida. Puede cambiarla por su cuenta si quiere.
     const [r] = await conn.query(
-        'INSERT INTO usuario_pantalla_gris (users_company_id, usuario, password, debe_cambiar_password) VALUES (?, ?, ?, 1)',
+        'INSERT INTO usuario_pantalla_gris (users_company_id, usuario, password, debe_cambiar_password) VALUES (?, ?, ?, 0)',
         [usersCompanyId, usuario, hash]
     );
     return r.insertId;

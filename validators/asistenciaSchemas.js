@@ -13,15 +13,26 @@ const rangoQuerySchema = {
     }
 };
 
-// Las 5 clases del formato V.3; la elige el agente al solicitar y el jefe la ajusta al aprobar.
+// Las 5 clases del formato V.3. Ya no las elige el agente: el servidor clasifica la franja
+// (migración 074). Se usan al asignar (el jefe sí elige) y al ajustar tramos al aprobar.
 const CLASES_HORA_EXTRA = ['recargo_nocturno', 'extras_diurnas', 'extras_nocturnas', 'dominicales_festivas', 'extras_dominicales_festivas'];
 
+// El agente ingresa la franja (fecha + hora inicio/fin); la clase la determina el servidor.
 const solicitarHoraExtraSchema = {
     body: {
         fecha: { requerido: true, tipo: 'fecha' },
-        minutos_estimados: { requerido: true, tipo: 'entero' },
-        clase: { requerido: true, enum: CLASES_HORA_EXTRA },
+        hora_inicio: { requerido: true, tipo: 'hora' },
+        hora_fin: { requerido: true, tipo: 'hora' },
         motivo: { tipo: 'texto' }
+    }
+};
+
+// Previsualización de la clasificación antes de enviar (no guarda nada).
+const previsualizarHoraExtraSchema = {
+    body: {
+        fecha: { requerido: true, tipo: 'fecha' },
+        hora_inicio: { requerido: true, tipo: 'hora' },
+        hora_fin: { requerido: true, tipo: 'hora' }
     }
 };
 
@@ -104,11 +115,12 @@ const bandejaHorasExtraQuerySchema = {
     query: { estado: { enum: ['pendiente', 'aprobada', 'rechazada', 'cancelada'] } }
 };
 
+// Al aprobar, el jefe puede ajustar la clasificación mandando `tramos` [{clase, minutos}]. Si no
+// los manda, se quedan los que calculó el servidor. El contenido de cada tramo lo valida el servicio.
 const aprobarHoraExtraSchema = {
     params: { id: { requerido: true, tipo: 'entero' } },
     body: {
-        minutos_aprobados: { requerido: true, tipo: 'entero' },
-        clase: { enum: CLASES_HORA_EXTRA },
+        tramos: { tipo: 'array' },
         comentario: { tipo: 'texto' }
     }
 };
@@ -168,6 +180,7 @@ module.exports = {
     trazabilidadParamsSchema,
     rangoQuerySchema,
     solicitarHoraExtraSchema,
+    previsualizarHoraExtraSchema,
     misHorasExtraQuerySchema,
     idParamSchema,
     empleadoIdParamSchema,

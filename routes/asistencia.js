@@ -18,6 +18,7 @@ const {
     trazabilidadParamsSchema,
     rangoQuerySchema,
     solicitarHoraExtraSchema,
+    previsualizarHoraExtraSchema,
     misHorasExtraQuerySchema,
     idParamSchema,
     empleadoIdParamSchema,
@@ -51,6 +52,7 @@ router.get('/mi-jornada/:fecha/trazabilidad', canRegistrarAsistencia, validar(tr
 router.get('/mis-jornadas', canRegistrarAsistencia, validar(rangoQuerySchema), asyncHandler(consultaController.misJornadas));
 router.get('/mis-estadisticas', canRegistrarAsistencia, validar(rangoQuerySchema), asyncHandler(consultaController.misEstadisticas));
 router.post('/horas-extra/solicitar', canRegistrarAsistencia, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
+router.post('/horas-extra/previsualizar', canRegistrarAsistencia, validar(previsualizarHoraExtraSchema), asyncHandler(horaExtraController.previsualizar));
 router.get('/mis-horas-extra', canRegistrarAsistencia, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misHorasExtra));
 // Campana: alertas de traspasos dirigidas a mi ficha (evaluación del encargo, retorno del trabajo en casa)
 router.get('/mis-alertas', canRegistrarAsistencia, asyncHandler(alertaController.misAlertas));

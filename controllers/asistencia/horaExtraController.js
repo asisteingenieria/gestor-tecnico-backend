@@ -5,12 +5,22 @@ async function solicitar(req, res) {
     const resultado = await horaExtraService.solicitar({
         usersCompanyId: req.user.users_company_id,
         fecha: req.body.fecha,
-        minutosEstimados: req.body.minutos_estimados,
-        clase: req.body.clase,
+        horaInicio: req.body.hora_inicio,
+        horaFin: req.body.hora_fin,
         motivo: req.body.motivo,
         solicitadoPor: autorDe(req)
     });
     res.status(201).json(resultado);
+}
+
+async function previsualizar(req, res) {
+    const resultado = await horaExtraService.previsualizar({
+        usersCompanyId: req.user.users_company_id,
+        fecha: req.body.fecha,
+        horaInicio: req.body.hora_inicio,
+        horaFin: req.body.hora_fin
+    });
+    res.json(resultado);
 }
 
 async function misHorasExtra(req, res) {
@@ -33,8 +43,7 @@ async function aprobar(req, res) {
     const resultado = await horaExtraService.aprobar({
         directorUsersCompanyId: req.user.users_company_id,
         idhoraExtra: Number(req.params.id),
-        minutosAprobados: req.body.minutos_aprobados,
-        clase: req.body.clase,
+        tramos: req.body.tramos,
         comentario: req.body.comentario,
         aprobadoPor: autorDe(req)
     });
@@ -64,4 +73,4 @@ async function asignar(req, res) {
     res.status(201).json(resultado);
 }
 
-module.exports = { solicitar, misHorasExtra, bandeja, aprobar, rechazar, asignar };
+module.exports = { solicitar, previsualizar, misHorasExtra, bandeja, aprobar, rechazar, asignar };
