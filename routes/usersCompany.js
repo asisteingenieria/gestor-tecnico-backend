@@ -30,11 +30,22 @@ const verificarLecturaEmpleados = (req, res, next) => {
     next();
 };
 
+// Gasto total en salarios: solo financiera y admin. recursosHumanos ve contratación, no costos.
+const verificarFinanciera = (req, res, next) => {
+    if (!['financiera', 'admin'].includes(req.user.role)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Acceso denegado.'
+        });
+    }
+    next();
+};
+
 router.use(verifyToken);
 
 router.get('/',                          verificarLecturaEmpleados, userCompanyController.getAll);
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
-router.get('/gasto-total',               verificarRecursosHumanos, userCompanyController.getGastoTotal);
+router.get('/gasto-total',               verificarFinanciera, userCompanyController.getGastoTotal);
 
 // Import masivo de empleados desde Excel
 router.post('/import-excel/preview',     verificarRecursosHumanos, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.previewImportExcel));

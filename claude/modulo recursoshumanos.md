@@ -2223,3 +2223,32 @@ prueba monta las rutas en un Express dentro del propio script):
 
 **Para producción:** correr `070` (después de 068 y 069) junto con el deploy. El proceso de pm2 necesita
 escribir en `storage/traspasos/` además de `storage/novedades/`.
+
+## 36. Sesión 2026-10-23 — Botón "Traspasar" del drawer conectado al módulo de Traspasos
+
+Cierra el pendiente de §16.1: el botón "Traspasar" de `EmpleadoDrawer.jsx` estaba deshabilitado
+("Próximamente"). Ahora abre `TraspasoForm` con ese empleado ya elegido, sin salir de la pantalla de
+Empleados. Solo frontend, sin cambios de backend ni migración.
+
+- `EmpleadoDrawer.jsx`: prop nueva `onTraspaso(id)`. El botón se habilita solo si el empleado tiene
+  contrato y no está `retirado`/`inactivo` (si no, lo explica en el `title`).
+- `AgentManagement.jsx`: estado `traspasoEmpleadoId`; cierra el drawer y monta `TraspasoForm`
+  (mismo patrón que `RetiroModal`). Al guardar solo cierra: un traspaso no cambia el contrato (§35),
+  así que no hay que recargar la tabla.
+- `TraspasoForm.jsx`: prop nueva `empleadoInicialId`. Al abrir un traspaso nuevo con ella, precarga
+  la "Información actual" con el mismo `onSelectEmpleado` del selector y bloquea el campo Empleado.
+  Desde la pantalla Traspasos se sigue usando igual (sin la prop).
+
+Verificado: `eslint` sin errores nuevos (queda el falso positivo de `Icon` de §11.1), `vite build` ok.
+**No probado en el navegador.**
+
+## 37. Sesión 2026-10-23 — KPI "Gasto mensual en personal" solo para financiera/admin
+
+Pedido: `recursosHumanos` solo ve información de contratación, nada de costos de salarios. El KPI
+"Gasto mensual en personal" de la pantalla Empleados queda para `financiera` y `admin`.
+- Backend: `GET /users-company/gasto-total` pasa de `verificarRecursosHumanos` a un middleware nuevo
+  `verificarFinanciera` (`financiera`, `admin`) en `routes/usersCompany.js` → 403 para RRHH.
+- Frontend: `AgentManagement.jsx` calcula `puedeVerGasto` (`isFinanciera || isAdmin`); sin él no
+  pide el endpoint, no pinta el KPI y la franja de KPIs pasa a 3 columnas.
+- **Solo el KPI.** Los salarios siguen visibles para RRHH en el formulario de alta (`AgentForm`),
+  el drawer, Traspasos y Contratación Hydra.
