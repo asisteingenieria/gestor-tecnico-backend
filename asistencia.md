@@ -2172,3 +2172,44 @@ su calendario + tabla; las celdas enlazan a la trazabilidad por campaña con `?f
 Verificado con prueba de integración (comparativo de 2 campañas + detalle). Sin migración.
 
 **Tendencia mes contra mes:** el resumen de financiera también trae `periodo_anterior` y, por campaña, `anterior` (los mismos totales del mes previo, consulta agregada aparte), para mostrar la variación de puntualidad en puntos porcentuales.
+
+**Ajuste (commit `5fcf46c`) — el comparativo incluye TODAS las campañas con dotación activa:**
+la primera versión armaba el comparativo a partir de `agregadosPorEmpleado` (basado en `jornada`),
+así que una campaña sin marcaciones ese mes (p. ej. Pymes, Vital, Asiste) desaparecía del tablero.
+Ahora `financieraService.resumenMensual` parte de `empleadoRepo.findCampaniasConEmpleados()` (todas
+las campañas con contrato activo, con su dotación real) y le pega el agregado del mes; las que no
+tienen jornadas salen en 0 / — en vez de faltar. El detalle de una campaña (`campania_id`) también
+lista a TODOS sus empleados activos vía `findActivosPorCampania`, con ceros para los que no marcaron.
+Verificado en local: 18 campañas / 398 empleados. Sin migración.
+
+**Topnav (frontend):** al sumar las pestañas "Asistencia mensual" y "Equipo · mes", el contenedor
+`.ai-topnav-links` no se encogía y las pestañas se montaban sobre la lupa/campana. Corregido en
+`RecursosHumanosLayout.jsx` y `asistencia/AsistenciaLayout.jsx`: las pestañas son flexibles con
+scroll horizontal sin barra visible (`flex:1 1 auto; min-width:0; overflow-x:auto`) y el bloque de
+acciones queda fijo (`[data-topnav-actions] { flex: none; }`).
+
+## 36. Sesión 2026-10-23 — "Reporte Asistencia": reporte mensual y trazabilidad en una sola pestaña
+
+Pedido: renombrar la pestaña "Asistencia mensual" de financiera a **"Reporte Asistencia"** y unificarle
+la pestaña "Trazabilidad" (por campaña). Solo frontend.
+- `RecursosHumanosLayout.jsx`: `NAV_FINANCIERA` queda con "Horas extra" y "Reporte Asistencia"
+  (`/recursos-humanos/asistencia-mensual`, misma ruta). Sale "Trazabilidad".
+- `financiera/AsistenciaMensual.jsx` (título "Reporte de asistencia"): al abrir una campaña, buscador
+  por nombre o cédula que filtra el calendario diario y la tabla por empleado, y columna
+  "Trazabilidad" con acceso directo a la traza diaria (además del clic en cada día del calendario y
+  en el nombre, que ya existían).
+- `financiera/TrazabilidadPorCampania.jsx` se borró. `/recursos-humanos/trazabilidad` redirige al
+  reporte; `/recursos-humanos/trazabilidad/:empleadoId` (traza diaria) sigue igual y su "Volver al
+  reporte" abre el mes y la campaña de la fecha que se estaba viendo.
+- Lo que se pierde de la vista vieja: la columna "Jefe de área" (el resumen mensual no la trae).
+  `GET /api/asistencia/financiera/empleados` queda sin uso en el frontend; no se quitó del backend.
+
+Verificado: `eslint` sin errores nuevos, `vite build` ok. **No probado en el navegador.**
+
+**Ajuste (mismo día):** el detalle de la campaña ya no se despliega debajo del comparativo: "Ver
+detalle" abre una ventana (`DetalleCampaniaModal`, en el mismo archivo, 1200 px) con KPIs de la
+campaña (puntualidad con tendencia, días trabajados, ausencias, días tarde, horas trabajadas y extra),
+buscador, calendario diario, tabla por empleado y "Exportar empleados" (CSV). Se cierra con X, Esc o
+clic fuera. La campaña abierta sigue en `?campania=`, así que "Volver al reporte" desde la
+trazabilidad reabre la ventana. Mientras carga, el comparativo queda visible y solo la ventana
+muestra el spinner.
