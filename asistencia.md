@@ -2213,3 +2213,74 @@ buscador, calendario diario, tabla por empleado y "Exportar empleados" (CSV). Se
 clic fuera. La campaña abierta sigue en `?campania=`, así que "Volver al reporte" desde la
 trazabilidad reabre la ventana. Mientras carga, el comparativo queda visible y solo la ventana
 muestra el spinner.
+
+## 37. Sesión 2026-10-23 — Home de financiera/admin: tablero de RRHH, asistencia, horas extra y costos
+
+Pedido: una página "Home" para financiera (y admin) con estadísticas concretas que se lean a primera
+vista: RRHH, asistencia, horas extra y su costo, y costo de nómina. Sin migración.
+
+**Backend** (en capas, dentro del módulo de asistencia):
+- `GET /api/asistencia/financiera/home?periodo=AAAA-MM` (`isFinanciera` = financiera + admin).
+- `services/asistencia/homeFinancieraService.js → resumen()`: reutiliza `financieraService.resumenMensual`
+  (mes y mes anterior) y `reporteHorasExtraService.reporteFinanciera` (últimos 6 meses), más el repo nuevo.
+- `repositories/asistencia/indicadoresRrhhRepository.js`: nómina vigente por campaña (salario + bonos
+  del `historial_salarial` abierto de cada contrato activo; cuenta los activos sin salario), ingresos
+  por `contrato.fecha_ingreso`, retiros por `retiro.fecha_retiro` y novedades por tipo que se cruzan con el mes.
+- `domain/asistencia/homeFinanciera.js` (puro, con `tests/asistencia/homeFinanciera.test.js`, 10 tests):
+  `variacionPct`, `deltaPp`, `unirPorCampania` y `hallazgos` — frases de "lo que hay que mirar" (costo
+  de horas extra ±10 % vs mes anterior, campaña que concentra ≥ 40 % del costo, puntualidad global ±3 pp,
+  campañas bajo la meta de 90 %, más retiros que ingresos, activos sin salario, horas extra como % de
+  la nómina). En el **mes en curso** no compara el costo contra el mes anterior completo.
+- `utils/fechaBogota.js`: `sumarMeses` y `periodosHasta`.
+- Ojo: la "nómina" es salario básico + bonos; **no incluye prestaciones ni aportes**. No es el mismo
+  número que `GET /users-company/gasto-total` (ese suma todos los contratos con salario abierto, sin
+  filtrar por estado).
+
+**Frontend:** `financiera/HomeFinanciera.jsx` en `/recursos-humanos/home` (guard `HomeFinancieraRoute`:
+financiera o admin). Financiera aterriza ahí al entrar y es su primera pestaña; el admin lo abre desde
+"Tablero financiero" en su menú lateral. Contenido: hallazgos; KPIs (nómina, costo de horas extra con
+variación, activos con ingresos/retiros, puntualidad con delta, ausencias con novedades); gráficas de
+costo de horas extra 6 meses, ingresos vs retiros 6 meses, nómina por campaña, puntualidad por campaña
+(énfasis: bajo la meta en naranja, resto gris, línea de meta), costo de horas extra por campaña, horas
+por clase, novedades por tipo; y el top 10 de empleados por costo de horas extra. Chart.js con la guía
+de visualización: azul `#2a78d6`/naranja `#eb6834` (oscuro `#3987e5`/`#d95926`) validados para
+daltonismo sobre las superficies de la app, una escala por gráfica, fuente del dato y vista de tabla
+en cada tarjeta, modo oscuro propio.
+
+Verificado: `npm test` 206/206; servicio contra la BD local (oct y sep 2026); capturas en Chromium
+headless como financiera (claro y oscuro) y admin, sin errores de consola. **No probado por el usuario.**
+
+## 38. Sesión 2026-10-23 — Costo de nómina en el Home: nómina, prestaciones, bonos y total, en vivo y mes a mes
+
+Pedido: ver por separado el costo de solo nómina, de prestaciones, de bonos y el costo total, en tiempo
+real y con el histórico mes a mes.
+
+**Migración `078_factor_costo_nomina.sql`** (aplicada en local, **pendiente en producción**, idempotente,
+sin IDs): tabla `factor_costo_nomina` con los porcentajes de las prestaciones sociales sobre el salario
+básico — cesantías 8,33 %, intereses sobre cesantías 1 %, prima 8,33 %, vacaciones 4,17 % (21,83 %).
+Se ajustan con un `UPDATE` sin tocar código. **No incluye aportes** (salud, pensión, ARL, caja, ICBF,
+SENA) ni auxilio de transporte: si se decide sumarlos, van como filas nuevas con su categoría.
+**El backend nuevo sin la 078 rompe `GET /financiera/home`** (la consulta de factores falla).
+
+**Cálculo** (`domain/asistencia/costoNomina.js`, puro, `tests/asistencia/costoNomina.test.js`):
+- Se reconstruye desde `historial_salarial`: cada vigencia es un tramo recortado al ingreso y al retiro
+  del contrato (`indicadoresRrhhRepository.tramosSalariales`). `fecha_vigencia_fin` es excluyente (ese
+  día ya rige el salario nuevo). Un contrato retirado/inactivo sin fila en `retiro` termina en su
+  `updated_at`.
+- Prorrateo con mes comercial de 30 días: mes completo = 30 (también febrero), el 31 no cuenta.
+- Nómina = salario prorrateado; prestaciones = nómina × factores; bonos = no prestacional + cafetería
+  prorrateados (no son base de prestaciones); total = la suma.
+- Mes en curso: **proyectado al cierre** con la nómina vigente hoy, más lo **causado a hoy** (corte en la
+  fecha laboral de Bogotá). Los meses futuros no se calculan.
+- La campaña es la actual del contrato (los traspasos no cambian el contrato, §35 de RRHH).
+
+**Home:** KPI principal = costo total (en curso: proyectado + causado a hoy; cerrado: variación vs mes
+anterior). Sección nueva "Costo de nómina": los cuatro valores con su variación, barras apiladas de 12
+meses (nómina/prestaciones/bonos, azul/naranja/aqua, validado; el mes en curso más claro y con `*`),
+vista de tabla con lo causado, exportar CSV y el detalle de cada prestación. "Costo total de nómina por
+campaña" pasa a barras apiladas. Hallazgo nuevo cuando el costo total cambia ≥ 5 % vs el mes anterior.
+**Tiempo real:** el mes en curso se recalcula solo cada 2 minutos y muestra la hora de actualización.
+
+Verificado: `npm test` 213/213; en local octubre 2026 = nómina $ 774,9 M + prestaciones $ 169,2 M +
+bonos $ 92,7 M = $ 1.036,7 M (causado al 23: $ 794,6 M), histórico nov 2025 → oct 2026; capturas en
+Chromium claro/oscuro sin errores de consola. **No probado por el usuario.**

@@ -34,4 +34,16 @@ function rangoDelMes(periodo) {
     return { desde: `${periodo}-01`, hasta: `${periodo}-${String(ultimo).padStart(2, '0')}` };
 }
 
-module.exports = { fechaLaboral, combinarFechaHora, sumarDias, rangoDelMes, normalizarFecha };
+// Mes 'YYYY-MM' desplazado `n` meses (negativo hacia atrás).
+function sumarMeses(periodo, n) {
+    const [anio, mes] = periodo.split('-').map(Number);
+    const d = new Date(Date.UTC(anio, mes - 1 + n, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+// Los `cantidad` meses que terminan en `periodo`, del más antiguo al más reciente.
+function periodosHasta(periodo, cantidad) {
+    return Array.from({ length: cantidad }, (_, i) => sumarMeses(periodo, i - cantidad + 1));
+}
+
+module.exports = { fechaLaboral, combinarFechaHora, sumarDias, rangoDelMes, normalizarFecha, sumarMeses, periodosHasta };
