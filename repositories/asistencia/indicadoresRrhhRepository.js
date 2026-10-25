@@ -100,7 +100,10 @@ async function tramosSalariales({ desde, hasta }, conn = db) {
                 DATE_FORMAT(${inicio}, '%Y-%m-%d') AS desde,
                 DATE_FORMAT(${fin}, '%Y-%m-%d') AS hasta,
                 hs.salario,
-                COALESCE(hs.bono_no_prestacional, 0) + COALESCE(hs.bono_cafeteria, 0) AS bonos
+                COALESCE(hs.bono_no_prestacional, 0) + COALESCE(hs.bono_cafeteria, 0) AS bonos,
+                (SELECT ss.tarifa_arl FROM seguridad_social ss
+                  WHERE ss.users_company_id = c.users_company_id AND ss.tipo = 'ARL' AND ss.activa = 1
+                  ORDER BY ss.idseguridad_social DESC LIMIT 1) AS tarifa_arl
          FROM historial_salarial hs
          JOIN contrato c ON c.idcontrato = hs.contrato_idcontrato
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
@@ -117,16 +120,26 @@ async function tramosSalariales({ desde, hasta }, conn = db) {
         desde: f.desde,
         hasta: f.hasta,
         salario: Number(f.salario) || 0,
-        bonos: Number(f.bonos) || 0
+        bonos: Number(f.bonos) || 0,
+        tarifa_arl: f.tarifa_arl == null ? null : Number(f.tarifa_arl)
     }));
 }
 
-/** Factores activos del costo de nómina (migración 078), en orden. */
+/** Factores activos del costo de nómina (migraciones 078 y 079), en orden. */
 async function factoresCostoNomina(conn = db) {
     const [filas] = await conn.query(
-        'SELECT codigo, nombre, categoria, porcentaje FROM factor_costo_nomina WHERE activo = 1 ORDER BY orden, codigo'
+        'SELECT codigo, nombre, categoria, porcentaje, exonerable FROM factor_costo_nomina WHERE activo = 1 ORDER BY orden, codigo'
     );
-    return filas.map((f) => ({ codigo: f.codigo, nombre: f.nombre, categoria: f.categoria, porcentaje: Number(f.porcentaje) }));
+    return filas.map((f) => ({
+        codigo: f.codigo, nombre: f.nombre, categoria: f.categoria,
+        porcentaje: Number(f.porcentaje), exonerable: Number(f.exonerable) === 1
+    }));
 }
 
-module.exports = { nominaPorCampania, ingresosPorMes, retirosPorMes, novedadesPorTipo, tramosSalariales, factoresCostoNomina };
+/** SMMLV por año (migración 079), para el tope de la exoneración de aportes. */
+async function salariosMinimos(conn = db) {
+    const [filas] = await conn.query('SELECT anio, valor FROM salario_minimo ORDER BY anio');
+    return filas.map((f) => ({ anio: Number(f.anio), valor: Number(f.valor) }));
+}
+
+module.exports = { nominaPorCampania, ingresosPorMes, retirosPorMes, novedadesPorTipo, tramosSalariales, factoresCostoNomina, salariosMinimos };
