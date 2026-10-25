@@ -2284,3 +2284,36 @@ campaña" pasa a barras apiladas. Hallazgo nuevo cuando el costo total cambia �
 Verificado: `npm test` 213/213; en local octubre 2026 = nómina $ 774,9 M + prestaciones $ 169,2 M +
 bonos $ 92,7 M = $ 1.036,7 M (causado al 23: $ 794,6 M), histórico nov 2025 → oct 2026; capturas en
 Chromium claro/oscuro sin errores de consola. **No probado por el usuario.**
+
+## 39. Sesión 2026-10-25 — Aportes de seguridad social y parafiscales en el costo de nómina
+
+Pedido: sumar al costo de nómina los aportes del empleador.
+
+**Migración `079_aportes_costo_nomina.sql`** (aplicada en local, **pendiente en producción, va después
+de la 078**, idempotente, sin IDs):
+- `factor_costo_nomina.categoria` pasa a `ENUM('prestacion','aporte')` y gana `exonerable`.
+- Aportes: salud 8,5 % · pensión 12 % · ARL 0,522 % (respaldo) · caja 4 % · ICBF 3 % · SENA 2 %.
+  Salud, ICBF y SENA llevan `exonerable = 1` (art. 114-1 E.T.: no se pagan por quien gana menos de
+  10 SMMLV). **Si la empresa no aplica la exoneración**:
+  `UPDATE factor_costo_nomina SET exonerable = 0 WHERE codigo IN ('salud','icbf','sena');`
+- Tabla `salario_minimo` (SMMLV por año: 2024 $ 1.300.000, 2025 $ 1.423.500, 2026 $ 1.750.905).
+  **Cada enero hay que insertar el del año nuevo**; si falta, se usa el último cargado. Sin ninguno,
+  no se exonera nada (estimación conservadora).
+
+**Cálculo** (`domain/asistencia/costoNomina.js`):
+- Base de los aportes = IBC: el salario más lo que los bonos (no salariales) pasen del 40 % de la
+  remuneración total (Ley 1393 de 2010, art. 30). Hoy ningún empleado supera ese 40 %.
+- ARL: la `seguridad_social.tarifa_arl` de la afiliación ARL activa del empleado. Si falta o está fuera
+  del rango legal 0,348-8,7 % (en local hay tarifas de 80 y 200, datos mal cargados) se usa la del factor.
+- La exoneración se decide con el salario mensual del tramo contra 10 SMMLV del año del periodo.
+- Prestaciones siguen sobre el salario básico. Total = nómina + prestaciones + aportes + bonos.
+- Cada detalle trae `porcentaje_efectivo` (lo que de verdad pesó sobre su base en el mes).
+
+**Home:** quinto valor "Aportes" (violeta; paleta azul/naranja/violeta/aqua validada en claro y oscuro,
+adyacencias en el orden de apilado), en las barras apiladas de 12 meses, por campaña, en la tabla y el
+CSV; fila de chips con cada aporte (los exonerados dicen "exonerado").
+
+Verificado: `npm test` 218/218; en local octubre 2026 = nómina $ 774,9 M + prestaciones $ 169,2 M +
+aportes $ 128,0 M (pensión $ 93 M, caja $ 31 M, ARL $ 4 M; salud/ICBF/SENA exonerados) + bonos
+$ 92,7 M = $ 1.164,7 M. Capturas claro/oscuro sin errores. **No probado por el usuario.** Sin
+auxilio de transporte todavía.

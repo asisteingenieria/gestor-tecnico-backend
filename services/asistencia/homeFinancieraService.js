@@ -10,7 +10,7 @@ const { ValidacionError } = require('../../errors/AppError');
 // Home de financiera/admin (asistencia.md §37): en una sola respuesta, los indicadores del mes de
 // RRHH (nómina, dotación, novedades), asistencia y horas extra con su costo, la tendencia de los
 // últimos meses y los hallazgos redactados. Reutiliza los cálculos de los reportes existentes.
-// El costo de nómina (§38) se reconstruye mes a mes desde las vigencias salariales: es en vivo y
+// El costo de nómina (§38-§39) se reconstruye mes a mes desde las vigencias salariales: es en vivo y
 // también histórico.
 
 const MESES_TENDENCIA = 6;
@@ -29,7 +29,7 @@ async function resumen({ periodo }) {
     const periodosNomina = periodosHasta(periodo, MESES_HISTORICO_NOMINA);
     const rangoNomina = { desde: rangoDelMes(periodosNomina[0]).desde, hasta: rangoDelMes(periodo).hasta };
 
-    const [asistencia, asistenciaAnterior, reportes, nomina, ingresos, retiros, novedades, tramos, factores] = await Promise.all([
+    const [asistencia, asistenciaAnterior, reportes, nomina, ingresos, retiros, novedades, tramos, factores, salariosMinimos] = await Promise.all([
         financieraService.resumenMensual({ periodo }),
         financieraService.resumenMensual({ periodo: periodoAnterior }),
         Promise.all(periodos.map((p) => reporteService.reporteFinanciera({ periodo: p }))),
@@ -38,7 +38,8 @@ async function resumen({ periodo }) {
         indicadoresRepo.retirosPorMes(rangoTendencia),
         indicadoresRepo.novedadesPorTipo(rangoDelMes(periodo)),
         indicadoresRepo.tramosSalariales(rangoNomina),
-        indicadoresRepo.factoresCostoNomina()
+        indicadoresRepo.factoresCostoNomina(),
+        indicadoresRepo.salariosMinimos()
     ]);
 
     const extraMes = reportes[reportes.length - 1];
@@ -46,8 +47,8 @@ async function resumen({ periodo }) {
     const cantidadDe = (lista, p) => lista.find((x) => x.periodo === p)?.cantidad ?? 0;
 
     // Costo de nómina: el mes elegido (con su desglose por campaña) y el histórico mes a mes.
-    const costoMes = costoNomina.costoDelMes(tramos, factores, periodo);
-    const historicoNomina = costoNomina.historico(tramos, factores, periodosNomina, hoy);
+    const costoMes = costoNomina.costoDelMes(tramos, factores, periodo, { salariosMinimos });
+    const historicoNomina = costoNomina.historico(tramos, factores, periodosNomina, hoy, { salariosMinimos });
     const costoAnterior = historicoNomina.find((m) => m.periodo === periodoAnterior) ?? null;
     const causadoHoy = mesEnCurso ? historicoNomina.find((m) => m.periodo === periodo)?.causado ?? null : null;
 
@@ -63,8 +64,10 @@ async function resumen({ periodo }) {
             total: costoMes.total,
             salarios: costoMes.salarios,
             prestaciones: costoMes.prestaciones,
+            aportes: costoMes.aportes,
             bonos: costoMes.bonos,
             detalle_prestaciones: costoMes.detalle_prestaciones,
+            detalle_aportes: costoMes.detalle_aportes,
             causado_hoy: causadoHoy,
             total_anterior: costoAnterior?.total ?? null,
             variacion_pct: home.variacionPct(costoMes.total, costoAnterior?.total),

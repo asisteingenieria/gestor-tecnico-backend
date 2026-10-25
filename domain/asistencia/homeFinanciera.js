@@ -35,7 +35,7 @@ function deltaPp(actual, anterior) {
 }
 
 /**
- * Une por campaña la dotación activa, el costo de nómina del mes (salarios, prestaciones, bonos),
+ * Une por campaña la dotación activa, el costo de nómina del mes (salarios, prestaciones, aportes, bonos),
  * la asistencia y el costo de horas extra. Una campaña que solo aparece en el costo o en horas
  * extra (gente ya retirada, meses pasados) se agrega igual para que el costo no se pierda.
  */
@@ -47,7 +47,7 @@ function unirPorCampania({ nomina = [], costos = [], asistencia = [], horasExtra
         if (!mapa.has(k)) {
             mapa.set(k, {
                 idcampania: id ?? null, campania: nombre || 'Sin campaña', empleados: 0,
-                salarios: 0, prestaciones: 0, bonos: 0, costo_total: 0, sin_salario: 0,
+                salarios: 0, prestaciones: 0, aportes: 0, bonos: 0, costo_total: 0, sin_salario: 0,
                 dinero_extra: 0, horas_extra: 0, puntualidad: null, ausencias: 0, dias_trabajados: 0
             });
         }
@@ -60,7 +60,7 @@ function unirPorCampania({ nomina = [], costos = [], asistencia = [], horasExtra
     }
     for (const k of costos) {
         const f = fila(k.idcampania, k.campania);
-        Object.assign(f, { salarios: k.salarios, prestaciones: k.prestaciones, bonos: k.bonos, costo_total: k.total });
+        Object.assign(f, { salarios: k.salarios, prestaciones: k.prestaciones, aportes: k.aportes ?? 0, bonos: k.bonos, costo_total: k.total });
         if (!f.empleados) f.empleados = k.empleados ?? 0;
     }
     for (const a of asistencia) {
