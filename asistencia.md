@@ -2428,3 +2428,79 @@ muestre las horas de la jornada, con el tiempo de cada estado aparte.
     almuerzo, capacitación y "Desconectado" si lo hubo.
 - **Verificado en local:** entrada hace 30 min y 10 min de break. El reloj muestra 0:30, Laborado
   20 min y Break 10 min.
+
+## 42. Sesión 2026-10-26 — Desconexión de AsisLock: la jornada corre hasta la hora de salida
+
+Regla pedida por el usuario: si el empleado se desconecta de AsisLock y no vuelve, el contador de
+la jornada sigue hasta su hora de salida. La traza debe decir a qué hora se desconectó y cuánto
+tiempo de la jornada estuvo sin conexión.
+
+**Antes:**
+- En vivo, el reloj seguía corriendo sin límite, también pasada la hora de salida.
+- El cierre del día ponía la salida **en el logout**, así que el tramo entre el logout y la hora
+  de salida desaparecía de la jornada.
+
+**Ahora (sin migración):**
+- **Con horario:** `calcularJornada` corre la jornada hasta la hora de salida programada si hay
+  una desconexión abierta, sin reconexión ni salida, y ahí la detiene. Todo el tramo desde el
+  logout es **desconectado**: no laborado, `minutosDesconexion`, y no genera hora extra. Expone
+  `cuentaJornada`, que es `cuenta_jornada` en `/mi-jornada/hoy`, para que el monitor sepa cuándo
+  parar el reloj.
+- **Sin horario:** no hay hasta dónde llevarla, así que la jornada se detiene en la desconexión,
+  igual que antes en el cierre.
+- **Cierre del día** (`cierreService.normalizarJornada`): con una desconexión abierta, la salida
+  va a la hora de salida programada si es posterior al logout. Lleva origen `asislock`, así que no
+  levanta `sin_marcar_salida`, y la nota "desconectado de AsisLock sin reconexión hasta la hora de
+  salida". Sin horario, va en el logout, como antes. El laborado no cambia, porque el tramo nuevo
+  es todo desconexión.
+- **Frontend:**
+  - el aviso de Mi jornada explica que la jornada sigue hasta la hora de salida como tiempo
+    desconectado, o que queda detenida si no hay horario;
+  - el reloj se detiene con `cuenta_jornada`;
+  - la trazabilidad suma la tarjeta "Desconectado de AsisLock". La fila de la desconexión ya
+    mostraba su duración hasta la salida.
+- **Pruebas:** 2 tests nuevos, 226 en total. `test:e2e` sigue en 127/127.
+- **Verificado en local** con un horario de prueba de 11:50 a 12:28:
+  - entrada a las 11:51 y logout a las 12:05;
+  - el monitor siguió corriendo, se detuvo en 0:36:32 a las 12:28 y siguió así al recargar,
+    con 23 min desconectado;
+  - el cierre puso la salida a las 12:28 con la nota, y la traza quedó como entrada, desconexión
+    de 23 min y salida.
+
+## 43. Sesión 2026-10-26 — Pantallas de monitoreo en vivo: jefes y financiera
+
+Pedido del usuario: que el cambio de pantalla según el estado (§41) también llegue a quienes
+monitorean, es decir a los jefes de personal y al "admin o financiera". Aclaración del usuario:
+**el admin de los módulos de asistencia y RRHH es financiera**, no el `admin` del sistema (que
+administra los otros módulos).
+
+**Backend (sin migración):**
+- Al suscribirse, una sesión de `users` con rol `financiera` entra además a la sala
+  `asistencia:monitores` (`ROLES_MONITOR_ASISTENCIA` en `index.js`; las cuentas de empleado y el
+  `admin` del sistema no entran).
+- `notificarCambioJornada` emite ahí `asistencia:monitor` `{ tipo, usersCompanyId }`, además del
+  aviso de siempre al jefe de área, `asistencia:equipo`, que solo llega a la sala de su ficha.
+  El equipo es de reportes directos (`jefe_area_id`), así que no hay cadena de jefes que avisar.
+
+**Frontend:** `escucharCambiosEmpleados(handler, esperaMs)` en `socketAsistencia.js` escucha los
+dos avisos y puede agrupar una ráfaga en una sola llamada.
+- **Equipo hoy** (jefe): ya se actualizaba desde §41.
+- **Trazabilidad de un empleado** (`TrazabilidadEmpleado`, la del jefe y la de financiera): se
+  recarga sin spinner cuando el aviso es de ese empleado. El CSV ahora nombra break y
+  capacitación.
+- **Calendario mensual del equipo** (jefe) y **asistencia mensual** (financiera): solo en el mes
+  en curso, recargan en silencio con los avisos agrupados cada 5 s. Una recarga fallida deja la
+  tabla que ya se veía.
+- **Home de financiera:** sigue con su refresco de 2 min. Muestra montos del mes, no estados
+  en vivo.
+- **Cambio de sesión sin recargar la página** (logout y login de otra persona): el socket
+  compartido se reconecta al notar otro token, para no quedarse en las salas de la sesión
+  anterior.
+
+**Verificado en local:**
+- Con tres sesiones suscritas a la vez y un cambio de AsisLock de `empleado1`, el jefe
+  (9000000001) recibió `asistencia:equipo`, la sesión financiera recibió `asistencia:monitor` y
+  `empleado2` no recibió nada.
+- En Chrome, con el jefe en la trazabilidad de `empleado1`, el break apareció sin recargar.
+- El calendario mensual del jefe volvió a pedir el resumen tras cada cambio.
+- Pruebas: `npm test` 226/226, `test:e2e` 127/127. Los datos de prueba se borraron.

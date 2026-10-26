@@ -50,17 +50,25 @@ async function normalizarJornada(usersCompanyId, fecha, ahora, conn = db) {
 
     if (!ESTADOS_ABIERTOS.includes(jornada.estado)) return null;
 
-    // Si el último movimiento fue un logout de AsisLock que nunca se reconectó, el empleado
-    // se fue a esa hora: la salida se registra ahí (origen asislock), no en la hora programada,
-    // y no levanta la alerta sin_marcar_salida porque sí hubo un logout real.
+    // Si el último movimiento fue un logout de AsisLock que nunca se reconectó, la jornada se
+    // cierra a la hora de salida programada y el tramo desde el logout queda como tiempo
+    // desconectado (no laborado), igual que lo muestra el monitor en vivo (asistencia.md §42).
+    // Sin horario, se cierra en el logout. Origen asislock: hubo un logout real, así que no
+    // levanta la alerta sin_marcar_salida.
     const desconexionDesde = asislock.desconexionAbierta(await eventoRepo.findByJornada(jornada.idjornada, conn));
-    const corte = desconexionDesde
-        ?? (horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59'));
+    const horaSalida = horario && !horario.es_descanso ? combinarFechaHora(fecha, horario.hora_salida) : null;
+    let corte;
+    if (desconexionDesde) corte = horaSalida && horaSalida > desconexionDesde ? horaSalida : desconexionDesde;
+    else corte = horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59');
     await eventoRepo.insertar({
         jornadaId: jornada.idjornada,
         tipo: 'salida',
         origen: desconexionDesde ? 'asislock' : 'sistema',
-        nota: desconexionDesde ? 'Cierre del día: último logout de AsisLock sin reconexión' : null,
+        nota: desconexionDesde
+            ? (corte > desconexionDesde
+                ? 'Cierre del día: desconectado de AsisLock sin reconexión hasta la hora de salida'
+                : 'Cierre del día: último logout de AsisLock sin reconexión')
+            : null,
         ocurridoEn: corte
     }, conn);
 

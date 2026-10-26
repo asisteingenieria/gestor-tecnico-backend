@@ -97,12 +97,16 @@ io.on('connection', (socket) => {
 
 // Asistencia en vivo: cada pantalla se suscribe con su JWT y entra a la sala de su ficha
 // (`users_company_id`), así el aviso llega igual a cuentas de `users` y de `cuenta_empleado`
-// (cuyos ids pueden coincidir). Un token inválido simplemente no se suscribe.
+// (cuyos ids pueden coincidir). Financiera, que es la administradora de RRHH y asistencia y monitorea
+// a todos los empleados, entra además a la sala de monitores (el admin del sistema no: administra
+// los otros módulos). Un token inválido simplemente no se suscribe.
+const ROLES_MONITOR_ASISTENCIA = ['financiera'];
 io.on('connection', (socket) => {
     socket.on('asistencia:suscribir', (token) => {
         try {
-            const ficha = jwt.verify(String(token), process.env.JWT_SECRET).user?.users_company_id;
-            if (ficha) socket.join(`asistencia:${ficha}`);
+            const sesion = jwt.verify(String(token), process.env.JWT_SECRET).user || {};
+            if (sesion.users_company_id) socket.join(`asistencia:${sesion.users_company_id}`);
+            if (sesion.tipo_cuenta !== 'empleado' && ROLES_MONITOR_ASISTENCIA.includes(sesion.role)) socket.join('asistencia:monitores');
         } catch {
             // token vencido o inválido: sin suscripción; la pantalla sigue con su resincronización
         }
@@ -111,6 +115,10 @@ io.on('connection', (socket) => {
 
 global.emitirAsistencia = (usersCompanyId, event, data) => {
     io.to(`asistencia:${usersCompanyId}`).emit(event, data);
+};
+
+global.emitirMonitoresAsistencia = (event, data) => {
+    io.to('asistencia:monitores').emit(event, data);
 };
 
 // Función helper para enviar mensajes a un usuario específico

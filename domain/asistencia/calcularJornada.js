@@ -13,6 +13,7 @@ const ESTADO_SIN_ENTRADA = {
     minutosTrabajados: 0,
     segundosTrabajados: 0,
     segundosEnJornada: 0,
+    cuentaJornada: false,
     cuentaTiempo: false,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
@@ -34,6 +35,17 @@ function minutosEntre(desde, hasta) {
     return (hasta.getTime() - desde.getTime()) / 60000;
 }
 
+// Inicio de la desconexión de AsisLock que sigue abierta en `ahora` (sin reconexión), o null.
+function desconexionAbiertaA(ordenados, ahora) {
+    let desde = null;
+    for (const e of ordenados) {
+        if (e.ocurrido_en > ahora) break;
+        if (e.tipo === 'inicio_desconexion' && desde === null) desde = e.ocurrido_en;
+        else if (e.tipo === 'fin_desconexion') desde = null;
+    }
+    return desde;
+}
+
 /**
  * @param {Array}  eventos              jornada_evento del día, cualquier orden
  * @param {Object|null} horario         horario_asignado del día, o null
@@ -48,7 +60,24 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     if (!entrada) return { ...ESTADO_SIN_ENTRADA };
 
     const salida = ordenados.find((e) => e.tipo === 'salida');
-    const fin = salida ? salida.ocurrido_en : ahora;
+    let fin = salida ? salida.ocurrido_en : ahora;
+
+    // Desconectado de AsisLock sin reconexión ni salida: la jornada sigue corriendo hasta la hora
+    // de salida programada —ese tramo queda como tiempo desconectado, no laborado— y ahí se
+    // detiene. Sin horario no hay hasta dónde llevarla: se detiene en la desconexión. El cierre
+    // del día (cierreService) pone la salida en ese mismo punto (asistencia.md §42).
+    let jornadaDetenida = false;
+    if (!salida) {
+        const desconectadoDesde = desconexionAbiertaA(ordenados, ahora);
+        if (desconectadoDesde) {
+            const horaSalida = horario && !horario.es_descanso ? combinarFechaHora(horario.fecha, horario.hora_salida) : null;
+            const tope = horaSalida && horaSalida > desconectadoDesde ? horaSalida : desconectadoDesde;
+            if (tope < fin) {
+                fin = tope;
+                jornadaDetenida = true;
+            }
+        }
+    }
 
     // Pausas que manda AsisLock por `estado_conexion`. Baño, break y almuerzo son tiempo libre y
     // DESCUENTAN del tiempo trabajado; capacitación cuenta COMO LABORADA (no descuenta), por
@@ -189,6 +218,8 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         // muestra como "tiempo en jornada"; el desglose por estado va aparte.
         segundosEnJornada: Math.floor(Math.max(0, bruto) * 60),
         cuentaTiempo,
+        // ¿El tiempo en jornada sigue corriendo? Hasta la salida, o hasta el tope de una desconexión.
+        cuentaJornada: !salida && !jornadaDetenida,
         minutosPausaBano: Math.round(minutosPausaBano),
         minutosPausaAlmuerzo: Math.round(minutosPausaAlmuerzo),
         minutosBreak: Math.round(minutosBreak),

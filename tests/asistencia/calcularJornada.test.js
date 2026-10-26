@@ -225,3 +225,31 @@ test('segundosEnJornada: corre desde la entrada sin descontar pausas ni desconex
     assert.equal(resultado.segundosTrabajados, 95 * 60);
     assert.equal(resultado.minutosBreak, 15);
 });
+
+test('desconexión sin reconexión: la jornada corre hasta la hora de salida y ese tramo es desconectado', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_desconexion', '15:00:00')];
+    // a las 16:00 sigue corriendo: 8 h en jornada, 1 h desconectado, 7 h laboradas
+    const antes = calcularJornada(eventos, HORARIO, horaDia('16:00:00'));
+    assert.equal(antes.segundosEnJornada, 8 * 3600);
+    assert.equal(antes.minutosDesconexion, 60);
+    assert.equal(antes.minutosTrabajados, 7 * 60);
+    assert.equal(antes.cuentaJornada, true);
+    assert.equal(antes.cuentaTiempo, false);
+    // pasada la salida (17:00) se detiene ahí: 9 h en jornada, 2 h desconectado, sin hora extra
+    const despues = calcularJornada(eventos, HORARIO, horaDia('19:00:00'));
+    assert.equal(despues.segundosEnJornada, 9 * 3600);
+    assert.equal(despues.minutosDesconexion, 120);
+    assert.equal(despues.minutosTrabajados, 7 * 60);
+    assert.equal(despues.minutosExtra, 0);
+    assert.equal(despues.cuentaJornada, false);
+    assert.ok(despues.desconexionActiva);
+});
+
+test('desconexión sin reconexión y sin horario: la jornada se detiene en la desconexión', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_desconexion', '10:00:00')];
+    const resultado = calcularJornada(eventos, null, horaDia('12:00:00'));
+    assert.equal(resultado.segundosEnJornada, 2 * 3600);
+    assert.equal(resultado.minutosTrabajados, 120);
+    assert.equal(resultado.cuentaJornada, false);
+    assert.ok(resultado.desconexionActiva);
+});
