@@ -10,7 +10,7 @@ const { ValidacionError } = require('../../errors/AppError');
 // Home de financiera/admin (asistencia.md §37): en una sola respuesta, los indicadores del mes de
 // RRHH (nómina, dotación, novedades), asistencia y horas extra con su costo, la tendencia de los
 // últimos meses y los hallazgos redactados. Reutiliza los cálculos de los reportes existentes.
-// El costo de nómina (§38-§39) se reconstruye mes a mes desde las vigencias salariales: es en vivo y
+// El costo de nómina (§38-§40) se reconstruye mes a mes desde las vigencias salariales: es en vivo y
 // también histórico.
 
 const MESES_TENDENCIA = 6;
@@ -63,6 +63,8 @@ async function resumen({ periodo }) {
         nomina: {
             total: costoMes.total,
             salarios: costoMes.salarios,
+            auxilio_transporte: costoMes.auxilio_transporte,
+            empleados_con_auxilio: costoMes.empleados_con_auxilio,
             prestaciones: costoMes.prestaciones,
             aportes: costoMes.aportes,
             bonos: costoMes.bonos,

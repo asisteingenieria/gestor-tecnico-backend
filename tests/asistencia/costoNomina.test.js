@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { diasEnMes, ibcMensual, salarioMinimoDe, costoDelMes, historico } = require('../../domain/asistencia/costoNomina');
+const { diasEnMes, ibcMensual, salarioMinimoDe, auxilioTransporteDe, costoDelMes, historico } = require('../../domain/asistencia/costoNomina');
 
 const FACTORES = [
     { codigo: 'cesantias', nombre: 'Cesantías', porcentaje: 8.33 },
@@ -105,4 +105,32 @@ test('aportes: sobre 10 SMMLV se paga todo; tarifa ARL inválida usa la del fact
 test('aportes: sin SMMLV cargado no se exonera (estimación conservadora)', () => {
     const r = costoDelMes([tramo()], APORTES, '2026-10');
     assert.equal(r.detalle_aportes.find((d) => d.codigo === 'salud').valor, 255000);
+});
+
+const SMMLV_AUX = [{ anio: 2025, valor: 1423500, auxilio_transporte: 200000 }, { anio: 2026, valor: 1750905, auxilio_transporte: 249095 }];
+const PRESTACIONES_AUX = FACTORES.map((f) => ({ ...f, categoria: 'prestacion', incluye_auxilio: f.codigo !== 'vacaciones' }));
+
+test('auxilioTransporteDe: usa el del año o el último cargado antes', () => {
+    assert.equal(auxilioTransporteDe(SMMLV_AUX, 2026), 249095);
+    assert.equal(auxilioTransporteDe(SMMLV_AUX, 2027), 249095);
+    assert.equal(auxilioTransporteDe(SMMLV_AUX, 2024), null);
+});
+
+test('auxilio: hasta 2 SMMLV se paga prorrateado y es base de cesantías, intereses y prima, no de vacaciones', () => {
+    const r = costoDelMes([tramo({ salario: 2000000, desde: '2026-10-16' })], PRESTACIONES_AUX, '2026-10', { salariosMinimos: SMMLV_AUX });
+    const aux = 249095 / 2;
+    assert.equal(r.auxilio_transporte, Math.round(aux));
+    assert.equal(r.empleados_con_auxilio, 1);
+    const valor = (c) => r.detalle_prestaciones.find((d) => d.codigo === c).valor;
+    assert.equal(valor('cesantias'), Math.round(((1000000 + aux) * 8.33) / 100));
+    assert.equal(valor('vacaciones'), Math.round((1000000 * 4.17) / 100));
+    assert.equal(r.total, r.salarios + r.auxilio_transporte + r.prestaciones);
+});
+
+test('auxilio: sobre 2 SMMLV no se paga, ni sin SMMLV cargado; no es base de aportes', () => {
+    const alto = costoDelMes([tramo({ salario: 3600000 })], PRESTACIONES_AUX, '2026-10', { salariosMinimos: SMMLV_AUX });
+    assert.equal(alto.auxilio_transporte, 0);
+    assert.equal(costoDelMes([tramo({ salario: 2000000 })], PRESTACIONES_AUX, '2026-10').auxilio_transporte, 0);
+    const conAportes = costoDelMes([tramo({ salario: 2000000 })], APORTES, '2026-10', { salariosMinimos: SMMLV_AUX });
+    assert.equal(conAportes.detalle_aportes.find((d) => d.codigo === 'pension').valor, 240000);
 });

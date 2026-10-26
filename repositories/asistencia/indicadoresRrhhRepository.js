@@ -125,21 +125,26 @@ async function tramosSalariales({ desde, hasta }, conn = db) {
     }));
 }
 
-/** Factores activos del costo de nómina (migraciones 078 y 079), en orden. */
+/** Factores activos del costo de nómina (migraciones 078-080), en orden. */
 async function factoresCostoNomina(conn = db) {
     const [filas] = await conn.query(
-        'SELECT codigo, nombre, categoria, porcentaje, exonerable FROM factor_costo_nomina WHERE activo = 1 ORDER BY orden, codigo'
+        'SELECT codigo, nombre, categoria, porcentaje, exonerable, incluye_auxilio FROM factor_costo_nomina WHERE activo = 1 ORDER BY orden, codigo'
     );
     return filas.map((f) => ({
         codigo: f.codigo, nombre: f.nombre, categoria: f.categoria,
-        porcentaje: Number(f.porcentaje), exonerable: Number(f.exonerable) === 1
+        porcentaje: Number(f.porcentaje), exonerable: Number(f.exonerable) === 1,
+        incluye_auxilio: Number(f.incluye_auxilio) === 1
     }));
 }
 
-/** SMMLV por año (migración 079), para el tope de la exoneración de aportes. */
+/** SMMLV y auxilio de transporte por año (migraciones 079 y 080). */
 async function salariosMinimos(conn = db) {
-    const [filas] = await conn.query('SELECT anio, valor FROM salario_minimo ORDER BY anio');
-    return filas.map((f) => ({ anio: Number(f.anio), valor: Number(f.valor) }));
+    const [filas] = await conn.query('SELECT anio, valor, auxilio_transporte FROM salario_minimo ORDER BY anio');
+    return filas.map((f) => ({
+        anio: Number(f.anio),
+        valor: Number(f.valor),
+        auxilio_transporte: f.auxilio_transporte == null ? null : Number(f.auxilio_transporte)
+    }));
 }
 
 module.exports = { nominaPorCampania, ingresosPorMes, retirosPorMes, novedadesPorTipo, tramosSalariales, factoresCostoNomina, salariosMinimos };

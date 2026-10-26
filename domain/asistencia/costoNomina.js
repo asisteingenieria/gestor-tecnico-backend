@@ -1,6 +1,6 @@
-// Costo de nómina por mes (asistencia.md §38-§39): salarios prorrateados por días, bonos,
-// prestaciones sociales (sobre el salario básico) y aportes de seguridad social y parafiscales
-// (sobre el IBC). Puro: recibe los tramos salariales ya leídos, los factores, los SMMLV y la fecha
+// Costo de nómina por mes (asistencia.md §38-§40): salarios prorrateados por días, bonos, auxilio
+// de transporte, prestaciones sociales (sobre el salario básico, más el auxilio en las que lo
+// incluyen) y aportes de seguridad social y parafiscales (sobre el IBC; el auxilio no es base). Puro: recibe los tramos salariales ya leídos, los factores, los SMMLV y la fecha
 // de hoy. Las fechas son 'YYYY-MM-DD' de columnas DATE (sin zona horaria).
 //
 // Convención de nómina en Colombia: mes comercial de 30 días. Un mes completo vale 30 días (también
@@ -14,6 +14,8 @@ const DIAS_MES_COMERCIAL = 30;
 const TOPE_NO_SALARIAL_PCT = 40;
 // Art. 114-1 E.T.: salud, ICBF y SENA no se pagan por quien gana menos de 10 SMMLV.
 const SMMLV_EXONERACION = 10;
+// Ley 15 de 1959: el auxilio de transporte lo recibe quien gana hasta 2 SMMLV.
+const SMMLV_AUXILIO = 2;
 // Rango legal de la tarifa ARL (clase I mínima a clase V máxima). Fuera de él es un dato mal
 // cargado y se usa la tarifa por defecto del factor.
 const TARIFA_ARL_MIN = 0.348;
@@ -48,12 +50,16 @@ function ibcMensual(salario, bonos) {
     return salario + Math.max(0, exceso);
 }
 
-/** SMMLV del año (o del último año cargado antes). null si no hay ninguno: no se exonera. */
-function salarioMinimoDe(salariosMinimos, anio) {
+/** Valor de `campo` del año (o del último año cargado antes). null si no hay ninguno. */
+function vigenteDe(salariosMinimos, anio, campo) {
     let valor = null;
-    for (const s of salariosMinimos) if (s.anio <= anio) valor = s.valor;
+    for (const s of salariosMinimos) if (s.anio <= anio && s[campo] != null) valor = s[campo];
     return valor;
 }
+
+/** SMMLV del año. null si no hay ninguno: no se exonera ni se paga auxilio. */
+const salarioMinimoDe = (salariosMinimos, anio) => vigenteDe(salariosMinimos, anio, 'valor');
+const auxilioTransporteDe = (salariosMinimos, anio) => vigenteDe(salariosMinimos, anio, 'auxilio_transporte');
 
 const tarifaDe = (factor, tramo) => {
     const propia = tramo.tarifa_arl;
@@ -61,14 +67,16 @@ const tarifaDe = (factor, tramo) => {
     return factor.porcentaje;
 };
 
-const sumaVacia = () => ({ salarios: 0, bonos: 0, ibc: 0, factores: new Map(), empleados: new Set() });
+const sumaVacia = () => ({ salarios: 0, bonos: 0, auxilio: 0, ibc: 0, factores: new Map(), empleados: new Set(), conAuxilio: new Set() });
 
 /**
  * Costo de un mes. `corte` (opcional) limita el cálculo hasta ese día: es lo causado a la fecha.
  * Devuelve totales, el detalle de cada prestación y aporte, y el desglose por campaña.
  */
 function costoDelMes(tramos, factores, periodo, { corte = null, salariosMinimos = [] } = {}) {
-    const smmlv = salarioMinimoDe(salariosMinimos, Number(periodo.slice(0, 4)));
+    const anio = Number(periodo.slice(0, 4));
+    const smmlv = salarioMinimoDe(salariosMinimos, anio);
+    const auxilioMensual = auxilioTransporteDe(salariosMinimos, anio);
     const total = sumaVacia();
     const porCampania = new Map();
     for (const t of tramos) {
@@ -81,17 +89,22 @@ function costoDelMes(tramos, factores, periodo, { corte = null, salariosMinimos 
         const bonos = bonosMes * proporcion;
         const ibc = ibcMensual(salarioMes, bonosMes) * proporcion;
         const exonerado = smmlv != null && salarioMes < SMMLV_EXONERACION * smmlv;
+        const tieneAuxilio = smmlv != null && auxilioMensual != null && salarioMes > 0 && salarioMes <= SMMLV_AUXILIO * smmlv;
+        const auxilio = tieneAuxilio ? auxilioMensual * proporcion : 0;
 
         const clave = t.idcampania ?? 'sin';
         if (!porCampania.has(clave)) porCampania.set(clave, { idcampania: t.idcampania ?? null, campania: t.campania || 'Sin campaña', ...sumaVacia() });
         for (const acc of [total, porCampania.get(clave)]) {
             acc.salarios += salario;
             acc.bonos += bonos;
+            acc.auxilio += auxilio;
             acc.ibc += ibc;
             acc.empleados.add(t.users_company_id);
+            if (tieneAuxilio) acc.conAuxilio.add(t.users_company_id);
             for (const f of factores) {
                 const esAporte = f.categoria === 'aporte';
-                const valor = esAporte && f.exonerable && exonerado ? 0 : ((esAporte ? ibc : salario) * tarifaDe(f, t)) / 100;
+                const base = esAporte ? ibc : salario + (f.incluye_auxilio ? auxilio : 0);
+                const valor = esAporte && f.exonerable && exonerado ? 0 : (base * tarifaDe(f, t)) / 100;
                 acc.factores.set(f.codigo, (acc.factores.get(f.codigo) || 0) + valor);
             }
         }
@@ -100,11 +113,15 @@ function costoDelMes(tramos, factores, periodo, { corte = null, salariosMinimos 
     const cerrar = (acc) => {
         const salarios = Math.round(acc.salarios);
         const bonos = Math.round(acc.bonos);
-        const resultado = { salarios, prestaciones: 0, aportes: 0, bonos, total: 0, empleados: acc.empleados.size, detalle_prestaciones: [], detalle_aportes: [] };
+        const auxilio = Math.round(acc.auxilio);
+        const resultado = {
+            salarios, auxilio_transporte: auxilio, prestaciones: 0, aportes: 0, bonos, total: 0,
+            empleados: acc.empleados.size, empleados_con_auxilio: acc.conAuxilio.size, detalle_prestaciones: [], detalle_aportes: []
+        };
         for (const f of factores) {
             const grupo = CATEGORIAS[f.categoria] || 'prestaciones';
             const valor = Math.round(acc.factores.get(f.codigo) || 0);
-            const base = grupo === 'aportes' ? acc.ibc : acc.salarios;
+            const base = grupo === 'aportes' ? acc.ibc : acc.salarios + (f.incluye_auxilio ? acc.auxilio : 0);
             resultado[grupo] += valor;
             resultado[`detalle_${grupo}`].push({
                 codigo: f.codigo, nombre: f.nombre, porcentaje: f.porcentaje, exonerable: !!f.exonerable,
@@ -113,7 +130,7 @@ function costoDelMes(tramos, factores, periodo, { corte = null, salariosMinimos 
                 valor
             });
         }
-        resultado.total = salarios + resultado.prestaciones + resultado.aportes + bonos;
+        resultado.total = salarios + auxilio + resultado.prestaciones + resultado.aportes + bonos;
         return resultado;
     };
 
@@ -140,9 +157,12 @@ function historico(tramos, factores, periodos, hoy, { salariosMinimos = [] } = {
         return {
             ...mes,
             en_curso: true,
-            causado: { salarios: causado.salarios, prestaciones: causado.prestaciones, aportes: causado.aportes, bonos: causado.bonos, total: causado.total }
+            causado: {
+                salarios: causado.salarios, auxilio_transporte: causado.auxilio_transporte, prestaciones: causado.prestaciones,
+                aportes: causado.aportes, bonos: causado.bonos, total: causado.total
+            }
         };
     });
 }
 
-module.exports = { DIAS_MES_COMERCIAL, diasEnMes, ibcMensual, salarioMinimoDe, costoDelMes, historico };
+module.exports = { DIAS_MES_COMERCIAL, diasEnMes, ibcMensual, salarioMinimoDe, auxilioTransporteDe, costoDelMes, historico };
