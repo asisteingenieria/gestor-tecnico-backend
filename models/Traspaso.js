@@ -401,6 +401,18 @@ class Traspaso {
         const [rows] = await db.query('SELECT archivo FROM traspaso_soporte WHERE traspaso_id = ?', [traspasoId]);
         return rows.map(r => r.archivo);
     }
+
+    // Archivos de todos los traspasos de un empleado, para borrarlos del disco al eliminar su ficha.
+    static async archivosDeEmpleado(ucId) {
+        const [rows] = await db.query(
+            `SELECT ts.archivo FROM traspaso_soporte ts
+             JOIN traspaso t ON ts.traspaso_id = t.idtraspaso
+             JOIN contrato c ON t.contrato_idcontrato = c.idcontrato
+             WHERE c.users_company_id = ?`,
+            [ucId]
+        );
+        return rows.map(r => r.archivo);
+    }
 }
 
 module.exports = Traspaso;

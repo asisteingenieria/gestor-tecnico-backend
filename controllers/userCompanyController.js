@@ -24,6 +24,38 @@ async function prepararPayloadTraspaso(body) {
     return { datos };
 }
 
+// Un ID de catálogo o de contrato que no existe llega a MySQL como violación de FK: es un dato
+// inválido del cliente (400), no un error del servidor.
+const esReferenciaInvalida = (error) => error.status === 400 || error.code === 'ER_NO_REFERENCED_ROW_2' || error.code === 'ER_NO_REFERENCED_ROW';
+const MENSAJE_REFERENCIA_INVALIDA = 'Alguno de los datos seleccionados (empleado, contrato o catálogo) no existe';
+
+// Un archivo que no es Excel (o un Excel sin la hoja de empleados) se leía como "0 filas" y la
+// previsualización salía en blanco sin explicar nada.
+const ARCHIVO_SIN_EMPLEADOS = 'El archivo no tiene filas de empleados: revisa que sea el Excel de la plantilla (hoja "TOTAL PERSONAL")';
+
+const fechaDia = (f) => (f ? String(f).slice(0, 10) : '');
+
+function validarNovedad({ contrato_id, tipo_novedad_id, fecha_inicial, fecha_final, fecha_retorno, total_dias }) {
+    if (!contrato_id || !tipo_novedad_id || !fecha_inicial) return 'contrato_id, tipo_novedad_id y fecha_inicial son obligatorios';
+    if (fecha_final && fechaDia(fecha_final) < fechaDia(fecha_inicial)) return 'La fecha final no puede ser anterior a la fecha inicial';
+    if (fecha_retorno && fechaDia(fecha_retorno) < fechaDia(fecha_inicial)) return 'La fecha de retorno no puede ser anterior a la fecha inicial';
+    if (Number(total_dias) < 0) return 'El total de días no puede ser negativo';
+    return null;
+}
+
+function validarVacaciones(body) {
+    if (!body.contrato_id || !body.fecha_corte) return 'contrato_id y fecha_corte son obligatorios';
+    for (const campo of ['dias_trabajados', 'dias_acumulados', 'dias_tomados', 'dias_compensados', 'pasivo_vacacional']) {
+        if (Number(body[campo]) < 0) return 'Los días y el pasivo vacacional no pueden ser negativos';
+    }
+    for (const periodo of (body.periodos || [])) {
+        if (periodo.fecha_inicio && periodo.fecha_final && fechaDia(periodo.fecha_final) < fechaDia(periodo.fecha_inicio)) {
+            return `El periodo ${periodo.periodo_tomado || ''} termina antes de empezar`.replace('  ', ' ');
+        }
+    }
+    return null;
+}
+
 const rutaArchivoSoporte = soportesNovedad.ruta;
 const borrarArchivoSoporte = soportesNovedad.borrar;
 
@@ -120,6 +152,9 @@ const userCompanyController = {
             if (error.message.includes('Ya existe')) {
                 return res.status(409).json({ success: false, message: error.message, type: 'DUPLICATE_IDENTIFICACION' });
             }
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -149,6 +184,9 @@ const userCompanyController = {
             if (error.message.includes('Ya existe')) {
                 return res.status(409).json({ success: false, message: error.message, type: 'DUPLICATE_IDENTIFICACION' });
             }
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -162,7 +200,13 @@ const userCompanyController = {
                 return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
             }
 
+            // Las novedades y traspasos caen por CASCADE con el contrato, pero sus archivos de
+            // soporte están en disco: se recogen antes y se borran después del commit.
+            const archivosNovedades = await NovedadRrhh.archivosDeEmpleado(id);
+            const archivosTraspasos = await Traspaso.archivosDeEmpleado(id);
             await UserCompany.delete(id);
+            archivosNovedades.forEach(borrarArchivoSoporte);
+            archivosTraspasos.forEach(soportesTraspaso.borrar);
             res.json({ success: true, message: 'Empleado eliminado exitosamente. Los activos asignados quedaron sin empleado.' });
         } catch (error) {
             console.error('Error al eliminar empleado:', error);
@@ -178,6 +222,9 @@ const userCompanyController = {
                 return res.status(400).json({ success: false, message: 'No se recibió ningún archivo' });
             }
             const { filas, errores_parseo } = importEmpleadosExcel.parsearArchivo(req.file.buffer);
+            if (filas.length === 0 && errores_parseo.length === 0) {
+                return res.status(400).json({ success: false, message: ARCHIVO_SIN_EMPLEADOS });
+            }
             const reporte = await importEmpleadosService.previsualizar(filas);
             res.json({ success: true, errores_parseo, ...reporte });
         } catch (error) {
@@ -192,6 +239,9 @@ const userCompanyController = {
                 return res.status(400).json({ success: false, message: 'No se recibió ningún archivo' });
             }
             const { filas, errores_parseo } = importEmpleadosExcel.parsearArchivo(req.file.buffer);
+            if (filas.length === 0 && errores_parseo.length === 0) {
+                return res.status(400).json({ success: false, message: ARCHIVO_SIN_EMPLEADOS });
+            }
             const reporte = await importEmpleadosService.confirmar(filas);
             res.json({ success: true, message: 'Importación completada', errores_parseo, ...reporte });
         } catch (error) {
@@ -295,23 +345,26 @@ const userCompanyController = {
 
     async createNovedad(req, res) {
         try {
-            const { contrato_id, tipo_novedad_id, fecha_inicial } = req.body;
-            if (!contrato_id || !tipo_novedad_id || !fecha_inicial) {
-                return res.status(400).json({ success: false, message: 'contrato_id, tipo_novedad_id y fecha_inicial son obligatorios' });
+            const errorValidacion = validarNovedad(req.body);
+            if (errorValidacion) {
+                return res.status(400).json({ success: false, message: errorValidacion });
             }
             const novedad = await NovedadRrhh.create(req.body);
             res.status(201).json({ success: true, message: 'Novedad creada exitosamente', novedad });
         } catch (error) {
             console.error('Error al crear novedad:', error);
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
 
     async updateNovedad(req, res) {
         try {
-            const { contrato_id, tipo_novedad_id, fecha_inicial } = req.body;
-            if (!contrato_id || !tipo_novedad_id || !fecha_inicial) {
-                return res.status(400).json({ success: false, message: 'contrato_id, tipo_novedad_id y fecha_inicial son obligatorios' });
+            const errorValidacion = validarNovedad(req.body);
+            if (errorValidacion) {
+                return res.status(400).json({ success: false, message: errorValidacion });
             }
             const ok = await NovedadRrhh.update(req.params.novedadId, req.body);
             if (!ok) {
@@ -320,6 +373,9 @@ const userCompanyController = {
             res.json({ success: true, message: 'Novedad actualizada exitosamente' });
         } catch (error) {
             console.error('Error al actualizar novedad:', error);
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -590,23 +646,26 @@ const userCompanyController = {
 
     async createVacaciones(req, res) {
         try {
-            const { contrato_id, fecha_corte } = req.body;
-            if (!contrato_id || !fecha_corte) {
-                return res.status(400).json({ success: false, message: 'contrato_id y fecha_corte son obligatorios' });
+            const errorValidacion = validarVacaciones(req.body);
+            if (errorValidacion) {
+                return res.status(400).json({ success: false, message: errorValidacion });
             }
             const vacaciones = await Vacaciones.create(req.body);
             res.status(201).json({ success: true, message: 'Registro de vacaciones creado exitosamente', vacaciones });
         } catch (error) {
             console.error('Error al crear vacaciones:', error);
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
 
     async updateVacaciones(req, res) {
         try {
-            const { contrato_id, fecha_corte } = req.body;
-            if (!contrato_id || !fecha_corte) {
-                return res.status(400).json({ success: false, message: 'contrato_id y fecha_corte son obligatorios' });
+            const errorValidacion = validarVacaciones(req.body);
+            if (errorValidacion) {
+                return res.status(400).json({ success: false, message: errorValidacion });
             }
             const ok = await Vacaciones.update(req.params.vacacionesId, req.body);
             if (!ok) {
@@ -615,6 +674,9 @@ const userCompanyController = {
             res.json({ success: true, message: 'Registro de vacaciones actualizado exitosamente' });
         } catch (error) {
             console.error('Error al actualizar vacaciones:', error);
+            if (esReferenciaInvalida(error)) {
+                return res.status(400).json({ success: false, message: error.status === 400 ? error.message : MENSAJE_REFERENCIA_INVALIDA });
+            }
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
@@ -664,6 +726,9 @@ const userCompanyController = {
             res.status(201).json({ success: true, message: 'Retiro registrado exitosamente' });
         } catch (error) {
             console.error('Error al registrar retiro:', error);
+            if (error.status === 400) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
             if (error.message.includes('ya tiene un retiro') || error.message.includes('no tiene contrato')) {
                 return res.status(409).json({ success: false, message: error.message });
             }
@@ -682,6 +747,9 @@ const userCompanyController = {
             res.json({ success: true, message: 'Retiro actualizado exitosamente' });
         } catch (error) {
             console.error('Error al actualizar retiro:', error);
+            if (error.status === 400) {
+                return res.status(400).json({ success: false, message: error.message });
+            }
             if (error.message.includes('no tiene un retiro')) {
                 return res.status(404).json({ success: false, message: error.message });
             }

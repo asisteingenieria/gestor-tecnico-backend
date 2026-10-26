@@ -32,6 +32,22 @@ function validarObligatorios(data) {
         return 'El salario es obligatorio y debe ser mayor a cero';
     }
 
+    for (const [campo, nombre] of [['bono_no_prestacional', 'bono no prestacional'], ['bono_cafeteria', 'bono de cafetería']]) {
+        if (Number(data.salario[campo]) < 0) return `El ${nombre} no puede ser negativo`;
+    }
+    if (Number(data.numero_hijos) < 0) {
+        return 'El número de hijos no puede ser negativo';
+    }
+
+    // Fechas 'YYYY-MM-DD' (o ISO): se comparan como texto por los primeros 10 caracteres.
+    const ingreso = String(data.contrato.fecha_ingreso).slice(0, 10);
+    for (const [campo, nombre] of [['fecha_fin_periodo_prueba', 'fin del periodo de prueba'], ['fecha_fin_contrato', 'fin de contrato']]) {
+        const fecha = data.contrato[campo];
+        if (fecha && String(fecha).slice(0, 10) < ingreso) {
+            return `La fecha de ${nombre} no puede ser anterior a la fecha de ingreso`;
+        }
+    }
+
     const tarifaArl = data.seguridad_social?.tarifa_arl;
     if (tarifaArl !== undefined && tarifaArl !== null && tarifaArl !== '' &&
         (isNaN(Number(tarifaArl)) || Number(tarifaArl) < 0 || Number(tarifaArl) > 100)) {

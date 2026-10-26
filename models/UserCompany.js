@@ -76,7 +76,11 @@ function camposPersonales(data) {
 
 async function clienteDeCampania(conn, campaniaId) {
     const [rows] = await conn.query('SELECT Cliente_idCliente FROM campania WHERE idcampania = ?', [campaniaId]);
-    if (rows.length === 0) throw new Error('La campaña seleccionada no existe');
+    if (rows.length === 0) {
+        const error = new Error('La campaña seleccionada no existe');
+        error.status = 400; // dato inválido del cliente, no error del servidor
+        throw error;
+    }
     return rows[0].Cliente_idCliente;
 }
 
@@ -199,7 +203,14 @@ async function guardarCuentaBancaria(conn, ucId, cuenta) {
 }
 
 async function guardarDireccion(conn, ucId, direccion) {
-    if (!direccion || !val(direccion.direccion) || !val(direccion.tipo_direccion_id)) return;
+    if (!direccion || !val(direccion.direccion)) return;
+    // El formulario, el import y Hydra mandan "Residencia"; si llega sin tipo, la dirección se
+    // perdía en silencio. Se toma "Residencia" por defecto.
+    if (!val(direccion.tipo_direccion_id)) {
+        const [[residencia]] = await conn.query("SELECT idtipo_direccion FROM tipo_direccion WHERE nombre = 'Residencia'");
+        if (!residencia) return;
+        direccion = { ...direccion, tipo_direccion_id: residencia.idtipo_direccion };
+    }
 
     const [actuales] = await conn.query(
         'SELECT iddireccion FROM direccion WHERE users_company_id = ? AND es_principal = 1',
