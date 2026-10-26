@@ -23,6 +23,20 @@ async function directorUserIdDe(usersCompanyId, conn = db) {
     return filas[0]?.id ?? null;
 }
 
+// Ficha del jefe de área del contrato activo del empleado (para avisarle en vivo a su "Equipo hoy").
+async function jefeAreaDe(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT c.jefe_area_id
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.users_company_id = ? AND ec.nombre IN (?, ?)
+         ORDER BY c.fecha_ingreso DESC
+         LIMIT 1`,
+        [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas[0]?.jefe_area_id ?? null;
+}
+
 // ¿El empleado tiene, en su contrato activo, a este director como jefe de área?
 async function esSubordinado(directorUsersCompanyId, empleadoId, conn = db) {
     const [filas] = await conn.query(
@@ -78,4 +92,4 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     return filas;
 }
 
-module.exports = { directorUserIdDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };
+module.exports = { directorUserIdDe, jefeAreaDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };
