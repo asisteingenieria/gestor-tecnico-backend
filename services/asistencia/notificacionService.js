@@ -20,6 +20,8 @@ async function notificarCambioJornada(usersCompanyId, evento, datos = {}) {
         global.emitirAsistencia?.(usersCompanyId, 'asistencia:mi-jornada', { tipo: evento });
         const jefeId = await equipoRepo.jefeAreaDe(usersCompanyId);
         if (jefeId) global.emitirAsistencia?.(jefeId, 'asistencia:equipo', { tipo: evento, usersCompanyId });
+        // Financiera (admin de RRHH y asistencia) ve a todos (trazabilidad y asistencia mensual): sala aparte.
+        global.emitirMonitoresAsistencia?.('asistencia:monitor', { tipo: evento, usersCompanyId });
     } catch (error) {
         console.error('[asistencia] Error avisando el cambio de jornada:', error.message);
     }
