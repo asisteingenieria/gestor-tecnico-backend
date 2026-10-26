@@ -12,6 +12,7 @@ const ESTADO_SIN_ENTRADA = {
     estado: 'pendiente',
     minutosTrabajados: 0,
     segundosTrabajados: 0,
+    segundosEnJornada: 0,
     cuentaTiempo: false,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
@@ -184,6 +185,9 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         minutosTrabajados: Math.round(minutosTrabajados),
         // Exacto, para que el contador del monitor no salte hasta ±30 s al recargar.
         segundosTrabajados: Math.floor(minutosTrabajados * 60),
+        // Tiempo total desde la entrada (laborado + pausas + desconexión): lo que el monitor
+        // muestra como "tiempo en jornada"; el desglose por estado va aparte.
+        segundosEnJornada: Math.floor(Math.max(0, bruto) * 60),
         cuentaTiempo,
         minutosPausaBano: Math.round(minutosPausaBano),
         minutosPausaAlmuerzo: Math.round(minutosPausaAlmuerzo),
