@@ -15,6 +15,27 @@ function val(x) {
     return x === undefined || x === null || x === '' ? null : x;
 }
 
+// Reglas que el modal ya aplica pero que la API no exigía: el retiro no puede ser anterior al
+// ingreso y los tipos con `requiere_justificacion` (Renuncia Voluntaria, migración 055) la piden.
+// Lanza un error con `status = 400` que el controller devuelve tal cual.
+async function validarRetiro(conn, contratoId, data) {
+    const [[contrato]] = await conn.query('SELECT fecha_ingreso FROM contrato WHERE idcontrato = ?', [contratoId]);
+    const ingreso = contrato?.fecha_ingreso ? new Date(contrato.fecha_ingreso).toISOString().slice(0, 10) : null;
+    let mensaje = null;
+    if (ingreso && String(data.fecha_retiro).slice(0, 10) < ingreso) {
+        mensaje = 'La fecha de retiro no puede ser anterior a la fecha de ingreso';
+    } else {
+        const [[tipo]] = await conn.query('SELECT requiere_justificacion FROM tipo_retiro WHERE idtipo_retiro = ?', [data.tipo_retiro_id]);
+        if (!tipo) mensaje = 'Tipo de retiro inválido';
+        else if (tipo.requiere_justificacion && !String(data.justificacion || '').trim()) mensaje = 'Este tipo de retiro requiere justificación';
+    }
+    if (mensaje) {
+        const error = new Error(mensaje);
+        error.status = 400;
+        throw error;
+    }
+}
+
 class Retiro {
     static async getByUserCompanyId(ucId) {
         const [rows] = await db.query(
@@ -42,6 +63,7 @@ class Retiro {
 
             const [existentes] = await conn.query('SELECT idretiro FROM retiro WHERE contrato_idcontrato = ?', [contratoId]);
             if (existentes.length > 0) throw new Error('Este empleado ya tiene un retiro registrado');
+            await validarRetiro(conn, contratoId, data);
 
             const [estadoRetirado] = await conn.query("SELECT idestado_contrato FROM estado_contrato WHERE nombre = 'retirado'");
             if (estadoRetirado.length === 0) throw new Error("No existe el estado de contrato 'retirado' (ejecutar migración 035)");
@@ -89,12 +111,13 @@ class Retiro {
             await conn.beginTransaction();
 
             const [rows] = await conn.query(
-                `SELECT r.idretiro, r.equipo_entregado AS equipo_entregado_anterior
+                `SELECT r.idretiro, r.contrato_idcontrato, r.equipo_entregado AS equipo_entregado_anterior
                  FROM retiro r JOIN contrato c ON r.contrato_idcontrato = c.idcontrato
                  WHERE c.users_company_id = ? ORDER BY r.idretiro DESC LIMIT 1`,
                 [ucId]
             );
             if (rows.length === 0) throw new Error('Este empleado no tiene un retiro registrado');
+            await validarRetiro(conn, rows[0].contrato_idcontrato, data);
 
             await conn.query(
                 `UPDATE retiro SET

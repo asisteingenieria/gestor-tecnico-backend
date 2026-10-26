@@ -200,6 +200,18 @@ class NovedadRrhh {
         const [rows] = await db.query('SELECT archivo FROM novedad_rrhh_soporte WHERE novedad_rrhh_id = ?', [novedadId]);
         return rows.map(r => r.archivo);
     }
+
+    // Archivos de todas las novedades de un empleado, para borrarlos del disco al eliminar su ficha.
+    static async archivosDeEmpleado(ucId) {
+        const [rows] = await db.query(
+            `SELECT nrs.archivo FROM novedad_rrhh_soporte nrs
+             JOIN novedad_rrhh nr ON nrs.novedad_rrhh_id = nr.idnovedad_rrhh
+             JOIN contrato c ON nr.contrato_idcontrato = c.idcontrato
+             WHERE c.users_company_id = ?`,
+            [ucId]
+        );
+        return rows.map(r => r.archivo);
+    }
 }
 
 module.exports = NovedadRrhh;

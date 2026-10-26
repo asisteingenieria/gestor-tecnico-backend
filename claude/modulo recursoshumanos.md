@@ -2252,3 +2252,84 @@ Pedido: `recursosHumanos` solo ve información de contratación, nada de costos 
   pide el endpoint, no pinta el KPI y la franja de KPIs pasa a 3 columnas.
 - **Solo el KPI.** Los salarios siguen visibles para RRHH en el formulario de alta (`AgentForm`),
   el drawer, Traspasos y Contratación Hydra.
+
+## 38. Sesión 2026-10-26 — Prueba en el navegador del alta completa, Tarifa ARL al editar y `tipo_contrato` duplicado
+
+**Prueba:** con la cuenta `sharon.pardo` se registró desde `/recursos-humanos` un empleado con **todos**
+los campos de los dos pasos de `AgentForm` ("Prueba Navegador Completo Claude", CC `7770000999`,
+`users_company.id` 669; Claro + HOGAR + Agente call center, contrato Fijo). `POST /users-company` →
+201, sin errores de consola. Verificado:
+- automatismos: Cargo filtrado por Cliente (16 de Claro), salario sugerido 1.750.905 y bloqueado, fin
+  de periodo de prueba a +2 meses, "Fin de contrato" visible por ser Fijo, jefatura sugerida (jefe de
+  área y director con etiqueta "Sugerido"), analista encargado tomado del login;
+- el drawer de perfil muestra cada campo con el valor capturado;
+- `cuenta_empleado` creada (usuario = cédula, `debe_cambiar_password = 1`);
+- al editar, el formulario precarga todos los valores (salvo la tarifa ARL, ver abajo).
+El empleado de prueba **quedó en la BD local** para revisión.
+
+**Bug corregido — Tarifa ARL vacía al editar** (`AgentForm.jsx`): se guardaba bien, pero la BD
+devuelve el DECIMAL con todos sus ceros (`"0.52200"`) y el `id` de la opción es `"0.522"`, así que el
+selector quedaba en "Sin especificar". Nuevo helper `tarifaArlDelSelector()` que, al cargar el
+empleado, busca la opción por valor numérico (si no coincide con ninguna clase, conserva el valor tal
+cual). Verificado en el navegador: ahora precarga "Clase I".
+
+**`tipo_contrato` duplicado — migración `081_tipo_contrato_sin_duplicados.sql`** (aplicada en local,
+**pendiente en producción**, sin dependencias). El selector "Tipo de contrato" mostraba cada opción dos
+veces: la tabla (034) no tiene UNIQUE en `nombre` y el seed de la 035 se corrió dos veces (IDs 1-5 y
+6-10; los 389 del import masivo usaban el 6). La migración, por nombre y nunca por ID fijo:
+- deja por cada nombre la fila de menor ID y le pasa todo lo que apuntaba a una repetida:
+  `contrato.tipo_contrato_idtipo_contrato`, `traspaso.tipo_contrato_anterior_id` (070, sin FK) y
+  `hydra_candidato.datos_empleado → $.contrato.tipo_contrato_id` (JSON del staging de Hydra; puede
+  venir como número, texto, vacío o null de JSON — solo se reasigna si son dígitos);
+- borra las repetidas y agrega `UNIQUE KEY uq_tipo_contrato_nombre (nombre)`;
+- es idempotente; si producción no tiene duplicados, solo agrega el UNIQUE.
+
+Verificado: en una BD temporal con casos sintéticos (contratos, traspasos y candidatos de Hydra
+apuntando a repetidas, un nombre con espacios, JSON con id texto/null/vacío) los resultados coinciden
+con lo esperado, la segunda corrida no cambia nada y el UNIQUE rechaza un duplicado nuevo. En local:
+10 → 5 tipos, los 399 contratos conservan el mismo tipo **por nombre** antes y después, y el selector
+del alta muestra 5 opciones. `npm test` 221/221, `eslint` sin errores en `AgentForm.jsx`.
+
+**Antes de correrla en producción**, ver si allá hay duplicados:
+`SELECT nombre, COUNT(*) FROM tipo_contrato GROUP BY nombre HAVING COUNT(*) > 1;`
+
+**Visto y no tocado:** el catálogo de ciudades tiene "Bogotá" y "BOGOTÁ D.C" como opciones separadas
+en los buscadores de ciudad (ver §12.4).
+
+## 39. Sesión 2026-10-26 — Prueba de punta a punta del módulo y fallas corregidas
+
+Se probó todo el módulo contra el backend y la BD local con un script de 107 verificaciones por API
+(no commiteado: permisos, validaciones del alta, alta y lectura de la ficha, edición, novedades con
+soportes, los 6 tipos de traspaso con alertas y documentos, pasivo vacacional, retiro/reactivación,
+previsualización del Excel y borrado). Los empleados de prueba usaron cédulas `777000099x` y se
+borraron al final. También se probó en el navegador: Contratación Hydra, Novedades (con soporte),
+Traspasos (Ratificación → alerta al director de área) y Pasivo vacacional, sin errores de consola.
+La primera corrida dio 88/107; tras las correcciones queda en **105/107**, y las 2 fallas restantes
+son reglas de negocio sin definir (abajo). `npm test`: 221/221.
+
+**Fallas corregidas (backend, todas en el patrón de dos capas):**
+
+| Falla | Corrección |
+|---|---|
+| Borrar un empleado dejaba huérfanos en disco los archivos de sus novedades y traspasos (las filas caen por CASCADE, los archivos no) | `NovedadRrhh.archivosDeEmpleado` / `Traspaso.archivosDeEmpleado`: el controller los lee antes del `DELETE` y los borra del disco después |
+| ID de catálogo inexistente (campaña, cargo, EPS…) en alta/edición de empleado, novedad o vacaciones → **500** | Violación de FK (`ER_NO_REFERENCED_ROW*`) y `clienteDeCampania` (ahora con `status = 400`) responden **400** con mensaje |
+| La API aceptaba fechas al revés: fin de periodo de prueba / fin de contrato antes del ingreso, fecha final o de retorno de novedad antes de la inicial, periodos de vacaciones invertidos | `utils/validarEmpleado.js` (compartido con Hydra), `validarNovedad` y `validarVacaciones` en el controller |
+| La API aceptaba negativos: bonos, número de hijos, total de días, días/pasivo de vacaciones | Mismas validaciones |
+| Retiro: la API no exigía la justificación de los tipos con `requiere_justificacion` ni que el retiro fuera posterior al ingreso (solo lo hacía el modal) | `validarRetiro` en `models/Retiro.js`, en `registrar` y `actualizar`; error `status = 400` |
+| Un Excel corrupto o de otra plantilla en "Cargar Excel" se tomaba como "0 empleados" sin aviso | Preview y commit responden 400 si no hay filas ni errores de parseo |
+| La dirección llegada sin `tipo_direccion_id` (API directa) se descartaba en silencio | `guardarDireccion` toma "Residencia" por defecto, igual que el formulario, el import y Hydra |
+
+Todos los formularios (`AgentForm`, `NovedadForm`, `TraspasoForm`, `VacacionesForm`, `RetiroModal`)
+ya muestran `err.response.data.message`, así que los mensajes nuevos llegan al usuario.
+
+**Para decidir con el negocio (no se tocó):**
+- A un empleado **retirado** se le pueden registrar novedades y traspasos (API y UI: los selectores
+  listan a todos). Una novedad de fechas anteriores al retiro es legítima; un traspaso no parece.
+- 3 contratos tienen fin de periodo de prueba **un día antes** del ingreso (cédulas 1030582520,
+  1007134962 —del Excel real— y 10056566565, de prueba). Con la validación nueva, **editar su ficha
+  pide corregir esa fecha** antes de guardar.
+- `tipo_retiro` "Renuncia" trae `motivo_sugerido` "Proceso disciplinario".
+- El teléfono es obligatorio en el formulario pero no en la API.
+- La previsualización del Excel real propone crear la ciudad "BOGOTÁ D.C D.C." (duplicados de
+  ciudad, §38).
+- Detalle menor de UI: el contador del menú "Novedades" no se actualiza al crear una hasta recargar.
