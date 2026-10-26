@@ -2317,3 +2317,30 @@ Verificado: `npm test` 218/218; en local octubre 2026 = nómina $ 774,9 M + pres
 aportes $ 128,0 M (pensión $ 93 M, caja $ 31 M, ARL $ 4 M; salud/ICBF/SENA exonerados) + bonos
 $ 92,7 M = $ 1.164,7 M. Capturas claro/oscuro sin errores. **No probado por el usuario.** Sin
 auxilio de transporte todavía.
+
+## 40. Sesión 2026-10-26 — Auxilio de transporte en el costo de nómina
+
+Pedido: sumar el auxilio de transporte al costo de nómina.
+
+**Migración `080_auxilio_transporte_costo_nomina.sql`** (aplicada en local, **pendiente en producción,
+va después de la 079**, idempotente, sin IDs):
+- `salario_minimo.auxilio_transporte`: 2024 $ 162.000, 2025 $ 200.000, 2026 $ 249.095. **Cada enero
+  se actualiza junto con el SMMLV** (si falta el del año, se usa el último cargado).
+- `factor_costo_nomina.incluye_auxilio = 1` en cesantías, intereses sobre cesantías y prima (el
+  auxilio es base de esas tres, no de vacaciones).
+
+**Cálculo** (`domain/asistencia/costoNomina.js`):
+- Lo recibe quien tiene salario básico hasta 2 SMMLV del año del periodo (Ley 15 de 1959),
+  prorrateado por los mismos días comerciales del tramo. Sin SMMLV o sin auxilio cargado, no se suma.
+- No es base de aportes a seguridad social ni parafiscales.
+- No se distingue el auxilio de conectividad del trabajo en casa (Ley 2088 de 2021): vale lo mismo.
+- Total = nómina + auxilio + prestaciones + aportes + bonos. Nuevos campos `auxilio_transporte` y
+  `empleados_con_auxilio` en el mes, el histórico, lo causado y por campaña.
+
+**Home:** sexta tarjeta "Auxilio de transporte" (amarillo, al final de la pila; paleta de 5 validada
+en claro y oscuro con las adyacencias del apilado), en barras de 12 meses, por campaña, tabla y CSV.
+Las tarjetas comparan "vs <mes corto>" para que no se partan en dos líneas.
+
+Verificado: `npm test` 221/221; en local octubre 2026 = nómina $ 774,9 M + auxilio $ 96,5 M (388
+empleados) + prestaciones $ 186,2 M + aportes $ 128,0 M + bonos $ 92,7 M = $ 1.278,3 M. Capturas
+claro/oscuro sin errores. **No probado por el usuario.**
