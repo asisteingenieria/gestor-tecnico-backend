@@ -56,6 +56,7 @@ async function estadoDeHoy(usersCompanyId) {
         minutos_tarde: estado.minutosTarde,
         minutos_trabajados: estado.minutosTrabajados,
         segundos_trabajados: estado.segundosTrabajados,
+        segundos_en_jornada: estado.segundosEnJornada,
         cuenta_tiempo: estado.cuentaTiempo,
         minutos_pausa_bano: estado.minutosPausaBano,
         minutos_pausa_almuerzo: estado.minutosPausaAlmuerzo,

@@ -212,3 +212,16 @@ test('cuentaTiempo: suma en curso y en capacitación, no en break ni desconectad
     assert.equal(calcularJornada([...base, evento('salida', '08:30:00')], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
     assert.equal(calcularJornada([], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
 });
+
+test('segundosEnJornada: corre desde la entrada sin descontar pausas ni desconexión', () => {
+    const eventos = [
+        evento('entrada', '08:00:00'),
+        evento('inicio_break', '08:01:00'), evento('fin_break', '08:16:00'),
+        evento('inicio_desconexion', '09:00:00'), evento('fin_desconexion', '09:10:00')
+    ];
+    const resultado = calcularJornada(eventos, HORARIO, horaDia('10:00:00'));
+    assert.equal(resultado.segundosEnJornada, 7200);
+    // laborado = 120 − 15 de break − 10 desconectado
+    assert.equal(resultado.segundosTrabajados, 95 * 60);
+    assert.equal(resultado.minutosBreak, 15);
+});

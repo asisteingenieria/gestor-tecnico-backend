@@ -2411,3 +2411,20 @@ prueba se borraron.
 URL de `VITE_API_BASE_URL` sin `/api`. Si nginx publica la API por un proxy que solo reenvía
 `/api`, también debe reenviar `/socket.io/` con `Upgrade`. Si no, el monitor igual se actualiza,
 pero cada 15 s en vez de al instante.
+
+**Ajuste del mismo día: el reloj grande es el tiempo en jornada.** El usuario vio que al volver
+del break el contador "empezaba de cero". No se perdía tiempo. El reloj mostraba el tiempo
+**laborado**, que descuenta el break, y en una prueba corta, con entrada y break enseguida, eso es
+casi cero. Lo que se pidió es que el reloj siga corriendo desde la entrada y que al final del día
+muestre las horas de la jornada, con el tiempo de cada estado aparte.
+
+- **Backend:** `calcularJornada` devuelve `segundosEnJornada`, el tiempo desde la entrada hasta la
+  salida o hasta ahora, con pausas y desconexión incluidas, y `/mi-jornada/hoy` lo expone como
+  `segundos_en_jornada`. Hay 1 test nuevo, 224 en total.
+- **Frontend:**
+  - el reloj de `ContadorJornada` dice "TIEMPO EN JORNADA" y corre mientras la jornada está
+    abierta, también en pausa;
+  - el desglose muestra "Laborado" (lo que cuenta para nómina, sin cambios), baño, break,
+    almuerzo, capacitación y "Desconectado" si lo hubo.
+- **Verificado en local:** entrada hace 30 min y 10 min de break. El reloj muestra 0:30, Laborado
+  20 min y Break 10 min.

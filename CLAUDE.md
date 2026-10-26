@@ -16,7 +16,7 @@ npm start       # NODE_ENV=production
 ```
 
 `npm test` corre `node --test tests/**/*.test.js` — hoy cubre el dominio puro del módulo de
-asistencia, de la conexión con Hydra y de la integración AsisLock, más las reglas de campos por tipo de traspaso y de la pantalla gris de AsisLock y del reporte de horas extras y de la clasificación automática de la hora extra y de las pausas de AsisLock y del relato de hora extra en la trazabilidad y del resumen mensual del equipo y del Home de financiera con su costo de nómina (223 tests, sin servidor ni base de datos). `npm run test:e2e` es la prueba de punta a punta de asistencia contra el backend y la BD local (127 checks, ver `asistencia.md` §20, §23-§26 y §30). El resto del repo
+asistencia, de la conexión con Hydra y de la integración AsisLock, más las reglas de campos por tipo de traspaso y de la pantalla gris de AsisLock y del reporte de horas extras y de la clasificación automática de la hora extra y de las pausas de AsisLock y del relato de hora extra en la trazabilidad y del resumen mensual del equipo y del Home de financiera con su costo de nómina (224 tests, sin servidor ni base de datos). `npm run test:e2e` es la prueba de punta a punta de asistencia contra el backend y la BD local (127 checks, ver `asistencia.md` §20, §23-§26 y §30). El resto del repo
 sigue sin pruebas.
 
 ## Arquitectura
