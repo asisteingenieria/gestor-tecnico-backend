@@ -2333,3 +2333,21 @@ ya muestran `err.response.data.message`, así que los mensajes nuevos llegan al 
 - La previsualización del Excel real propone crear la ciudad "BOGOTÁ D.C D.C." (duplicados de
   ciudad, §38).
 - Detalle menor de UI: el contador del menú "Novedades" no se actualiza al crear una hasta recargar.
+
+## 40. Sesión 2026-10-26 — Alta de empleado: obligatorio todo lo que aplica a cualquier empleado
+
+En `AgentForm.jsx`, **solo al crear** (al editar no, para no bloquear fichas importadas incompletas):
+
+- **Paso 1, ahora obligatorios:** fecha y ciudad de expedición, fecha y ciudad de nacimiento,
+  género, estado civil, grupo sanguíneo, número de hijos (acepta 0), correo, y la dirección
+  completa (dirección, barrio, ciudad, zona, tipo de vivienda).
+- **Paso 2, ahora obligatorios:** empresa, periodo de pago, tipo cotizante, EPS, ARL, tarifa ARL,
+  cuenta bancaria (banco, tipo y número), contacto de emergencia (nombre, teléfono, parentesco),
+  fin de contrato cuando el tipo lo muestra y las tallas cuando aplica dotación. AFP, cesantías y
+  caja son obligatorias salvo en Aprendizaje y Prestación de servicios, que no cotizan.
+- **Siguen opcionales** porque no todos los tienen: segundo nombre y apellido, RUT, libreta
+  militar, documento secundario, piso, jefe inmediato/de área/director, cargo y usuario SSFF, fin
+  del periodo de prueba, bonos, fechas de afiliación y recursos (diadema, locker, carnet).
+
+Es validación del formulario: la API (`utils/validarEmpleado.js`) no cambió, porque la comparten la
+carga del Excel y Contratación Hydra, que traen datos incompletos.
