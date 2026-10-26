@@ -160,7 +160,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
         await jornadaRepo.actualizarTotales(jornada.idjornada, construirTotales(estadoCalculado, eventosActualizados), conn);
 
         const respuesta = await finalizar('registrado', { usersCompanyId, jornadaId: jornada.idjornada, accion: decision.accion });
-        notificacionService.notificarDirector(usersCompanyId, decision.eventos[decision.eventos.length - 1], { origen: 'asislock' });
+        notificacionService.notificarCambioJornada(usersCompanyId, decision.eventos[decision.eventos.length - 1], { origen: 'asislock' });
         return respuesta;
     } catch (error) {
         await conn.rollback();

@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 
 // Cargar variables de entorno
 dotenv.config();
@@ -93,6 +94,24 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+// Asistencia en vivo: cada pantalla se suscribe con su JWT y entra a la sala de su ficha
+// (`users_company_id`), así el aviso llega igual a cuentas de `users` y de `cuenta_empleado`
+// (cuyos ids pueden coincidir). Un token inválido simplemente no se suscribe.
+io.on('connection', (socket) => {
+    socket.on('asistencia:suscribir', (token) => {
+        try {
+            const ficha = jwt.verify(String(token), process.env.JWT_SECRET).user?.users_company_id;
+            if (ficha) socket.join(`asistencia:${ficha}`);
+        } catch {
+            // token vencido o inválido: sin suscripción; la pantalla sigue con su resincronización
+        }
+    });
+});
+
+global.emitirAsistencia = (usersCompanyId, event, data) => {
+    io.to(`asistencia:${usersCompanyId}`).emit(event, data);
+};
 
 // Función helper para enviar mensajes a un usuario específico
 global.sendMessageToUser = (userId, event, data) => {

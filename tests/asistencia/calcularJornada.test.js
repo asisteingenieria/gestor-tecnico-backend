@@ -191,3 +191,24 @@ test('capacitación abierta queda como pausa activa pero no descuenta', () => {
     assert.equal(r.pausaActiva.tipo, 'capacitacion');
     assert.equal(r.minutosTrabajados, 150); // bruto 150, no se resta
 });
+
+test('segundos exactos: el contador no pierde los segundos que el redondeo a minutos ocultaba', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_break', '10:00:00')];
+    const resultado = calcularJornada(eventos, HORARIO, horaDia('10:00:40'));
+    assert.equal(resultado.segundosTrabajados, 7200);
+    // 40 s de break: en minutos redondeados era 1 (o 0 con 20 s); en segundos, exacto
+    assert.equal(resultado.pausaActiva.segundosTranscurridos, 40);
+    assert.equal(resultado.pausaActiva.tipo, 'break');
+});
+
+test('cuentaTiempo: suma en curso y en capacitación, no en break ni desconectado', () => {
+    const base = [evento('entrada', '08:00:00')];
+    assert.equal(calcularJornada(base, HORARIO, horaDia('09:00:00')).cuentaTiempo, true);
+    assert.equal(calcularJornada([...base, evento('inicio_break', '08:30:00')], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
+    const capacitacion = calcularJornada([...base, evento('inicio_capacitacion', '08:30:00')], HORARIO, horaDia('09:00:00'));
+    assert.equal(capacitacion.estado, 'en_pausa');
+    assert.equal(capacitacion.cuentaTiempo, true);
+    assert.equal(calcularJornada([...base, evento('inicio_desconexion', '08:30:00')], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
+    assert.equal(calcularJornada([...base, evento('salida', '08:30:00')], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
+    assert.equal(calcularJornada([], HORARIO, horaDia('09:00:00')).cuentaTiempo, false);
+});

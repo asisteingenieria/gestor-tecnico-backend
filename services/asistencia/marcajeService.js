@@ -49,7 +49,7 @@ async function marcarEntrada({ usersCompanyId, contexto }) {
         await recalcularYGuardar(usersCompanyId, fecha, idjornada, ahora, conn);
 
         await conn.commit();
-        notificacionService.notificarDirector(usersCompanyId, 'entrada');
+        notificacionService.notificarCambioJornada(usersCompanyId, 'entrada');
         return consultaService.estadoDeHoy(usersCompanyId);
     } catch (error) {
         await conn.rollback();
@@ -81,7 +81,7 @@ async function iniciarPausa({ usersCompanyId, tipo, contexto }) {
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);
 
         await conn.commit();
-        notificacionService.notificarDirector(usersCompanyId, `inicio_${tipo}`);
+        notificacionService.notificarCambioJornada(usersCompanyId, `inicio_${tipo}`);
         return consultaService.estadoDeHoy(usersCompanyId);
     } catch (error) {
         await conn.rollback();
@@ -114,7 +114,7 @@ async function finalizarPausa({ usersCompanyId, contexto }) {
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);
 
         await conn.commit();
-        notificacionService.notificarDirector(usersCompanyId, `fin_${tipoPausaActiva}`);
+        notificacionService.notificarCambioJornada(usersCompanyId, `fin_${tipoPausaActiva}`);
         return consultaService.estadoDeHoy(usersCompanyId);
     } catch (error) {
         await conn.rollback();
@@ -146,7 +146,7 @@ async function marcarSalida({ usersCompanyId, contexto }) {
         await recalcularYGuardar(usersCompanyId, fecha, jornada.idjornada, ahora, conn);
 
         await conn.commit();
-        notificacionService.notificarDirector(usersCompanyId, 'salida');
+        notificacionService.notificarCambioJornada(usersCompanyId, 'salida');
         return consultaService.estadoDeHoy(usersCompanyId);
     } catch (error) {
         await conn.rollback();

@@ -11,6 +11,8 @@ const PARAMETROS_DEFECTO = {
 const ESTADO_SIN_ENTRADA = {
     estado: 'pendiente',
     minutosTrabajados: 0,
+    segundosTrabajados: 0,
+    cuentaTiempo: false,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,
     minutosBreak: 0,
@@ -97,7 +99,7 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     if (pendiente) {
         const duracion = Math.max(0, minutosEntre(pendiente.desde, fin));
         acumularPausa(pendiente.tipo, duracion);
-        if (!salida) pausaActiva = { tipo: pendiente.tipo, desde: pendiente.desde, minutosTranscurridos: Math.round(duracion) };
+        if (!salida) pausaActiva = { tipo: pendiente.tipo, desde: pendiente.desde, minutosTranscurridos: Math.round(duracion), segundosTranscurridos: Math.floor(duracion * 60) };
     }
 
     const minutosPausaBano = minutosPausa.bano;
@@ -111,7 +113,7 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     if (desconexionDesde !== null) {
         const duracion = Math.max(0, minutosEntre(desconexionDesde, fin));
         minutosDesconexion += duracion;
-        if (!salida) desconexionActiva = { desde: desconexionDesde, minutosTranscurridos: Math.round(duracion) };
+        if (!salida) desconexionActiva = { desde: desconexionDesde, minutosTranscurridos: Math.round(duracion), segundosTranscurridos: Math.floor(duracion * 60) };
     }
 
     const bruto = minutosEntre(entrada.ocurrido_en, fin);
@@ -173,10 +175,16 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     if (salida && salida.origen === 'sistema') alertas.push('sin_marcar_salida');
 
     const estado = salida ? 'finalizada' : (pausaActiva || desconexionActiva ? 'en_pausa' : 'en_curso');
+    // ¿El tiempo laborado sigue sumando en este instante? Sí en curso y en capacitación (que cuenta
+    // como laborada aunque el estado sea 'en_pausa'); no en baño/break/almuerzo ni desconectado.
+    const cuentaTiempo = !salida && !desconexionActiva && (!pausaActiva || !DESCUENTA[pausaActiva.tipo]);
 
     return {
         estado,
         minutosTrabajados: Math.round(minutosTrabajados),
+        // Exacto, para que el contador del monitor no salte hasta ±30 s al recargar.
+        segundosTrabajados: Math.floor(minutosTrabajados * 60),
+        cuentaTiempo,
         minutosPausaBano: Math.round(minutosPausaBano),
         minutosPausaAlmuerzo: Math.round(minutosPausaAlmuerzo),
         minutosBreak: Math.round(minutosBreak),

@@ -55,6 +55,8 @@ async function estadoDeHoy(usersCompanyId) {
         hora_entrada_real: entrada ? entrada.ocurrido_en.toISOString() : null,
         minutos_tarde: estado.minutosTarde,
         minutos_trabajados: estado.minutosTrabajados,
+        segundos_trabajados: estado.segundosTrabajados,
+        cuenta_tiempo: estado.cuentaTiempo,
         minutos_pausa_bano: estado.minutosPausaBano,
         minutos_pausa_almuerzo: estado.minutosPausaAlmuerzo,
         minutos_break: estado.minutosBreak,

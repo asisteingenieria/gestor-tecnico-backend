@@ -2344,3 +2344,70 @@ Las tarjetas comparan "vs <mes corto>" para que no se partan en dos líneas.
 Verificado: `npm test` 221/221; en local octubre 2026 = nómina $ 774,9 M + auxilio $ 96,5 M (388
 empleados) + prestaciones $ 186,2 M + aportes $ 128,0 M + bonos $ 92,7 M = $ 1.278,3 M. Capturas
 claro/oscuro sin errores. **No probado por el usuario.**
+
+## 41. Sesión 2026-10-26 — Monitor del empleado en vivo con AsisLock
+
+Prueba del usuario en producción con un empleado de prueba y AsisLock. Encontró cuatro problemas:
+1. Al loguearse, el contador corría pero el monitor no lo mostraba hasta recargar.
+2. Igual con los cambios de estado: baño, break, etc.
+3. Al recargar en break, el contador arrancaba desde cero.
+4. En break, la etiqueta decía "En baño".
+
+**Causas:**
+- **Sin aviso al monitor:** el monitor solo se resincronizaba cada 60 s y al volver a la pestaña, y
+  el backend no le avisaba. El aviso por socket existente (`notificarDirector`) iba solo a cuentas
+  de `users` y a ninguna pantalla del empleado.
+- **Contador de pausa mal calculado:** el contador de la pausa se armaba con
+  `pausa_activa.minutosTranscurridos × 60`, y esos minutos vienen redondeados. Una pausa de 20 s
+  daba 0 min, y por eso "desde cero". El contador principal tenía el mismo defecto (±30 s).
+- **Etiquetas incompletas:** `TarjetaPausa` y "Equipo hoy" solo conocían baño y almuerzo.
+  Cualquier otro tipo salía como "Baño", en la tarjeta, o como "Almuerzo", en Equipo hoy.
+
+**Backend (sin migración):**
+- `calcularJornada` devuelve `segundosTrabajados` exactos, `pausaActiva.segundosTranscurridos` /
+  `desconexionActiva.segundosTranscurridos` y `cuentaTiempo`. Este último indica si el tiempo
+  laborado suma en este instante: en curso y en **capacitación** sí, que cuenta como laborada
+  aunque el estado sea `en_pausa`; en baño, break, almuerzo y desconectado, no.
+  `/mi-jornada/hoy` los expone como `segundos_trabajados` y `cuenta_tiempo`. Hay 2 tests nuevos,
+  223 en total.
+- **Socket por ficha** (`index.js`): la pantalla emite `asistencia:suscribir` con su JWT. El
+  servidor lo verifica y la une a la sala `asistencia:<users_company_id>` (dentro de
+  `payload.user`). Así sirve igual para cuentas de `users` y de `cuenta_empleado`, cuyos ids pueden
+  coincidir. `global.emitirAsistencia(ficha, evento, datos)`.
+- **Aviso en cada cambio de jornada:** `notificacionService.notificarCambioJornada` reemplaza a
+  `notificarDirector` en `asislockService` y `marcajeService`. Emite `asistencia:mi-jornada` a la
+  ficha del empleado y `asistencia:equipo` a la de su jefe de área (`equipoRepo.jefeAreaDe`), y
+  luego el aviso viejo al director. Solo avisa: cada pantalla vuelve a pedir su estado a la API.
+
+**Frontend:**
+- `src/utils/socketAsistencia.js`: un socket compartido que se suscribe con el token al conectar
+  y al reconectar.
+- `useJornada`:
+  - recarga al recibir `asistencia:mi-jornada`;
+  - el contador principal parte de `segundos_trabajados` y suma mientras `cuenta_tiempo`;
+  - el de la pausa se calcula desde `pausa_activa.desde`, con el reloj del servidor;
+  - sin socket, la resincronización baja de 60 s a 15 s.
+- `src/utils/pausasAsistencia.js` reúne etiqueta, ícono y color de baño, break, almuerzo y
+  capacitación:
+  - `TarjetaPausa` dice "En break", "En capacitación", etc.;
+  - en capacitación aclara que cuenta como laborada.
+- `EquipoAsistencia`:
+  - se recarga con `asistencia:equipo`;
+  - la tarjeta "En pausa" suma break y capacitación;
+  - el badge muestra el estado real.
+- `ContadorJornada` muestra "Break hoy" y "Capacitación".
+- La tabla "Registros de AsisLock" de la trazabilidad tiene la columna "Estado en AsisLock" y
+  etiquetas para las acciones de pausa (`pausa_*`, `fin_pausa`, `entrada_extra`, `fin_extra`) y
+  sus motivos (`ya_en_pausa`, `desconectado`, `en_hora_extra`, `empleado_no_encontrado`).
+
+**Verificado en local:** backend con una `ASISLOCK_API_KEY` de prueba pasada por variable de
+entorno, sin tocar `.env`, y envíos simulados para el empleado del seed. En Chrome, sin recargar,
+el monitor pasó de "Sin iniciar" a "En turno", luego a "En break", "En baño" al instante,
+"En capacitación" y de vuelta a "En turno". Al recargar en baño a 0:41 siguió en 0:44. La
+trazabilidad lista cada estado. `npm test` 223/223 y `npm run test:e2e` 127/127. Los datos de la
+prueba se borraron.
+
+**Para producción:** solo código, backend + frontend con `npm run build`. El socket conecta a la
+URL de `VITE_API_BASE_URL` sin `/api`. Si nginx publica la API por un proxy que solo reenvía
+`/api`, también debe reenviar `/socket.io/` con `Upgrade`. Si no, el monitor igual se actualiza,
+pero cada 15 s en vez de al instante.
