@@ -62,7 +62,8 @@ const crearPlantillaSchema = {
         hora_salida: { requerido: true, tipo: 'texto' },
         minutos_almuerzo: { tipo: 'entero' },
         hora_almuerzo_inicio: { tipo: 'texto' },
-        tolerancia_entrada_min: { tipo: 'entero' }
+        tolerancia_entrada_min: { tipo: 'entero' },
+        centro_costo_id: { tipo: 'entero' }
     }
 };
 
@@ -74,7 +75,8 @@ const actualizarPlantillaSchema = {
         hora_salida: { tipo: 'texto' },
         minutos_almuerzo: { tipo: 'entero' },
         hora_almuerzo_inicio: { tipo: 'texto' },
-        tolerancia_entrada_min: { tipo: 'entero' }
+        tolerancia_entrada_min: { tipo: 'entero' },
+        centro_costo_id: { tipo: 'entero' }
     }
 };
 

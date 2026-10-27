@@ -2400,6 +2400,6 @@ Excel no coincidía letra por letra con la ficha, o porque la persona no tiene f
 - `sincronizar --aplicar`, con el mismo resultado que en local: ficha de German, 394 contratos y 7 retiros;
 - la segunda corrida quedó en 0.
 
-El HeadCount tiene datos personales reales: no se commitea, y hay que borrarlo del servidor después de usarlo (`rm /root/HeadCount.xlsx`).
+El HeadCount tiene datos personales reales: no se commitea; se borró del servidor después de usarlo (confirmado el 2026-10-27).
 Producción queda con 389 + 67 fichas de empleado (60 activas y 7 retiradas), más la ficha sin contrato de
 German.
