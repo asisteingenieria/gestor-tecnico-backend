@@ -2563,7 +2563,7 @@ aprueba horas extra (§16, §23), su equipo quedaba sin nadie que lo gestionara.
   Barbosa, que reemplazó a Miguel Angel Bautista);
 - en la ficha, en RRHH y en los reportes el jefe de área **sigue siendo German**.
 
-**Migración `082_contrato_gestor_asistencia.sql`** (aplicada en local, **pendiente en producción**, sin
+**Migración `082_contrato_gestor_asistencia.sql`** (**aplicada en producción el 2026-10-27**, sin
 dependencias): `contrato.gestor_asistencia_id` (FK a `users_company`, `ON DELETE SET NULL`). NULL = lo
 gestiona el jefe de área, que es el caso de todos los demás empleados.
 
@@ -2581,10 +2581,74 @@ Manuel y los 7 de los que es jefe inmediata); Manuel, los 3 de workforce; David 
 226/226; `npm run test:e2e` 127/127 (con el servidor levantado aparte y `E2E_BASE`: el arranque propio
 de la prueba pasó los 10 s de espera).
 
-**Para producción**, en este orden:
+**Despliegue a producción** (hecho el 2026-10-27, en este orden):
 1. Migración `082`.
 2. Deploy del backend (`equipoRepository.js`, `reporteHorasExtraRepository.js`, `scripts/headcountRRHH.js`)
    y `pm2 restart gestor-backend`.
 3. Cargar `PersonalPend_para_cargar.xlsx` por RRHH → "Cargar Excel" (generado con
    `node scripts/headcountRRHH.js excel`), revisando antes la previsualización.
 4. `node scripts/headcountRRHH.js sincronizar <HeadCount.xlsx>`, revisar y repetir con `--aplicar`.
+
+**Desplegado el 2026-10-27** (backend `e74c966`, mergeado a `main` como `87f79b5`; sin cambios de
+frontend). Se corrieron la `082`, el pull con `pm2 restart` y la carga del Excel. `sincronizar` dio en
+producción exactamente lo mismo que en local: ficha de German creada, 394 contratos completados (42 jefes
+inmediatos, 53 jefes de área, 52 directores, 389 analistas, 53 gestores) y 7 retiros. La segunda corrida
+no encontró nada pendiente. El HeadCount se copió por `scp` a `/root/` solo para correr el script y se
+borró después (confirmado el 2026-10-27).
+
+**Pendiente:**
+- Revisar en pantalla: Geraldin (Asistencia → Equipo) debe ver 16 personas y Manuel, 3.
+- Si se vuelve a contratar a alguien con German como jefe de área, hay que llenar su
+  `gestor_asistencia_id` a mano o volver a correr el script.
+
+## 45. Sesión 2026-10-27 — Horarios por centro de costo
+
+**Problema:** cada jefe de área crea los horarios de su equipo (salvo el de German, §44), pero su
+equipo mezcla centros de costo con horarios distintos. Kevin Buitrago (Claro T&T) tiene 133 personas:
+CBAT OUTBOUND 70, CBAT WHATSAPP 33, CBAT INBOUND 30. Mayra Barbosa tiene unos 14 centros en Hogar,
+Móvil y Pymes. La pantalla de horarios mostraba al equipo como una sola lista por nombre.
+
+**Qué se hizo:**
+- **Migración 083**: `horario_plantilla.centro_costo_id`, que es NULL para una plantilla general y
+  tiene FK a `centro_costo` con `ON DELETE SET NULL`. Una plantilla puede marcar el centro de costo al
+  que aplica. Es una **sugerencia, no una restricción**: el servidor deja asignar cualquier plantilla
+  del jefe a cualquier persona de su equipo, para los casos individuales.
+- **Backend:**
+  - `equipoRepository.listaEmpleadosACargo` devuelve `campania`, `centro_costo_id` y `centro_costo`,
+    y `GET /equipo` los expone.
+  - `horarioPlantillaRepository.findPorDueno` trae el nombre del centro y ordena por centro, con las
+    generales al final.
+  - Crear y editar una plantilla aceptan `centro_costo_id`: `null` la vuelve general y si se omite
+    no se toca. `horarioService.centroCostoValido` revisa que el centro exista
+    (`ReglaAsistenciaError` si no).
+  - `asignarMasivo` no cambió: sigue validando con `subordinadosDe`.
+- **Frontend (`GestionHorarios.jsx`):**
+  - **Grilla semanal:** filtro por centro de costo, con conteo. Los empleados salen agrupados por
+    centro, con una fila de encabezado (centro · campaña · personas).
+  - **Panel de plantillas:** cada plantilla muestra su centro o "General". Con un centro filtrado
+    se ven las de ese centro más las generales, y una plantilla nueva nace para ese centro.
+  - **Modal de plantilla:** selector "Centro de costo" con los centros del equipo y "General".
+  - **Modal "Asignar horario":**
+    - Selector de centro de costo; abre con el centro filtrado en la grilla. Cambiarlo limpia la
+      selección.
+    - Las plantillas salen agrupadas: primero las de ese centro, luego las generales y al final las de
+      otros centros.
+    - "Seleccionar todo <centro> (n)", y con varios centros a la vista, un "seleccionar todo" por
+      centro.
+    - También se puede marcar a cada persona por separado.
+  - **Celda individual:** para darle a un agente un horario distinto al de su centro, se pulsa su
+    celda. Las plantillas de su centro salen primero. La asignación es un upsert por
+    `(users_company_id, fecha)`, así que pisa la masiva de ese día.
+
+**Verificado en local:**
+- Con el equipo de Kevin se probó crear una plantilla para CBAT OUTBOUND, renombrarla sin perder el
+  centro, volverla general y rechazar un centro inexistente.
+- `npm test` 226/226, `npm run test:e2e` 127/127, `npm run build` y eslint del frontend limpios.
+
+**Despliegue:**
+1. Migración `083`. No tiene dependencias, no compara texto y corre una sola vez.
+2. Backend: pull y `pm2 restart gestor-backend`.
+3. Frontend: pull, `npm install && npm run build`.
+
+El código sin la 083 falla al listar plantillas (`p.centro_costo_id` no existe), así que **la migración va
+antes del backend**.

@@ -84,13 +84,18 @@ async function subordinadosDe(directorUsersCompanyId, empleadoIds, conn = db) {
     return filas.map((f) => f.users_company_id);
 }
 
+// Con campaña y centro de costo: un mismo jefe tiene centros con horarios distintos y asigna por
+// centro (§45).
 async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     const [filas] = await conn.query(
-        `SELECT DISTINCT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo
+        `SELECT DISTINCT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo,
+                cam.nombre AS campania, c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo
          FROM users_company uc
          JOIN contrato c ON c.users_company_id = uc.id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
          LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+         LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
          WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?)
          ORDER BY uc.nombre_propio`,
         [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]

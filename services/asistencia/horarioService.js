@@ -19,6 +19,17 @@ async function plantillaPropia(id, directorUsersCompanyId) {
     return plantilla;
 }
 
+// Centro de costo al que aplica la plantilla (083, §45): null = general. Undefined = no se toca
+// (al actualizar). Solo se valida que exista: la plantilla es una sugerencia, no restringe a quién
+// se le asigna.
+async function centroCostoValido(centroCostoId) {
+    if (centroCostoId === undefined) return undefined;
+    if (centroCostoId === null || centroCostoId === '') return null;
+    const id = Number(centroCostoId);
+    if (!(await horarioPlantillaRepo.existeCentroCosto(id))) throw new ReglaAsistenciaError('El centro de costo no existe');
+    return id;
+}
+
 async function listarPlantillas({ directorUsersCompanyId }) {
     requireUsersCompanyId(directorUsersCompanyId);
     return horarioPlantillaRepo.findPorDueno(directorUsersCompanyId);
@@ -26,14 +37,15 @@ async function listarPlantillas({ directorUsersCompanyId }) {
 
 async function crearPlantilla({ directorUsersCompanyId, ...datos }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const id = await horarioPlantillaRepo.crear({ ...datos, duenoUsersCompanyId: directorUsersCompanyId });
+    const centroCostoId = await centroCostoValido(datos.centroCostoId);
+    const id = await horarioPlantillaRepo.crear({ ...datos, centroCostoId, duenoUsersCompanyId: directorUsersCompanyId });
     return { success: true, idhorario_plantilla: id };
 }
 
 async function actualizarPlantilla({ directorUsersCompanyId, id, campos }) {
     requireUsersCompanyId(directorUsersCompanyId);
     await plantillaPropia(id, directorUsersCompanyId);
-    await horarioPlantillaRepo.actualizar(id, campos);
+    await horarioPlantillaRepo.actualizar(id, { ...campos, centroCostoId: await centroCostoValido(campos.centroCostoId) });
     return { success: true };
 }
 

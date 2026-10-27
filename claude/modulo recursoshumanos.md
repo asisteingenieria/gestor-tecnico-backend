@@ -2395,5 +2395,11 @@ Excel no coincidía letra por letra con la ficha, o porque la persona no tiene f
 - sincronizar: 394 contratos completados (42 jefes inmediatos, 53 jefes de área, 52 directores,
   389 analistas, 53 gestores) y 7 retiros. La segunda corrida no cambia nada.
 
-**Para producción:** ver el orden en `asistencia.md` §44. El HeadCount tiene datos personales reales: no
-se commitea.
+**Aplicado en producción el 2026-10-27**, en el orden de `asistencia.md` §44:
+- carga de `PersonalPend_para_cargar.xlsx` por "Cargar Excel";
+- `sincronizar --aplicar`, con el mismo resultado que en local: ficha de German, 394 contratos y 7 retiros;
+- la segunda corrida quedó en 0.
+
+El HeadCount tiene datos personales reales: no se commitea; se borró del servidor después de usarlo (confirmado el 2026-10-27).
+Producción queda con 389 + 67 fichas de empleado (60 activas y 7 retiradas), más la ficha sin contrato de
+German.

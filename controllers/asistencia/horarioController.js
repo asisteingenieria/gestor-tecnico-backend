@@ -8,7 +8,8 @@ function datosPlantillaDe(req) {
         horaSalida: req.body.hora_salida,
         minutosAlmuerzo: req.body.minutos_almuerzo,
         horaAlmuerzoInicio: req.body.hora_almuerzo_inicio,
-        toleranciaEntradaMin: req.body.tolerancia_entrada_min
+        toleranciaEntradaMin: req.body.tolerancia_entrada_min,
+        centroCostoId: req.body.centro_costo_id
     };
 }
 
