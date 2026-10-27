@@ -30,4 +30,14 @@ async function findByJornada(jornadaId, conn = db) {
     return filas;
 }
 
-module.exports = { insertar, findByJornada };
+// Los eventos de varias jornadas en una consulta (tableros en vivo, §47).
+async function findByJornadas(jornadaIds, conn = db) {
+    if (jornadaIds.length === 0) return [];
+    const [filas] = await conn.query(
+        'SELECT * FROM jornada_evento WHERE jornada_id IN (?) ORDER BY jornada_id, ocurrido_en ASC',
+        [jornadaIds]
+    );
+    return filas;
+}
+
+module.exports = { insertar, findByJornada, findByJornadas };

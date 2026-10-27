@@ -27,6 +27,10 @@ async function empleados(req, res) {
     res.json(await financieraService.empleados({ campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null }));
 }
 
+async function enVivo(req, res) {
+    res.json(await financieraService.enVivo({ campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null }));
+}
+
 async function jornadasDe(req, res) {
     res.json(await financieraService.jornadasDe({
         empleadoId: Number(req.params.empleadoId),
@@ -43,4 +47,4 @@ async function home(req, res) {
     res.json(await homeService.resumen({ periodo: req.query.periodo }));
 }
 
-module.exports = { reporte, resumenMensual, home, campanias, empleados, jornadasDe, trazabilidadDe };
+module.exports = { reporte, resumenMensual, home, campanias, empleados, enVivo, jornadasDe, trazabilidadDe };

@@ -90,6 +90,8 @@ router.get('/financiera/resumen-mensual', isFinanciera, validar(reporteFinancier
 // Home de financiera/admin (§37): RRHH, asistencia, horas extra y costos del mes en una respuesta.
 router.get('/financiera/home', isFinanciera, validar(reporteFinancieraQuerySchema), asyncHandler(financieraController.home));
 router.get('/financiera/campanias', isFinanciera, asyncHandler(financieraController.campanias));
+// Asistencia en vivo de todos o de una campaña (§47); el histórico es el resumen mensual y la trazabilidad.
+router.get('/financiera/en-vivo', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.enVivo));
 router.get('/financiera/empleados', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.empleados));
 router.get('/financiera/empleados/:empleadoId/jornadas', isFinanciera, validar(jornadasEmpleadoSchema), asyncHandler(financieraController.jornadasDe));
 router.get('/financiera/empleados/:empleadoId/jornada/:fecha/trazabilidad', isFinanciera, validar(trazabilidadEquipoParamsSchema), asyncHandler(financieraController.trazabilidadDe));

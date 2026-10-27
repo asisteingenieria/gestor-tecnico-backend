@@ -17,6 +17,13 @@ async function empleados({ campaniaId }) {
     return empleadoRepo.findActivosPorCampania(campaniaId ?? null);
 }
 
+// Asistencia en vivo de toda la empresa, o de una campaña (§47): el mismo tablero que "Equipo hoy"
+// del jefe, con campaña, centro de costo, jefe de área y turno de hoy de cada persona.
+async function enVivo({ campaniaId }) {
+    const empleadosActivos = await empleadoRepo.findActivosPorCampania(campaniaId ?? null);
+    return equipoService.estadoEnVivo(empleadosActivos);
+}
+
 async function empleadoActivo(empleadoId) {
     const empleado = await empleadoRepo.findActivo(empleadoId);
     if (!empleado) throw new NoEncontradoError('El empleado no existe o no tiene un contrato activo');
@@ -87,15 +94,25 @@ async function resumenMensual({ periodo, campaniaId = null }) {
     // Detalle de una campaña: TODOS sus empleados activos (los que no marcaron van con ceros) + grilla.
     let campania = null;
     if (campaniaId != null) {
-        const [roster, dias] = await Promise.all([
-            empleadoRepo.findActivosPorCampania(campaniaId),
-            resumenMensualRepo.jornadasDiaPorCampania({ campaniaId, desde, hasta })
+        const roster = await empleadoRepo.findActivosPorCampania(campaniaId);
+        const [dias, horarios] = await Promise.all([
+            resumenMensualRepo.jornadasDiaPorCampania({ campaniaId, desde, hasta }),
+            horarioAsignadoRepo.findRangoPorEmpleados(roster.map((r) => r.users_company_id), desde, hasta)
         ]);
         const aggPorEmp = new Map((aggMapa.get(Number(campaniaId)) || aggMapa.get(String(campaniaId)) || []).map((e) => [e.users_company_id, e]));
         const diasPorEmp = new Map();
         for (const d of dias) {
             if (!diasPorEmp.has(d.users_company_id)) diasPorEmp.set(d.users_company_id, []);
             diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
+        }
+        // Turnos del mes por empleado (§46): el día a día para el calendario y el último turno
+        // (sin contar descansos) como su horario del mes.
+        const turnosPorEmp = new Map();
+        for (const h of horarios) {
+            if (!turnosPorEmp.has(h.users_company_id)) turnosPorEmp.set(h.users_company_id, []);
+            turnosPorEmp.get(h.users_company_id).push({
+                fecha: h.fecha, plantilla: h.plantilla, hora_entrada: h.hora_entrada, hora_salida: h.hora_salida, es_descanso: !!h.es_descanso
+            });
         }
         const empleadosCampania = roster.map((r) => {
             const agg = aggPorEmp.get(r.users_company_id) || resumenCero();
@@ -105,6 +122,9 @@ async function resumenMensual({ periodo, campaniaId = null }) {
                 nombre: r.nombre,
                 documento: r.cedula,
                 cargo: r.cargo,
+                centro_costo: r.centro_costo,
+                turno: ultimoTurno(turnosPorEmp.get(r.users_company_id) || []),
+                turnos: turnosPorEmp.get(r.users_company_id) || [],
                 dias: diasPorEmp.get(r.users_company_id) || []
             };
         });
@@ -119,6 +139,13 @@ async function resumenMensual({ periodo, campaniaId = null }) {
     }
 
     return { periodo, periodo_anterior: periodoAnterior, desde, hasta, por_campania, totales, campania };
+}
+
+// Último turno trabajable de la lista (vienen ordenados por fecha), o null si solo hay descansos.
+function ultimoTurno(turnos) {
+    const trabajables = turnos.filter((t) => !t.es_descanso);
+    const ultimo = trabajables[trabajables.length - 1];
+    return ultimo ? { plantilla: ultimo.plantilla, hora_entrada: ultimo.hora_entrada, hora_salida: ultimo.hora_salida } : null;
 }
 
 // Totales en cero para un empleado activo que no marcó ninguna jornada en el mes.
@@ -137,4 +164,4 @@ function mesAnterior(periodo) {
     return m === 1 ? `${a - 1}-12` : `${a}-${String(m - 1).padStart(2, '0')}`;
 }
 
-module.exports = { campanias, empleados, jornadasDe, trazabilidadDe, resumenMensual };
+module.exports = { campanias, empleados, enVivo, jornadasDe, trazabilidadDe, resumenMensual };

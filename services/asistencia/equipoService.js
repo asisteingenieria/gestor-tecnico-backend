@@ -5,7 +5,7 @@ const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepositor
 const { fechaLaboral, rangoDelMes } = require('../../utils/fechaBogota');
 const { NoAutorizadoError, NoEncontradoError, ValidacionError } = require('../../errors/AppError');
 const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/resumenMensual');
-const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
+const { calcularEstadoConDatos, calcularEstadosDelDia, construirTotales } = require('./jornadaCalculo');
 const cierreService = require('./cierreService');
 const asislockVista = require('./asislockVista');
 
@@ -28,21 +28,38 @@ async function esJefeDeEquipo(usersCompanyId) {
 async function equipo(directorUsersCompanyId) {
     requireUsersCompanyId(directorUsersCompanyId);
     const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    return estadoEnVivo(empleados.map((e) => ({ ...e, nombre: e.nombre_propio, cedula: e.numero_identificacion })));
+}
+
+// Estado de hoy de una lista de personas, con su turno del día (§46-§47). Lo usan "Equipo hoy" del
+// jefe y "Asistencia en vivo" de financiera. Sin chequeo de permisos: quien llama ya armó la lista
+// con lo que puede ver. Todo en lote: financiera puede pedir cientos de personas a la vez.
+async function estadoEnVivo(empleados) {
     const ahora = new Date();
     const fecha = fechaLaboral(ahora);
-    const asislockPorEmpleado = await asislockVista.resumenesDelDia(empleados.map((e) => e.users_company_id), fecha);
+    const ids = empleados.map((e) => e.users_company_id);
+    const [asislockPorEmpleado, estados] = await Promise.all([
+        asislockVista.resumenesDelDia(ids, fecha),
+        calcularEstadosDelDia(ids, fecha, ahora)
+    ]);
 
-    return Promise.all(empleados.map(async (empleado) => {
-        const jornada = await jornadaRepo.findPorFecha(empleado.users_company_id, fecha);
-        const { estadoCalculado } = await calcularEstadoConDatos(empleado.users_company_id, fecha, jornada?.idjornada ?? null, ahora);
+    return empleados.map((empleado) => {
+        const { estadoCalculado, horario } = estados.get(empleado.users_company_id);
         return {
             users_company_id: empleado.users_company_id,
-            nombre: empleado.nombre_propio,
-            cedula: empleado.numero_identificacion,
+            nombre: empleado.nombre,
+            cedula: empleado.cedula,
             cargo: empleado.cargo,
             campania: empleado.campania,
             centro_costo_id: empleado.centro_costo_id,
             centro_costo: empleado.centro_costo,
+            jefe_area: empleado.jefe_area ?? null,
+            turno: horario ? {
+                plantilla: horario.plantilla,
+                hora_entrada: horario.hora_entrada,
+                hora_salida: horario.hora_salida,
+                es_descanso: !!horario.es_descanso
+            } : null,
             estado: estadoCalculado.estado,
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             pausa_activa: estadoCalculado.pausaActiva,
@@ -50,7 +67,7 @@ async function equipo(directorUsersCompanyId) {
             alertas: estadoCalculado.alertas,
             asislock: asislockPorEmpleado[empleado.users_company_id] ?? null
         };
-    }));
+    });
 }
 
 async function jornadasDe({ directorUsersCompanyId, empleadoId, desde, hasta }) {
@@ -178,6 +195,7 @@ async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, 
 }
 
 module.exports = {
+    estadoEnVivo,
     assertEmpleadoACargo,
     esJefeDeEquipo,
     equipo,

@@ -23,6 +23,16 @@ async function findPorFecha(usersCompanyId, fecha, conn = db) {
     return filas[0] ?? null;
 }
 
+// Las jornadas de un día de varias personas en una consulta (tableros en vivo, §47).
+async function findPorFechaVarios(usersCompanyIds, fecha, conn = db) {
+    if (usersCompanyIds.length === 0) return [];
+    const [filas] = await conn.query(
+        'SELECT * FROM jornada WHERE users_company_id IN (?) AND fecha = ?',
+        [usersCompanyIds, fecha]
+    );
+    return filas;
+}
+
 async function findRango(usersCompanyId, desde, hasta, conn = db) {
     const [filas] = await conn.query(
         'SELECT * FROM jornada WHERE users_company_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha',
@@ -83,6 +93,7 @@ module.exports = {
     findHoyParaActualizar,
     findByIdParaActualizar,
     findPorFecha,
+    findPorFechaVarios,
     findRango,
     crear,
     actualizarTotales,

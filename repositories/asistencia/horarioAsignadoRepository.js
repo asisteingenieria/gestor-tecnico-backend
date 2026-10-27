@@ -1,8 +1,14 @@
 const db = require('../../config/db');
 
+// Cada horario trae el nombre de su plantilla (`plantilla`), para que el agente, el jefe y
+// financiera vean qué turno tiene y no solo las horas (§46). NULL si se asignó sin plantilla.
+const CON_PLANTILLA = `SELECT ha.*, hp.nombre AS plantilla
+                       FROM horario_asignado ha
+                       LEFT JOIN horario_plantilla hp ON hp.idhorario_plantilla = ha.horario_plantilla_id`;
+
 async function findByEmpleadoYFecha(usersCompanyId, fecha, conn = db) {
     const [filas] = await conn.query(
-        'SELECT * FROM horario_asignado WHERE users_company_id = ? AND fecha = ?',
+        `${CON_PLANTILLA} WHERE ha.users_company_id = ? AND ha.fecha = ?`,
         [usersCompanyId, fecha]
     );
     return filas[0] ?? null;
@@ -10,8 +16,18 @@ async function findByEmpleadoYFecha(usersCompanyId, fecha, conn = db) {
 
 async function findRango(usersCompanyId, desde, hasta, conn = db) {
     const [filas] = await conn.query(
-        'SELECT * FROM horario_asignado WHERE users_company_id = ? AND fecha BETWEEN ? AND ? ORDER BY fecha',
+        `${CON_PLANTILLA} WHERE ha.users_company_id = ? AND ha.fecha BETWEEN ? AND ? ORDER BY ha.fecha`,
         [usersCompanyId, desde, hasta]
+    );
+    return filas;
+}
+
+// Los horarios de varias personas en un rango, en una sola consulta (detalle mensual de financiera).
+async function findRangoPorEmpleados(empleadoIds, desde, hasta, conn = db) {
+    if (empleadoIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `${CON_PLANTILLA} WHERE ha.users_company_id IN (?) AND ha.fecha BETWEEN ? AND ? ORDER BY ha.users_company_id, ha.fecha`,
+        [empleadoIds, desde, hasta]
     );
     return filas;
 }
@@ -104,4 +120,4 @@ async function eliminar(id, conn = db) {
     return resultado.affectedRows > 0;
 }
 
-module.exports = { findByEmpleadoYFecha, findRango, findById, insertar, insertarVarios, actualizar, eliminar };
+module.exports = { findByEmpleadoYFecha, findRango, findRangoPorEmpleados, findById, insertar, insertarVarios, actualizar, eliminar };
