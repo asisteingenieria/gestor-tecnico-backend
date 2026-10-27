@@ -163,7 +163,7 @@ CORS dinámico: en dev permite `localhost:5173`/`5174`; en producción usa `FRON
 4. Trabajo remoto Barranquilla: técnicos de Bogotá y Villavicencio también atienden incidentes de esa sede.
 5. `User.deleteWithDependencies()` y el `delete` de `users-company` usan transacciones para no romper FKs.
 6. No hay migration runner: las migraciones SQL se aplican manualmente en orden numérico.
-7. Socket.IO: autenticación por JWT en la conexión, mapa global `authenticatedUsers` (userId → socketId) en `index.js`, helper global `sendMessageToUser(userId, event, data)`.
+7. Socket.IO: autenticación por JWT en la conexión, mapa global `authenticatedUsers` (userId → socketId) en `index.js`, helper global `sendMessageToUser(userId, event, data)`. Asistencia usa además salas por ficha (`asistencia:<users_company_id>`) y una sala de monitores solo para `financiera`, con los helpers `emitirAsistencia` / `emitirMonitoresAsistencia` (ver `asistencia.md` §41-§43 y la sección "Asistencia en vivo" de `CLAUDE.md`).
 
 ---
 

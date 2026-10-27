@@ -31,7 +31,8 @@ async function reporteDelMes({ jefeId = null, campaniaId = null, desde, hasta },
     const condiciones = ["he.estado = 'aprobada'", 'he.fecha BETWEEN ? AND ?'];
     const parametros = [...ESTADOS_CONTRATO_ACTIVOS, desde, hasta];
     if (jefeId != null) {
-        condiciones.push('c.jefe_area_id = ?');
+        // El equipo que gestiona (082, §44): el mismo de "Equipo hoy" y de los horarios.
+        condiciones.push('COALESCE(c.gestor_asistencia_id, c.jefe_area_id) = ?');
         parametros.push(jefeId);
     }
     if (campaniaId != null) {

@@ -2351,3 +2351,49 @@ En `AgentForm.jsx`, **solo al crear** (al editar no, para no bloquear fichas imp
 
 Es validación del formulario: la API (`utils/validarEmpleado.js`) no cambió, porque la comparten la
 carga del Excel y Contratación Hydra, que traen datos incompletos.
+
+## 41. Sesión 2026-10-27 — HeadCount: ingresos desde el 18-sep y jefaturas que no estaban vinculadas
+
+**Fuente:** `Descargas/HeadCount.xlsx`, enviado por RRHH. "TOTAL PERSONAL" son los 389 ya cargados, todos
+activos, con ingreso hasta el 2026-09-15. "Personal pend" son los 67 ingresos desde el 2026-09-18, 7 de
+ellos ya son bajas. Contratación borró 26 columnas de "Personal pend", entre ellas *Tipo de contrato* y
+*Ciudad donde labora*, que el import exige, y el resto quedó corrido. El import por posición no la puede
+leer, y además siempre toma la hoja "TOTAL PERSONAL", así que subir el archivo tal cual habría
+re-actualizado los 389 sin crear ninguno.
+
+**Comparación de los 389 contra la BD:** campaña, centro de costo, salario, fecha de ingreso, teléfono y
+correo, iguales. Lo que no cuadraba eran los vínculos de jefatura y analista, vacíos porque el nombre del
+Excel no coincidía letra por letra con la ficha, o porque la persona no tiene ficha.
+
+**Decisiones de RRHH:**
+- Tipo de contrato Indefinido y ciudad Bogotá para los 67. Las bajas se cargan y se les registra el retiro.
+- Alias confirmados: "GISETHE RODRIGUEZ" = Angie Gisethe Rodriguez Franco; "SHARON PARDO" = Sharon Disley
+  Pardo Sanchez; "STEFANY VELASQUEZ" = Stefany Julieth Velasquez Rodriguez; "AZAEL ... BETANCURT" =
+  Betancourt; "LAIDY NATHALY" = Nathali; "DIANA MILENA SASTRE" = Diana Marcela.
+- **German Stiven Arias Rojas** (dueño, "jefe de los jefes"): ficha mínima sin contrato, CC `0123456789`.
+  Aparece en la tabla de Empleados sin estado de contrato. No recibe cuenta ni usuario de AsisLock, porque
+  ambos piden contrato vigente. Quién gestiona la asistencia de su equipo está en `asistencia.md` §44.
+- Miguel Angel Bautista Leguizamon y Nicolas David Flor Bernal ya no están. Los 3 de workforce de Miguel
+  pasan a **Manuel Andres Quintero Barbosa**, nuevo jefe de workforce que viene en "Personal pend".
+- Los analistas sin ficha (Sebastian Sanchez, Maria Reyes, Cristian Ortiz, Karen Avila, Juan David Aguirre,
+  Brian Lopez, Nathalia Timote; 120 empleados) ya no están: se asigna el **director de área** del empleado.
+
+**`scripts/headcountRRHH.js`** (lee por posición y valida los encabezados antes de leer):
+- `excel <HeadCount> <salida>` arma "Personal pend" con el formato de "TOTAL PERSONAL", con los alias
+  aplicados, y deja sin diadema ni locker a las bajas.
+- `sincronizar <HeadCount> [--aplicar]` hace tres cosas:
+  - crea la ficha de German;
+  - llena los campos vacíos de jefe inmediato, jefe de área, director, analista y gestor de asistencia
+    (082) de las dos hojas, y reporta sin tocar los que ya tienen otra persona;
+  - registra el retiro de las 7 bajas con `Retiro.registrar`, con su fecha, tipo, motivo y justificación.
+
+  Es idempotente.
+
+**Aplicado en local:**
+- import de los 67 sin errores; se crearon los cargos PROFESIONAL SST y JEFE DE WORKFORCE, los centros de
+  costo CBAH VENTA CRUZADA y CBAP WHATSAPP, y las oleadas OLD 38-40;
+- sincronizar: 394 contratos completados (42 jefes inmediatos, 53 jefes de área, 52 directores,
+  389 analistas, 53 gestores) y 7 retiros. La segunda corrida no cambia nada.
+
+**Para producción:** ver el orden en `asistencia.md` §44. El HeadCount tiene datos personales reales: no
+se commitea.

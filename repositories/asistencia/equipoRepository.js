@@ -6,6 +6,11 @@ const ESTADOS_CONTRATO_ACTIVOS = ['activo', 'periodo_prueba'];
 // contrato.jefe_area_id, no por jefe_inmediato_id (decisión original de asistencia.md §2).
 // El jefe de área es quien crea horarios y aprueba horas extra de todo su equipo, no solo
 // de sus reportes directos — ver asistencia.md §16 para el detalle de la corrección.
+//
+// Desde la 082 (§44) quien gestiona puede ser otro: `contrato.gestor_asistencia_id`, cuando el jefe
+// de área no usa el sistema (German Arias, dueño de la empresa). NULL = el jefe de área. El jefe de
+// área que se muestra en la ficha y en los reportes no cambia; solo cambia quién gestiona.
+const GESTOR = 'COALESCE(c.gestor_asistencia_id, c.jefe_area_id)';
 
 // Login (users.id) del jefe de área del contrato activo de un empleado, o null si no
 // tiene jefe asignado o el jefe no tiene cuenta de login vinculada.
@@ -14,7 +19,7 @@ async function directorUserIdDe(usersCompanyId, conn = db) {
         `SELECT u.id
          FROM contrato c
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         JOIN users u ON u.users_company_id = c.jefe_area_id
+         JOIN users u ON u.users_company_id = ${GESTOR}
          WHERE c.users_company_id = ? AND ec.nombre IN (?, ?)
          ORDER BY c.fecha_ingreso DESC
          LIMIT 1`,
@@ -23,10 +28,11 @@ async function directorUserIdDe(usersCompanyId, conn = db) {
     return filas[0]?.id ?? null;
 }
 
-// Ficha del jefe de área del contrato activo del empleado (para avisarle en vivo a su "Equipo hoy").
+// Ficha de quien gestiona la asistencia del empleado —su jefe de área, salvo gestor_asistencia_id—,
+// para avisarle en vivo a su "Equipo hoy".
 async function jefeAreaDe(usersCompanyId, conn = db) {
     const [filas] = await conn.query(
-        `SELECT c.jefe_area_id
+        `SELECT ${GESTOR} AS gestor_id
          FROM contrato c
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
          WHERE c.users_company_id = ? AND ec.nombre IN (?, ?)
@@ -34,7 +40,7 @@ async function jefeAreaDe(usersCompanyId, conn = db) {
          LIMIT 1`,
         [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
-    return filas[0]?.jefe_area_id ?? null;
+    return filas[0]?.gestor_id ?? null;
 }
 
 // ¿El empleado tiene, en su contrato activo, a este director como jefe de área?
@@ -43,7 +49,7 @@ async function esSubordinado(directorUsersCompanyId, empleadoId, conn = db) {
         `SELECT 1
          FROM contrato c
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE c.users_company_id = ? AND c.jefe_area_id = ? AND ec.nombre IN (?, ?)
+         WHERE c.users_company_id = ? AND ${GESTOR} = ? AND ec.nombre IN (?, ?)
          LIMIT 1`,
         [empleadoId, directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
@@ -57,7 +63,7 @@ async function tieneEmpleadosACargo(usersCompanyId, conn = db) {
         `SELECT 1
          FROM contrato c
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?)
+         WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?)
          LIMIT 1`,
         [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
@@ -72,7 +78,7 @@ async function subordinadosDe(directorUsersCompanyId, empleadoIds, conn = db) {
         `SELECT DISTINCT c.users_company_id
          FROM contrato c
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?) AND c.users_company_id IN (?)`,
+         WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?) AND c.users_company_id IN (?)`,
         [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS, empleadoIds]
     );
     return filas.map((f) => f.users_company_id);
@@ -85,7 +91,7 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
          JOIN contrato c ON c.users_company_id = uc.id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
          LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
-         WHERE c.jefe_area_id = ? AND ec.nombre IN (?, ?)
+         WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?)
          ORDER BY uc.nombre_propio`,
         [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
