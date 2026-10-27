@@ -2563,7 +2563,7 @@ aprueba horas extra (§16, §23), su equipo quedaba sin nadie que lo gestionara.
   Barbosa, que reemplazó a Miguel Angel Bautista);
 - en la ficha, en RRHH y en los reportes el jefe de área **sigue siendo German**.
 
-**Migración `082_contrato_gestor_asistencia.sql`** (aplicada en local, **pendiente en producción**, sin
+**Migración `082_contrato_gestor_asistencia.sql`** (**aplicada en producción el 2026-10-27**, sin
 dependencias): `contrato.gestor_asistencia_id` (FK a `users_company`, `ON DELETE SET NULL`). NULL = lo
 gestiona el jefe de área, que es el caso de todos los demás empleados.
 
@@ -2581,10 +2581,22 @@ Manuel y los 7 de los que es jefe inmediata); Manuel, los 3 de workforce; David 
 226/226; `npm run test:e2e` 127/127 (con el servidor levantado aparte y `E2E_BASE`: el arranque propio
 de la prueba pasó los 10 s de espera).
 
-**Para producción**, en este orden:
+**Despliegue a producción** (hecho el 2026-10-27, en este orden):
 1. Migración `082`.
 2. Deploy del backend (`equipoRepository.js`, `reporteHorasExtraRepository.js`, `scripts/headcountRRHH.js`)
    y `pm2 restart gestor-backend`.
 3. Cargar `PersonalPend_para_cargar.xlsx` por RRHH → "Cargar Excel" (generado con
    `node scripts/headcountRRHH.js excel`), revisando antes la previsualización.
 4. `node scripts/headcountRRHH.js sincronizar <HeadCount.xlsx>`, revisar y repetir con `--aplicar`.
+
+**Desplegado el 2026-10-27** (backend `e74c966`, mergeado a `main` como `87f79b5`; sin cambios de
+frontend). Se corrieron la `082`, el pull con `pm2 restart` y la carga del Excel. `sincronizar` dio en
+producción exactamente lo mismo que en local: ficha de German creada, 394 contratos completados (42 jefes
+inmediatos, 53 jefes de área, 52 directores, 389 analistas, 53 gestores) y 7 retiros. La segunda corrida
+no encontró nada pendiente. El HeadCount se copió por `scp` a `/root/` solo para correr el script; debe
+borrarse de ahí (`rm /root/HeadCount.xlsx`).
+
+**Pendiente:**
+- Revisar en pantalla: Geraldin (Asistencia → Equipo) debe ver 16 personas y Manuel, 3.
+- Si se vuelve a contratar a alguien con German como jefe de área, hay que llenar su
+  `gestor_asistencia_id` a mano o volver a correr el script.
