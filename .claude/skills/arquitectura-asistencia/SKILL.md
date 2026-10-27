@@ -73,6 +73,9 @@ nadie — ni `db`, ni `config`, ni otro servicio.
     `contrato.jefe_area_id` (corregido 2026-09-23, antes `jefe_inmediato_id` — ver
     asistencia.md §16: en el negocio real es el jefe de área quien crea horarios y aprueba
     horas extra de su equipo, no el jefe inmediato). No hay tabla propia de equipos.
+    Desde la 082 (§44) quien gestiona es `COALESCE(c.gestor_asistencia_id, c.jefe_area_id)`
+    (constante `GESTOR` de `equipoRepository`): una consulta de "equipo" nueva usa esa expresión,
+    no `c.jefe_area_id` solo. Para **mostrar** al jefe de área sí se usa `jefe_area_id`.
 
 14. **Quién gestiona un equipo no lo dice un rol.** Las rutas de equipo, horarios y horas
     extra usan `canDirigirEquipo` (`middleware/auth.js`): pasa quien sea `jefe_area_id` de un
@@ -92,6 +95,13 @@ nadie — ni `db`, ni `config`, ni otro servicio.
 18. **En SQL de migraciones, compara texto entre tablas con `BINARY` o `COLLATE`.** En producción
     `users`/`users_company` son `utf8mb4_unicode_ci` y las tablas nuevas `utf8mb4_0900_ai_ci`:
     el `=` directo da el error 1267 (§26).
+19. **Todo cambio de jornada avisa por socket con `notificacionService.notificarCambioJornada`**
+    (después del commit, nunca dentro de la transacción). Avisa a la ficha del empleado
+    (`asistencia:mi-jornada`), a la de su jefe de área (`asistencia:equipo`) y a la sala de
+    monitores, que es solo de `financiera`, admin de RRHH y asistencia (`asistencia:monitor`).
+    El aviso no lleva datos: cada pantalla vuelve a pedir su estado a la API. Un caso de uso nuevo
+    que escriba eventos y no llame esto deja las pantallas desactualizadas hasta la resincronización
+    de 15 s (§41, §43).
 
 ## Zona horaria
 

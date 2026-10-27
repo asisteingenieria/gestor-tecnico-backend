@@ -1820,6 +1820,8 @@ con `ed09eae` (merge #14) y el frontend reconstruido; 389 cuentas por cédula cr
 15. Salida anticipada: se guarda pero no viaja en `/mi-jornada/hoy` ni genera alerta.
 16. Notificaciones por socket al jefe: `directorUserIdDe` solo encuentra cuentas de `users`, así que
     a un jefe con cuenta por cédula no le llegan (hoy ninguna pantalla las escucha).
+    **Resuelto en §41/§43 (2026-10-26):** los avisos van por sala de ficha (`asistencia:<users_company_id>`),
+    que sirve a cuentas por cédula. El aviso viejo a `directorUserIdDe` sigue, pero ya no hace falta.
 17. Una cuenta de RRHH u otro rol con gente a cargo pasa `canDirigirEquipo` en el backend, pero su
     interfaz no muestra la vista de equipo (decisión de §23).
 
@@ -1827,6 +1829,8 @@ con `ed09eae` (merge #14) y el frontend reconstruido; 389 cuentas por cédula cr
 18. Contadores que saltan hasta ±30 s (`useJornada.js`); tarjeta "En pausa" que no cuenta al
     desconectado de AsisLock; jornada finalizada que sigue mostrando "Salida programada"; scroll
     horizontal en "Horas extra"; plantilla que acepta un almuerzo fuera del turno.
+    **Los contadores que saltaban ±30 s quedaron resueltos en §41 (2026-10-26):** ahora usan
+    segundos exactos del servidor. El resto de este punto sigue abierto.
 19. `HorasExtra.jsx` arranca la fecha del formulario en UTC: entre 19:00 y 23:59 de Bogotá propone
     el día siguiente.
 
@@ -2504,3 +2508,83 @@ dos avisos y puede agrupar una ráfaga en una sola llamada.
 - En Chrome, con el jefe en la trazabilidad de `empleado1`, el break apareció sin recargar.
 - El calendario mensual del jefe volvió a pedir el resumen tras cada cambio.
 - Pruebas: `npm test` 226/226, `test:e2e` 127/127. Los datos de prueba se borraron.
+- Tras la aclaración de que "admin" es financiera, la sala de monitores quedó solo para
+  `financiera`. Se repitió la prueba con cuatro sesiones (jefe, financiera, `admin` y `empleado2`)
+  y un Conectado y un Break de `empleado1`: el jefe recibió `asistencia:equipo`, financiera
+  `asistencia:monitor`, y el `admin` y `empleado2`, nada. `npm test` 226/226.
+
+**Lo que no cambió:** los permisos de las pantallas. `isFinanciera` e `isRecursosHumanos`
+(`middleware/auth.js`) siguen dejando pasar al `admin` del sistema, que todavía puede abrir lo de
+financiera, aunque ya no recibe los avisos en vivo. Quitarle ese acceso es una decisión pendiente
+del usuario: confirmar antes que nadie de sistemas lo necesite para soporte. El rol `recursosHumanos`
+también administra RRHH, pero no ve lo exclusivo de financiera: el Home, los costos, las horas
+extras por campaña y la trazabilidad de todos.
+
+### Commits y despliegue de §41-§43
+
+| Cambio | Backend | Frontend |
+|---|---|---|
+| §41 monitor del empleado en vivo | `11700dc` | `005f8a7` |
+| §41 ajuste: reloj de tiempo en jornada | `cf42ebf` | `c050625` |
+| §42 desconexión hasta la salida + §43 monitoreo en vivo | `5bf012d` | `6036bba` |
+
+Todo en `sebas-branch`; el usuario hace el merge. **Sin migración.** Para producción:
+1. Backend: `git pull` y `pm2 restart gestor-backend`.
+2. Frontend: `git pull` y `npm install && npm run build`, sin excepción.
+3. **Verificar el websocket por nginx.** Si nginx publica la API por un proxy de `/api`, debe
+   reenviar también `/socket.io/` con los encabezados `Upgrade` y `Connection`. Para comprobarlo:
+   en las herramientas del navegador, pestaña Red/WS, debe aparecer una conexión a `/socket.io/`
+   con estado 101. Sin eso todo sigue funcionando, pero las pantallas se ponen al día cada 15 s
+   en vez de al instante.
+4. Prueba sugerida en producción: con el empleado de prueba, cambiar de estado en AsisLock
+   mientras su jefe tiene abierta su trazabilidad y financiera la asistencia mensual. Ambas
+   deben cambiar sin recargar. Luego desconectarlo de AsisLock en un día con horario: su reloj
+   debe seguir hasta la hora de salida y detenerse ahí.
+
+**Pendientes que deja esta tanda:**
+- Decidir si el `admin` del sistema pierde el acceso a RRHH y asistencia (ver arriba).
+- El Home de financiera no está en vivo: sigue con su refresco de 2 min, por diseño.
+- Avisos agrupados de 5 s en las vistas mensuales: con mucha concurrencia, como el cambio de turno
+  de cientos de agentes, cada pantalla abierta recarga el resumen del mes cada 5 s. Si pesa en
+  producción, subir la espera o recargar solo la fila del empleado del aviso.
+
+## 44. Sesión 2026-10-27 — Quién gestiona la asistencia cuando el jefe de área no usa el sistema
+
+**Origen:** el HeadCount de RRHH (`Descargas/HeadCount.xlsx`, `claude/modulo recursoshumanos.md` §41)
+pone a **German Stiven Arias Rojas**, dueño de la empresa, como jefe de área de 50 personas y jefe
+inmediato de 8 directores. No tiene contrato ni cuenta: se le creó una ficha mínima (nombre y cédula
+`0123456789`) para que figure como jefe. Como en asistencia el jefe de área es quien asigna horarios y
+aprueba horas extra (§16, §23), su equipo quedaba sin nadie que lo gestionara.
+
+**Decisión del negocio:**
+- a sus directores (los que lo tienen como jefe inmediato) los gestiona **Geraldin Cruz Ortiz**
+  (directora financiera, CC 1233489011), incluida ella misma;
+- al resto, su **jefe inmediato** (ej. tecnología → David Lopez; workforce → Manuel Andres Quintero
+  Barbosa, que reemplazó a Miguel Angel Bautista);
+- en la ficha, en RRHH y en los reportes el jefe de área **sigue siendo German**.
+
+**Migración `082_contrato_gestor_asistencia.sql`** (aplicada en local, **pendiente en producción**, sin
+dependencias): `contrato.gestor_asistencia_id` (FK a `users_company`, `ON DELETE SET NULL`). NULL = lo
+gestiona el jefe de área, que es el caso de todos los demás empleados.
+
+**Código:** `equipoRepository.js` calcula todo con `COALESCE(c.gestor_asistencia_id, c.jefe_area_id)`:
+equipo, `canDirigirEquipo`, `assertEmpleadoACargo`, asignación masiva de horarios, horas extra, avisos en
+vivo (`jefeAreaDe` devuelve ahora al gestor) y el reporte de horas extras del jefe
+(`reporteHorasExtraRepository`). Lo que **muestra** el jefe de área (`empleadoRepository`) no cambió.
+
+**Quién lo llena:** `node scripts/headcountRRHH.js sincronizar` (§41 de RRHH). No hay campo en el formulario
+de RRHH: si entra alguien nuevo con German como jefe de área, hay que volver a correr el script o llenarlo
+por SQL.
+
+**Verificado en local:** German no gestiona a nadie; Geraldin, 16 personas (los 8 directores, ella incluida,
+Manuel y los 7 de los que es jefe inmediata); Manuel, los 3 de workforce; David Lopez, 9. `npm test`
+226/226; `npm run test:e2e` 127/127 (con el servidor levantado aparte y `E2E_BASE`: el arranque propio
+de la prueba pasó los 10 s de espera).
+
+**Para producción**, en este orden:
+1. Migración `082`.
+2. Deploy del backend (`equipoRepository.js`, `reporteHorasExtraRepository.js`, `scripts/headcountRRHH.js`)
+   y `pm2 restart gestor-backend`.
+3. Cargar `PersonalPend_para_cargar.xlsx` por RRHH → "Cargar Excel" (generado con
+   `node scripts/headcountRRHH.js excel`), revisando antes la previsualización.
+4. `node scripts/headcountRRHH.js sincronizar <HeadCount.xlsx>`, revisar y repetir con `--aplicar`.
