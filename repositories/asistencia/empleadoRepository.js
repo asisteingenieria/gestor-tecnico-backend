@@ -44,11 +44,13 @@ async function findActivosPorCampania(campaniaId, conn = db) {
     const [filas] = await conn.query(
         `SELECT uc.id AS users_company_id, uc.numero_identificacion AS cedula, ${NOMBRE} AS nombre,
                 cam.idcampania, cam.nombre AS campania, car.nombre AS cargo,
+                c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo,
                 TRIM(CONCAT_WS(' ', j.primer_nombre, j.primer_apellido)) AS jefe_area
          FROM contrato c
          JOIN users_company uc ON uc.id = c.users_company_id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
          LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
          LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
          LEFT JOIN users_company j ON j.id = c.jefe_area_id
          WHERE ${condiciones.join(' AND ')}
@@ -58,15 +60,17 @@ async function findActivosPorCampania(campaniaId, conn = db) {
     return filas;
 }
 
-/** Nombre y campaña del contrato activo de una ficha, o null si no tiene contrato activo. */
+/** Nombre, campaña y centro de costo del contrato activo de una ficha, o null si no tiene contrato activo. */
 async function findActivo(usersCompanyId, conn = db) {
     const [filas] = await conn.query(
         `SELECT uc.id AS users_company_id, uc.numero_identificacion AS cedula, ${NOMBRE} AS nombre,
-                cam.idcampania, cam.nombre AS campania, car.nombre AS cargo
+                cam.idcampania, cam.nombre AS campania, car.nombre AS cargo,
+                c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo
          FROM contrato c
          JOIN users_company uc ON uc.id = c.users_company_id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
          LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
          LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
          WHERE uc.id = ? AND ec.nombre IN (?, ?) AND ${CONTRATO_ACTIVO}`,
         [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS]

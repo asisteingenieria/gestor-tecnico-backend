@@ -1,6 +1,7 @@
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
 const horarioRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
+const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
 const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository');
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
 const { calcularJornada } = require('../../domain/asistencia');
@@ -47,6 +48,7 @@ async function estadoDeHoy(usersCompanyId) {
         estado: estado.estado,
         servidor_ahora: ahora.toISOString(),
         horario: horario ? {
+            plantilla: horario.plantilla,
             hora_entrada: horario.hora_entrada,
             hora_salida: horario.hora_salida,
             hora_almuerzo_inicio: horario.hora_almuerzo_inicio,
@@ -74,10 +76,16 @@ async function estadoDeHoy(usersCompanyId) {
     };
 }
 
+// Los turnos del agente con el centro de costo y la campaña de su contrato: los horarios se
+// definen por centro de costo (§45-§46).
 async function miHorario({ usersCompanyId, desde, hasta }) {
     requireUsersCompanyId(usersCompanyId);
     const rango = desde && hasta ? { desde, hasta } : rangoSemanaActual();
-    return horarioRepo.findRango(usersCompanyId, rango.desde, rango.hasta);
+    const [empleado, horarios] = await Promise.all([
+        empleadoRepo.findActivo(usersCompanyId),
+        horarioRepo.findRango(usersCompanyId, rango.desde, rango.hasta)
+    ]);
+    return { campania: empleado?.campania ?? null, centro_costo: empleado?.centro_costo ?? null, horarios };
 }
 
 async function trazabilidad({ usersCompanyId, fecha }) {

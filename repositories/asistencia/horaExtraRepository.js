@@ -8,6 +8,16 @@ async function findAprobadasPorEmpleadoYFecha(usersCompanyId, fecha, conn = db) 
     return filas;
 }
 
+// Las aprobadas de un día de varias personas en una consulta (tableros en vivo, §47).
+async function findAprobadasPorEmpleadosYFecha(usersCompanyIds, fecha, conn = db) {
+    if (usersCompanyIds.length === 0) return [];
+    const [filas] = await conn.query(
+        "SELECT * FROM hora_extra WHERE users_company_id IN (?) AND fecha = ? AND estado = 'aprobada'",
+        [usersCompanyIds, fecha]
+    );
+    return filas;
+}
+
 async function insertarSolicitud({ usersCompanyId, fecha, horaInicio, horaFin, minutosEstimados, clase, motivo, solicitadoPor }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO hora_extra (users_company_id, fecha, hora_inicio, hora_fin, tipo, clase, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id, creado_en)
@@ -114,6 +124,7 @@ async function insertarAsignada({ usersCompanyId, fecha, minutos, clase, motivo,
 
 module.exports = {
     findAprobadasPorEmpleadoYFecha,
+    findAprobadasPorEmpleadosYFecha,
     insertarSolicitud,
     insertarTramos,
     reemplazarTramos,

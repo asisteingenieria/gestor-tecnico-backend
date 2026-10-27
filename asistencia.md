@@ -2652,3 +2652,89 @@ Móvil y Pymes. La pantalla de horarios mostraba al equipo como una sola lista p
 
 El código sin la 083 falla al listar plantillas (`p.centro_costo_id` no existe), así que **la migración va
 antes del backend**.
+
+## 46. Sesión 2026-10-27 — El turno y su centro de costo, visibles para el agente y para financiera
+
+**Objetivo:** que el agente y financiera vean qué turno tiene cada persona, con el nombre de la plantilla
+(que ahora se define por centro de costo, §45), y no solo las horas. Sin migración.
+
+**Backend:**
+- `horarioAsignadoRepository`: `findByEmpleadoYFecha` y `findRango` traen `plantilla` (nombre de la
+  plantilla, `LEFT JOIN`; NULL si se asignó sin plantilla). Nuevo `findRangoPorEmpleados`, que trae
+  los horarios de muchas personas en una consulta.
+- `empleadoRepository.findActivo` y `findActivosPorCampania` traen `centro_costo_id` y `centro_costo`.
+- **`GET /mi-horario` cambia de forma:** antes devolvía un arreglo y ahora devuelve
+  `{ campania, centro_costo, horarios }`. Se ajustaron sus dos consumidores, `MiHorario.jsx` y
+  `MiTrazabilidad.jsx`. **Hay que desplegar el backend y el frontend juntos.**
+- `GET /mi-jornada/hoy`: `horario.plantilla`.
+- Financiera:
+  - La trazabilidad (`/financiera/empleados/:id/jornada/:fecha/trazabilidad`) trae
+    `empleado.centro_costo` y `horario.plantilla`.
+  - El detalle de campaña de `/financiera/resumen-mensual` trae por empleado `centro_costo`, `turnos`
+    (los turnos del mes, día a día) y `turno`, que es el último turno del mes sin contar descansos.
+
+**Frontend:**
+- **Agente:**
+  - **Mi horario:** el centro de costo y la campaña en el subtítulo, y el nombre del turno hoy, en
+    cada día de la semana y en el tooltip del mes.
+  - **Mi jornada:** "Turno Outbound 7-4 · 7:00 a. m. – 4:00 p. m.".
+- **Trazabilidad del empleado** (la de financiera y la del jefe): una línea "Turno programado: …"
+  y el centro de costo en el subtítulo, este solo en la de financiera.
+- **Financiera → asistencia mensual → detalle de campaña:**
+  - Filtro por centro de costo y columna "Centro de costo · turno".
+  - El turno de cada día en el tooltip del calendario.
+  - Centro de costo y turno en el CSV.
+
+**Verificado en local:**
+- Con un turno de prueba "PRUEBA Outbound 7-4", asignado a un agente de CBAT OUTBOUND del equipo de
+  Kevin y borrado después:
+  - `miHorario` devolvió CBAT OUTBOUND · T&T con la plantilla;
+  - `estadoDeHoy` trajo `horario.plantilla`;
+  - la trazabilidad de financiera trajo el centro y el turno;
+  - el resumen mensual de T&T (142 empleados) trajo el centro y el turno del agente.
+- `npm test` 226/226, e2e 127/127, y el build y eslint del frontend limpios.
+
+## 47. Sesión 2026-10-27 — Asistencia en vivo para financiera
+
+**Pedido:** que financiera vea en vivo la jornada de hoy de cada empleado, además del histórico. Antes solo
+tenía el histórico: el reporte mensual y la trazabilidad de cada persona. El tablero en vivo era solo el
+"Equipo hoy" del jefe, y solo con su propio equipo.
+
+**Backend (sin migración):**
+- `GET /financiera/en-vivo?campania_id=` (`isFinanciera`): el estado de hoy de todos los empleados
+  activos, o de una campaña. Devuelve lo mismo que `GET /equipo` más `jefe_area`.
+- `equipoService.estadoEnVivo(empleados)` es la función que comparten "Equipo hoy" y financiera. Cada
+  persona trae campaña, centro de costo, jefe de área y `turno` de hoy: plantilla, horas y descanso.
+- **Cálculo en lote:** `jornadaCalculo.calcularEstadosDelDia(ids, fecha, ahora)` trae jornadas,
+  eventos, horarios, horas extra y parámetros con una consulta cada uno, y llama a la misma
+  `calcularJornada` por persona. Antes eran unas cinco consultas por persona. Repositorios nuevos:
+  `jornadaRepository.findPorFechaVarios`, `jornadaEventoRepository.findByJornadas` y
+  `horaExtraRepository.findAprobadasPorEmpleadosYFecha`. "Equipo hoy" del jefe también pasó a este
+  camino.
+
+**Frontend:**
+- `EquipoAsistencia.jsx` sirve para los dos. Con la prop `financiera` es "Asistencia en vivo", en la
+  ruta `/recursos-humanos/asistencia-en-vivo`, y aparece en el menú de financiera como "Asistencia
+  en vivo".
+- **Filtros:** campaña (solo financiera) y centro de costo (los dos). Los KPI y las pestañas cuentan
+  lo filtrado.
+- **Columna "Centro de costo · turno":** el turno de hoy y, para financiera, la campaña y el jefe de
+  área.
+- **Avisos en vivo:**
+  - financiera escucha la sala de monitores (§43) y agrupa los avisos que llegan dentro de 3 s en una
+    sola recarga;
+  - el jefe sigue con `asistencia:equipo`;
+  - los dos sondean cada 30 s.
+- **Histórico:**
+  - el botón "Histórico mensual" abre el reporte de asistencia en la campaña elegida;
+  - el ícono de cada fila abre la trazabilidad. Esta muestra la jornada de hoy en vivo y se navega día
+    a día hacia atrás. Desde ahí, "Volver a asistencia en vivo" regresa al tablero (`?origen=en-vivo`).
+- El CSV suma campaña, centro de costo, jefe de área y turno.
+
+**Verificado en local:**
+- Toda la empresa (458 personas) cargó en 39 ms. El equipo de Kevin (133) cargó en 5 ms.
+- En los tres días con más jornadas de la BD local, el cálculo en lote dio exactamente el mismo objeto
+  de estado que el cálculo por persona: 0 diferencias.
+- Sin token, el endpoint responde 401.
+- `npm test` 226/226, e2e 127/127 (cubre `GET /equipo` por el camino nuevo) y build del frontend.
+- **No se revisó en el navegador.**
