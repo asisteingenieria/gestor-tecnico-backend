@@ -102,6 +102,22 @@ const canDirigirEquipo = async (req, res, next) => {
         next(err);
     }
 };
+// Cambios de turno (asistencia.md §50): los pide el coordinador, que es quien es jefe inmediato de
+// alguien con contrato activo (o un jefe de área). Como canDirigirEquipo, sale de RRHH en cada petición.
+const canSolicitarCambioTurno = async (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ msg: 'No autenticado' });
+    }
+    try {
+        const { puedeSolicitar } = require('../services/asistencia/cambioTurnoService');
+        if (await puedeSolicitar(req.user.users_company_id)) {
+            return next();
+        }
+        return res.status(403).json({ msg: 'Solo los coordinadores pueden solicitar cambios de turno' });
+    } catch (err) {
+        next(err);
+    }
+};
 // recursosHumanos: su cuenta ya está vinculada a su ficha (es el "analista encargado" de las
 // altas), así que ve su propia asistencia con ella en vez de tener cuenta de empleado aparte.
 // financiera (§32) también tiene su cuenta vinculada a su ficha y ve su propia asistencia.
@@ -144,6 +160,7 @@ module.exports = {
     isDirectorOperaciones,
     isEmpleado,
     canDirigirEquipo,
+    canSolicitarCambioTurno,
     canRegistrarAsistencia,
     isFinanciera,
     // Middleware para contratación desde Hydra

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, isFinanciera } = require('../middleware/auth');
+const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, canSolicitarCambioTurno, isFinanciera } = require('../middleware/auth');
 const validar = require('../middleware/validar');
 const asyncHandler = require('../middleware/asyncHandler');
 
@@ -12,6 +12,7 @@ const equipoController = require('../controllers/asistencia/equipoController');
 const alertaController = require('../controllers/asistencia/alertaController');
 const reporteHorasExtraController = require('../controllers/asistencia/reporteHorasExtraController');
 const financieraController = require('../controllers/asistencia/financieraController');
+const cambioTurnoController = require('../controllers/asistencia/cambioTurnoController');
 
 const {
     iniciarPausaSchema,
@@ -36,7 +37,14 @@ const {
     periodoQuerySchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
-    jornadasEmpleadoSchema
+    jornadasEmpleadoSchema,
+    solicitarCambioTurnoSchema,
+    estadoCambioTurnoQuerySchema,
+    financieraCambiosTurnoQuerySchema,
+    plantillasCambioTurnoQuerySchema,
+    horariosCambioTurnoQuerySchema,
+    aprobarCambioTurnoSchema,
+    rechazarCambioTurnoSchema
 } = require('../validators/asistenciaSchemas');
 
 router.use(verifyToken);
@@ -57,6 +65,21 @@ router.get('/mis-horas-extra', canRegistrarAsistencia, validar(misHorasExtraQuer
 // Campana: alertas de traspasos dirigidas a mi ficha (evaluación del encargo, retorno del trabajo en casa)
 router.get('/mis-alertas', canRegistrarAsistencia, asyncHandler(alertaController.misAlertas));
 router.post('/mis-alertas/:id/leida', canRegistrarAsistencia, validar(idParamSchema), asyncHandler(alertaController.marcarLeida));
+// Campana: notificaciones de asistencia (084: cambios de turno) a mi ficha o a mi usuario (financiera)
+router.get('/mis-notificaciones', canRegistrarAsistencia, asyncHandler(alertaController.misNotificaciones));
+router.post('/mis-notificaciones/leidas', canRegistrarAsistencia, asyncHandler(alertaController.marcarTodasLeidas));
+router.post('/mis-notificaciones/:id/leida', canRegistrarAsistencia, validar(idParamSchema), asyncHandler(alertaController.marcarNotificacionLeida));
+
+// --- Cambios de turno (§50): el coordinador pide, el jefe que gestiona al empleado aprueba o rechaza ---
+router.get('/cambios-turno/permisos', canRegistrarAsistencia, asyncHandler(cambioTurnoController.permisos));
+router.get('/cambios-turno/empleados', canSolicitarCambioTurno, asyncHandler(cambioTurnoController.empleados));
+router.get('/cambios-turno/plantillas', canSolicitarCambioTurno, validar(plantillasCambioTurnoQuerySchema), asyncHandler(cambioTurnoController.plantillas));
+router.get('/cambios-turno/horarios', canSolicitarCambioTurno, validar(horariosCambioTurnoQuerySchema), asyncHandler(cambioTurnoController.horarios));
+router.get('/cambios-turno/mias', canSolicitarCambioTurno, asyncHandler(cambioTurnoController.misSolicitudes));
+router.post('/cambios-turno', canSolicitarCambioTurno, validar(solicitarCambioTurnoSchema), asyncHandler(cambioTurnoController.solicitar));
+router.get('/cambios-turno/bandeja', canDirigirEquipo, validar(estadoCambioTurnoQuerySchema), asyncHandler(cambioTurnoController.bandeja));
+router.put('/cambios-turno/:id/aprobar', canDirigirEquipo, validar(aprobarCambioTurnoSchema), asyncHandler(cambioTurnoController.aprobar));
+router.put('/cambios-turno/:id/rechazar', canDirigirEquipo, validar(rechazarCambioTurnoSchema), asyncHandler(cambioTurnoController.rechazar));
 
 // --- Jefe de equipo (director_operaciones o ficha con empleados a cargo, §23) ---
 router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));
@@ -95,5 +118,7 @@ router.get('/financiera/en-vivo', isFinanciera, validar(empleadosFinancieraQuery
 router.get('/financiera/empleados', isFinanciera, validar(empleadosFinancieraQuerySchema), asyncHandler(financieraController.empleados));
 router.get('/financiera/empleados/:empleadoId/jornadas', isFinanciera, validar(jornadasEmpleadoSchema), asyncHandler(financieraController.jornadasDe));
 router.get('/financiera/empleados/:empleadoId/jornada/:fecha/trazabilidad', isFinanciera, validar(trazabilidadEquipoParamsSchema), asyncHandler(financieraController.trazabilidadDe));
+// Todas las solicitudes de cambio de turno y su estado, solo lectura (§50).
+router.get('/financiera/cambios-turno', isFinanciera, validar(financieraCambiosTurnoQuerySchema), asyncHandler(cambioTurnoController.todas));
 
 module.exports = router;

@@ -103,4 +103,61 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     return filas;
 }
 
-module.exports = { directorUserIdDe, jefeAreaDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo };
+// ¿Esta ficha es jefe inmediato de alguien con contrato activo? Son los coordinadores, que piden los
+// cambios de turno de los empleados (§50).
+async function esJefeInmediato(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT 1
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.jefe_inmediato_id = ? AND ec.nombre IN (?, ?)
+         LIMIT 1`,
+        [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas.length > 0;
+}
+
+// Quién gestiona a cada empleado de la lista, en una consulta: Map empleado → ficha del gestor (o
+// ausente si no tiene contrato activo o no tiene jefe).
+async function gestoresDe(empleadoIds, conn = db) {
+    if (empleadoIds.length === 0) return new Map();
+    const [filas] = await conn.query(
+        `SELECT c.users_company_id, ${GESTOR} AS gestor_id
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE c.users_company_id IN (?) AND ec.nombre IN (?, ?) AND ${GESTOR} IS NOT NULL
+         ORDER BY c.fecha_ingreso`,
+        [empleadoIds, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    // Con dos contratos activos gana el más reciente (mismo criterio que jefeAreaDe).
+    return new Map(filas.map((f) => [f.users_company_id, f.gestor_id]));
+}
+
+// Todos los empleados activos con quien gestiona su asistencia: el coordinador puede pedir el cambio
+// de turno de cualquiera (§50) y ve a quién le llega la solicitud.
+async function empleadosActivosConGestor(conn = db) {
+    const [filas] = await conn.query(
+        `SELECT uc.id AS users_company_id, uc.nombre_propio AS nombre, uc.numero_identificacion AS cedula, car.nombre AS cargo,
+                cam.nombre AS campania, c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo,
+                ${GESTOR} AS gestor_id, g.nombre_propio AS gestor
+         FROM contrato c
+         JOIN users_company uc ON uc.id = c.users_company_id
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+         LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
+         LEFT JOIN users_company g ON g.id = ${GESTOR}
+         WHERE ec.nombre IN (?, ?)
+           AND c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2
+                                JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
+                               WHERE c2.users_company_id = c.users_company_id AND ec2.nombre IN (?, ?))
+         ORDER BY uc.nombre_propio`,
+        [...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas;
+}
+
+module.exports = {
+    directorUserIdDe, jefeAreaDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo,
+    esJefeInmediato, gestoresDe, empleadosActivosConGestor
+};

@@ -173,7 +173,65 @@ const jornadasEmpleadoSchema = {
     query: { desde: { tipo: 'fecha' }, hasta: { tipo: 'fecha' } }
 };
 
+// Cambios de turno (§50). Qué campos aplican según el tipo (fecha y empleado2 en un intercambio;
+// desde/hasta y plantilla, horas o descanso en un cambio de horario) lo valida el servicio.
+const ESTADOS_CAMBIO_TURNO = ['pendiente', 'aprobada', 'rechazada'];
+
+const solicitarCambioTurnoSchema = {
+    body: {
+        tipo: { requerido: true, enum: ['cambio_horario', 'intercambio'] },
+        motivo: { requerido: true, tipo: 'texto' },
+        empleado_id: { requerido: true, tipo: 'entero' },
+        empleado2_id: { tipo: 'entero' },
+        fecha: { tipo: 'fecha' },
+        desde: { tipo: 'fecha' },
+        hasta: { tipo: 'fecha' },
+        plantilla_id: { tipo: 'entero' },
+        hora_entrada: { tipo: 'hora' },
+        hora_salida: { tipo: 'hora' },
+        minutos_almuerzo: { tipo: 'entero' },
+        es_descanso: { tipo: 'booleano' }
+    }
+};
+
+const estadoCambioTurnoQuerySchema = {
+    query: { estado: { enum: ESTADOS_CAMBIO_TURNO } }
+};
+
+const financieraCambiosTurnoQuerySchema = {
+    query: { estado: { enum: ESTADOS_CAMBIO_TURNO }, desde: { tipo: 'fecha' }, hasta: { tipo: 'fecha' } }
+};
+
+const plantillasCambioTurnoQuerySchema = {
+    query: { empleadoId: { requerido: true, tipo: 'entero' } }
+};
+
+const horariosCambioTurnoQuerySchema = {
+    query: {
+        empleados: { requerido: true, tipo: 'texto' },
+        desde: { requerido: true, tipo: 'fecha' },
+        hasta: { requerido: true, tipo: 'fecha' }
+    }
+};
+
+const aprobarCambioTurnoSchema = {
+    params: { id: { requerido: true, tipo: 'entero' } },
+    body: { comentario: { tipo: 'texto' } }
+};
+
+const rechazarCambioTurnoSchema = {
+    params: { id: { requerido: true, tipo: 'entero' } },
+    body: { motivo_rechazo: { requerido: true, tipo: 'texto' } }
+};
+
 module.exports = {
+    solicitarCambioTurnoSchema,
+    estadoCambioTurnoQuerySchema,
+    financieraCambiosTurnoQuerySchema,
+    plantillasCambioTurnoQuerySchema,
+    horariosCambioTurnoQuerySchema,
+    aprobarCambioTurnoSchema,
+    rechazarCambioTurnoSchema,
     periodoQuerySchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
