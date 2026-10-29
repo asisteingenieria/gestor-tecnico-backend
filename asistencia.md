@@ -2897,3 +2897,109 @@ empleado. El jefe las aprueba o las rechaza, y a cada parte le llega el aviso.
 
 **Pendiente:** el aviso al coordinador cuando su solicitud vence porque llegó la fecha sin respuesta. Hoy
 queda pendiente y ya no se puede aprobar.
+
+---
+
+## 51. Sesión 2026-10-29 — Horas extra y cambios de turno: solicita el jefe, aprueba su director (085)
+
+**Qué cambió el negocio** (corrige el flujo de §32 para horas extra y el de §50 para cambios de turno):
+- Los **horarios** los siguen creando y asignando el jefe de operaciones. No cambia.
+- **Horas extra:** ya no las pide el empleado. Las **solicita el jefe de operaciones** por su personal y
+  las **aprueba el director**, que es el jefe del jefe de operaciones.
+- **Cambio de turno:** lo **solicita el jefe de operaciones**, ya no el coordinador, y lo **aprueba el
+  director**.
+
+**Decisiones del usuario:**
+- El coordinador deja de solicitar.
+- Las horas extra pendientes que ya pidieron los empleados las sigue resolviendo el jefe.
+- El director ve su bandeja y **la asistencia de todo su árbol**: la gente de sus jefes, no solo sus
+  subordinados directos.
+
+**La regla, sin roles nuevos:** solicita quien gestiona al empleado y aprueba quien gestiona a quien
+solicita. "Quién gestiona" es `GESTOR = COALESCE(gestor_asistencia_id, jefe_area_id)`, como en §44. En
+los datos reales ya funciona así:
+- Kevin y Mayra (Jefe de Operaciones) tienen como gestor a Nelson Acero y a Andrés Nuncira (Director de
+  Operaciones).
+- Los directores tienen como gestora a Geraldin.
+
+Si quien solicita no tiene gestor, o se gestiona a sí mismo (Geraldin), la solicitud se rechaza con 422
+(`assertAprobador`, `domain/asistencia/aprobacionJerarquica.js`) para que no quede colgada.
+
+**Migración 085** (`085_hora_extra_solicita_jefe.sql`), que requiere la 084:
+- `hora_extra.solicitante_users_company_id`: el jefe que la pidió.
+- `hora_extra.aprobador_users_company_id`: el director. Se fija al pedirla.
+- `NULL` en las dos = flujo anterior: la resuelve quien gestiona al empleado, por eso las pendientes
+  viejas siguen con su jefe.
+- `notificacion_asistencia.hora_extra_id`: la campana también avisa de horas extra.
+- No es idempotente: si se corre dos veces da error 1060 y no cambia nada.
+
+**Backend:**
+- `equipoRepository`: el árbol (CTE recursiva sobre `GESTOR`; con `UNION` termina aunque haya ciclos):
+  - `idsDelArbol`;
+  - `listaEmpleadosDelArbol`, con `directo` y el `jefe` de cada uno;
+  - `esDelArbol`;
+  - `ancestrosDe`.
+- `equipoRepository`, además:
+  - `tieneJefesACargo`: es el director, da `puede_aprobar`;
+  - `gestorConNombreDe`.
+- Se quitaron `esJefeInmediato`, `gestoresDe` y `empleadosActivosConGestor`.
+- **Lectura por árbol, escritura solo a los directos.** Usan el árbol:
+  - `GET /equipo` ("Equipo hoy"; cada fila trae `directo` y `jefe_area` = su jefe si no es directo);
+  - `GET /equipo/resumen-mensual` y `GET /equipo/estadisticas`;
+  - jornadas y trazabilidad de un empleado (`assertEmpleadoEnArbol`).
+- Siguen siendo solo del equipo directo (`assertEmpleadoACargo`/`subordinadosDe`): horarios,
+  correcciones de eventos, y solicitar horas extra o cambios de turno.
+- Socket: `notificarCambioJornada` avisa a todos los ancestros (`ancestrosDe`), no solo al jefe, para que
+  el "Equipo hoy" del director también se actualice en vivo.
+
+**Horas extra** (`horaExtraService`):
+- `POST /horas-extra/solicitar` y `/previsualizar` pasan a `canDirigirEquipo` y reciben `empleados: [...]`.
+  Se crea una solicitud por persona porque la clasificación depende del turno de cada una. El motivo es
+  obligatorio.
+- Rutas:
+  - `GET /horas-extra/mias`: las que pidió el jefe;
+  - `GET /horas-extra`: la bandeja, las que le toca aprobar más las pendientes viejas de su gente directa.
+- Aprobar o rechazar una ajena (o la que uno mismo pidió) responde **404**.
+- **Se eliminó `POST /horas-extra/asignar`**, que creaba horas extra ya aprobadas sin pasar por el
+  director. El frontend no la usaba.
+- Avisos:
+  - al director, al pedir;
+  - al jefe, al resolver (con el motivo si se rechaza);
+  - al empleado, cuando se aprueban ("Tienes horas extra aprobadas el 30/10 de 20:00 a 22:00").
+
+**Cambios de turno** (`cambioTurnoService`):
+- `puede_solicitar` = gestiona a alguien; `puede_aprobar` = `tieneJefesACargo`.
+- La lista de empleados es su equipo directo; `gestor` es su director, a quien le llega.
+- Las plantillas son las del jefe que pide.
+- Al aprobar, se verifica que los empleados sigan en el equipo de quien pidió.
+
+**Frontend:**
+- `HorasExtra.jsx` reescrita:
+  - el empleado solo consulta las suyas;
+  - el jefe tiene "Solicitar horas extra", con selección múltiple de su equipo, quién aprueba y la
+    clasificación de cada persona, y la pestaña "Mis solicitudes";
+  - el director tiene "Por aprobar", con aprobar, ajustar o rechazar. Un jefe ve esa pestaña solo si le
+    quedan pendientes del flujo anterior.
+- `MiJornada.jsx`: se quitó "Solicitar hora extra".
+- `GestionHorarios.jsx`: lista solo a la gente directa (`directo !== false`).
+- `EquipoAsistencia.jsx`: muestra "Jefe: X" para la gente de sus jefes.
+- `CambiosTurno.jsx`: textos del flujo nuevo, "Mis plantillas" y el segundo empleado del intercambio es
+  cualquiera de su equipo.
+- `CampanaAlertas`: los avisos de horas extra llevan a la pantalla de horas extra (`rutaHorasExtra`).
+
+**Verificación (local):**
+- `npm test`: 246/246 (6 nuevas de `aprobacionJerarquica`).
+- `npm run test:e2e`: 133/133. La sección 4 ahora prueba el flujo nuevo; durante esa parte empleado4
+  hace de director del seed.
+- Prueba con los datos reales (script de la sesión, fuera del repo): 28/28. Kevin solicita, Nelson
+  aprueba, Kevin no se aprueba a sí mismo, Nelson ve las 157 personas de su árbol (24 directas) pero no
+  le asigna horario a la gente de Kevin, y el coordinador ya no solicita.
+- En el navegador: Kevin pidió 2 h extra para un agente, a Nelson le llegó por la campana con "Pedida por
+  Kevin…" y la aprobó. Su "Equipo hoy" muestra las 157 personas con su jefe. Los datos de prueba se
+  borraron.
+
+**Para producción:**
+1. La 084 y luego la 085, antes del backend.
+2. Backend y frontend juntos.
+3. Que cada jefe de operaciones tenga en RRHH a su director como gestor (jefe de área o gestor de
+   asistencia). Si no, no puede solicitar. Hoy Kevin → Nelson y Mayra → Andrés ya están así.

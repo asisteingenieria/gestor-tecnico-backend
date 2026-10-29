@@ -18,8 +18,10 @@ async function notificarDirector(usersCompanyId, evento, datos = {}) {
 async function notificarCambioJornada(usersCompanyId, evento, datos = {}) {
     try {
         global.emitirAsistencia?.(usersCompanyId, 'asistencia:mi-jornada', { tipo: evento });
-        const jefeId = await equipoRepo.jefeAreaDe(usersCompanyId);
-        if (jefeId) global.emitirAsistencia?.(jefeId, 'asistencia:equipo', { tipo: evento, usersCompanyId });
+        // Su jefe y los jefes de su jefe: el director ve a toda la gente de sus jefes (§51).
+        for (const jefeId of await equipoRepo.ancestrosDe(usersCompanyId)) {
+            global.emitirAsistencia?.(jefeId, 'asistencia:equipo', { tipo: evento, usersCompanyId });
+        }
         // Financiera (admin de RRHH y asistencia) ve a todos (trazabilidad y asistencia mensual): sala aparte.
         global.emitirMonitoresAsistencia?.('asistencia:monitor', { tipo: evento, usersCompanyId });
     } catch (error) {

@@ -18,6 +18,24 @@ async function assertEmpleadoACargo(directorUsersCompanyId, empleadoId, conn) {
     if (!aCargo) throw new NoAutorizadoError('El empleado no está a su cargo');
 }
 
+// Para consultar basta con que la persona cuelgue de él en cualquier nivel (el director ve a la gente
+// de sus jefes, §51). Para escribir —horarios, horas extra, correcciones— sigue siendo assertEmpleadoACargo.
+async function assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId) {
+    if (!(await equipoRepo.esDelArbol(directorUsersCompanyId, empleadoId))) throw new NoAutorizadoError('El empleado no está a su cargo');
+}
+
+// La gente del árbol con la forma que esperan las pantallas de equipo. `jefe_area` = quién la gestiona,
+// solo para la que no es directa (en la directa es él mismo).
+async function empleadosDelArbol(directorUsersCompanyId) {
+    const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
+    return empleados.map((e) => ({
+        ...e,
+        nombre: e.nombre_propio,
+        cedula: e.numero_identificacion,
+        jefe_area: e.directo ? null : e.jefe
+    }));
+}
+
 // Jefe de equipo = ficha que es jefe de área de algún contrato activo. Se calcula en cada
 // consulta (no se guarda) para que siga a RRHH cuando cambia la jerarquía.
 async function esJefeDeEquipo(usersCompanyId) {
@@ -30,10 +48,11 @@ async function cargoDe(usersCompanyId) {
     return equipoRepo.cargoDe(usersCompanyId);
 }
 
+// "Equipo hoy": toda la gente que cuelga de él. `directo` dice a quién gestiona él mismo (a esos les
+// asigna horarios y les pide horas extra).
 async function equipo(directorUsersCompanyId) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
-    return estadoEnVivo(empleados.map((e) => ({ ...e, nombre: e.nombre_propio, cedula: e.numero_identificacion })));
+    return estadoEnVivo(await empleadosDelArbol(directorUsersCompanyId));
 }
 
 // Estado de hoy de una lista de personas, con su turno del día (§46-§47). Lo usan "Equipo hoy" del
@@ -59,6 +78,7 @@ async function estadoEnVivo(empleados) {
             centro_costo_id: empleado.centro_costo_id,
             centro_costo: empleado.centro_costo,
             jefe_area: empleado.jefe_area ?? null,
+            directo: empleado.directo ?? null,
             turno: horario ? {
                 plantilla: horario.plantilla,
                 hora_entrada: horario.hora_entrada,
@@ -77,18 +97,18 @@ async function estadoEnVivo(empleados) {
 
 async function jornadasDe({ directorUsersCompanyId, empleadoId, desde, hasta }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    await assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
+    await assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId);
     return jornadasDeEmpleado(empleadoId, desde, hasta);
 }
 
 async function trazabilidadDe({ directorUsersCompanyId, empleadoId, fecha }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    await assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
+    await assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId);
     return trazabilidadDeEmpleado(empleadoId, fecha);
 }
 
 // Sin chequeo de permisos: quien llama ya validó que puede ver a este empleado (el jefe con
-// assertEmpleadoACargo, financiera por su rol).
+// assertEmpleadoEnArbol, financiera por su rol).
 async function jornadasDeEmpleado(empleadoId, desde, hasta) {
     await cierreService.normalizarRangoSiEsPasado(empleadoId, desde, hasta, new Date());
     return jornadaRepo.findRango(empleadoId, desde, hasta);
@@ -120,7 +140,7 @@ async function trazabilidadDeEmpleado(empleadoId, fecha) {
 
 async function estadisticasEquipo({ directorUsersCompanyId, desde, hasta }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
 
     const porEmpleado = await Promise.all(empleados.map(async (empleado) => {
         await cierreService.normalizarRangoSiEsPasado(empleado.users_company_id, desde, hasta, new Date());
@@ -150,7 +170,7 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
         throw new ValidacionError('El periodo debe tener el formato AAAA-MM');
     }
     const { desde, hasta } = rangoDelMes(periodo);
-    const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
     const ahora = new Date();
 
     const filas = await Promise.all(empleados.map(async (empleado) => {
@@ -161,6 +181,7 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
             nombre: empleado.nombre_propio,
             documento: empleado.numero_identificacion,
             cargo: empleado.cargo,
+            jefe_area: empleado.directo ? null : empleado.jefe,
             ...resumenDeJornadas(jornadas)
         };
     }));
@@ -202,6 +223,7 @@ async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, 
 module.exports = {
     estadoEnVivo,
     assertEmpleadoACargo,
+    assertEmpleadoEnArbol,
     esJefeDeEquipo,
     cargoDe,
     equipo,

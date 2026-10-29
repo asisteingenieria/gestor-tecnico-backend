@@ -76,6 +76,10 @@ nadie — ni `db`, ni `config`, ni otro servicio.
     Desde la 082 (§44) quien gestiona es `COALESCE(c.gestor_asistencia_id, c.jefe_area_id)`
     (constante `GESTOR` de `equipoRepository`): una consulta de "equipo" nueva usa esa expresión,
     no `c.jefe_area_id` solo. Para **mostrar** al jefe de área sí se usa `jefe_area_id`.
+    Desde §51 las **consultas** del director (equipo, mensual, trazabilidad) abarcan todo su árbol
+    (`equipoRepository.listaEmpleadosDelArbol`, `assertEmpleadoEnArbol`); las **escrituras** siguen siendo
+    solo para su equipo directo. Horas extra y cambios de turno: solicita el gestor del empleado y aprueba
+    el gestor de ese jefe (`assertAprobador`).
 
 14. **Quién gestiona un equipo no lo dice un rol.** Las rutas de equipo, horarios y horas
     extra usan `canDirigirEquipo` (`middleware/auth.js`): pasa quien sea `jefe_area_id` de un

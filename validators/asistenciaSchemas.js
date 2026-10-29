@@ -13,23 +13,22 @@ const rangoQuerySchema = {
     }
 };
 
-// Las 5 clases del formato V.3. Ya no las elige el agente: el servidor clasifica la franja
-// (migración 074). Se usan al asignar (el jefe sí elige) y al ajustar tramos al aprobar.
-const CLASES_HORA_EXTRA = ['recargo_nocturno', 'extras_diurnas', 'extras_nocturnas', 'dominicales_festivas', 'extras_dominicales_festivas'];
-
-// El agente ingresa la franja (fecha + hora inicio/fin); la clase la determina el servidor.
+// El jefe solicita por su equipo (§51): las fichas y la franja (fecha + hora inicio/fin); la clase la
+// determina el servidor para cada persona según su turno.
 const solicitarHoraExtraSchema = {
     body: {
+        empleados: { requerido: true, tipo: 'array', minimo: 1 },
         fecha: { requerido: true, tipo: 'fecha' },
         hora_inicio: { requerido: true, tipo: 'hora' },
         hora_fin: { requerido: true, tipo: 'hora' },
-        motivo: { tipo: 'texto' }
+        motivo: { requerido: true, tipo: 'texto' }
     }
 };
 
 // Previsualización de la clasificación antes de enviar (no guarda nada).
 const previsualizarHoraExtraSchema = {
     body: {
+        empleados: { requerido: true, tipo: 'array', minimo: 1 },
         fecha: { requerido: true, tipo: 'fecha' },
         hora_inicio: { requerido: true, tipo: 'hora' },
         hora_fin: { requerido: true, tipo: 'hora' }
@@ -130,16 +129,6 @@ const aprobarHoraExtraSchema = {
 const rechazarHoraExtraSchema = {
     params: { id: { requerido: true, tipo: 'entero' } },
     body: { comentario: { tipo: 'texto' } }
-};
-
-const asignarHoraExtraSchema = {
-    body: {
-        empleados: { requerido: true, tipo: 'array', minimo: 1 },
-        fecha: { requerido: true, tipo: 'fecha' },
-        minutos: { requerido: true, tipo: 'entero' },
-        clase: { requerido: true, enum: CLASES_HORA_EXTRA },
-        motivo: { tipo: 'texto' }
-    }
 };
 
 const eventoManualSchema = {
@@ -253,6 +242,5 @@ module.exports = {
     bandejaHorasExtraQuerySchema,
     aprobarHoraExtraSchema,
     rechazarHoraExtraSchema,
-    asignarHoraExtraSchema,
     eventoManualSchema
 };

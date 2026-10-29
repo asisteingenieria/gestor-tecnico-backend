@@ -18,11 +18,18 @@ async function findAprobadasPorEmpleadosYFecha(usersCompanyIds, fecha, conn = db
     return filas;
 }
 
-async function insertarSolicitud({ usersCompanyId, fecha, horaInicio, horaFin, minutosEstimados, clase, motivo, solicitadoPor }, conn = db) {
+// `solicitante`/`aprobador` (fichas, 085): el jefe que la pide y el director que la aprueba (§51).
+async function insertarSolicitud({
+    usersCompanyId, fecha, horaInicio, horaFin, minutosEstimados, clase, motivo, solicitadoPor, solicitanteUsersCompanyId, aprobadorUsersCompanyId
+}, conn = db) {
     const [resultado] = await conn.query(
-        `INSERT INTO hora_extra (users_company_id, fecha, hora_inicio, hora_fin, tipo, clase, minutos_estimados, estado, motivo, solicitado_por_user_id, solicitado_por_cuenta_id, creado_en)
-         VALUES (?, ?, ?, ?, 'solicitada', ?, ?, 'pendiente', ?, ?, ?, NOW())`,
-        [usersCompanyId, fecha, horaInicio ?? null, horaFin ?? null, clase, minutosEstimados, motivo, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null]
+        `INSERT INTO hora_extra (users_company_id, fecha, hora_inicio, hora_fin, tipo, clase, minutos_estimados, estado, motivo,
+                                 solicitante_users_company_id, aprobador_users_company_id, solicitado_por_user_id, solicitado_por_cuenta_id, creado_en)
+         VALUES (?, ?, ?, ?, 'solicitada', ?, ?, 'pendiente', ?, ?, ?, ?, ?, NOW())`,
+        [
+            usersCompanyId, fecha, horaInicio ?? null, horaFin ?? null, clase, minutosEstimados, motivo,
+            solicitanteUsersCompanyId ?? null, aprobadorUsersCompanyId ?? null, solicitadoPor?.userId ?? null, solicitadoPor?.cuentaId ?? null
+        ]
     );
     return resultado.insertId;
 }
@@ -80,19 +87,50 @@ async function findById(id, conn = db) {
     return filas[0] ?? null;
 }
 
-async function findPorEquipo(usersCompanyIds, { estado } = {}, conn = db) {
-    if (usersCompanyIds.length === 0) return [];
-    const condiciones = [`users_company_id IN (${usersCompanyIds.map(() => '?').join(',')})`];
-    const parametros = [...usersCompanyIds];
+// Con los nombres que muestran las bandejas: el director no tiene a la gente del jefe en su lista.
+const CON_NOMBRES = `SELECT he.*, e.nombre_propio AS empleado, s.nombre_propio AS solicitante, a.nombre_propio AS aprobador
+         FROM hora_extra he
+         JOIN users_company e ON e.id = he.users_company_id
+         LEFT JOIN users_company s ON s.id = he.solicitante_users_company_id
+         LEFT JOIN users_company a ON a.id = he.aprobador_users_company_id`;
+
+// Lo que le toca resolver a esta ficha: las que la tienen de aprobador y, del flujo anterior (sin
+// aprobador), las de su propia gente (`empleadosDirectos`), que siguen siendo del jefe (§51).
+async function findBandeja(aprobadorUsersCompanyId, empleadosDirectos, { estado } = {}, conn = db) {
+    const condiciones = [
+        empleadosDirectos.length > 0
+            ? '(he.aprobador_users_company_id = ? OR (he.aprobador_users_company_id IS NULL AND he.users_company_id IN (?)))'
+            : 'he.aprobador_users_company_id = ?'
+    ];
+    const parametros = empleadosDirectos.length > 0 ? [aprobadorUsersCompanyId, empleadosDirectos] : [aprobadorUsersCompanyId];
     if (estado) {
-        condiciones.push('estado = ?');
+        condiciones.push('he.estado = ?');
         parametros.push(estado);
     }
     const [filas] = await conn.query(
-        `SELECT * FROM hora_extra WHERE ${condiciones.join(' AND ')} ORDER BY fecha DESC`,
+        `${CON_NOMBRES} WHERE ${condiciones.join(' AND ')} ORDER BY he.estado = 'pendiente' DESC, he.fecha DESC LIMIT 500`,
         parametros
     );
     return filas;
+}
+
+async function findPorSolicitante(solicitanteUsersCompanyId, { estado } = {}, conn = db) {
+    const condiciones = ['he.solicitante_users_company_id = ?'];
+    const parametros = [solicitanteUsersCompanyId];
+    if (estado) {
+        condiciones.push('he.estado = ?');
+        parametros.push(estado);
+    }
+    const [filas] = await conn.query(
+        `${CON_NOMBRES} WHERE ${condiciones.join(' AND ')} ORDER BY he.estado = 'pendiente' DESC, he.fecha DESC LIMIT 500`,
+        parametros
+    );
+    return filas;
+}
+
+async function findDetalle(id, conn = db) {
+    const [filas] = await conn.query(`${CON_NOMBRES} WHERE he.idhora_extra = ?`, [id]);
+    return filas[0] ?? null;
 }
 
 async function resolver(id, { estado, minutosAprobados, clase, comentario, aprobadoPor }, conn = db) {
@@ -108,20 +146,6 @@ async function resolver(id, { estado, minutosAprobados, clase, comentario, aprob
     return resultado.affectedRows > 0;
 }
 
-async function insertarAsignada({ usersCompanyId, fecha, minutos, clase, motivo, aprobadoPor }, conn = db) {
-    const [resultado] = await conn.query(
-        `INSERT INTO hora_extra
-            (users_company_id, fecha, tipo, clase, minutos_estimados, minutos_aprobados, estado, motivo,
-             solicitado_por_user_id, solicitado_por_cuenta_id, aprobado_por_user_id, aprobado_por_cuenta_id, fecha_decision, creado_en)
-         VALUES (?, ?, 'asignada', ?, ?, ?, 'aprobada', ?, ?, ?, ?, ?, NOW(), NOW())`,
-        [
-            usersCompanyId, fecha, clase, minutos, minutos, motivo ?? null,
-            aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null, aprobadoPor?.userId ?? null, aprobadoPor?.cuentaId ?? null
-        ]
-    );
-    return resultado.insertId;
-}
-
 module.exports = {
     findAprobadasPorEmpleadoYFecha,
     findAprobadasPorEmpleadosYFecha,
@@ -132,7 +156,8 @@ module.exports = {
     findTramosPorHorasExtra,
     findPorEmpleado,
     findById,
-    findPorEquipo,
-    resolver,
-    insertarAsignada
+    findBandeja,
+    findPorSolicitante,
+    findDetalle,
+    resolver
 };

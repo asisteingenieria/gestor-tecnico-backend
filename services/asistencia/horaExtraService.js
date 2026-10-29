@@ -4,11 +4,17 @@ const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const festivoRepo = require('../../repositories/asistencia/festivoRepository');
 const ventanaNocturnaRepo = require('../../repositories/asistencia/ventanaNocturnaRepository');
-const equipoService = require('./equipoService');
+const notificacionRepo = require('../../repositories/asistencia/notificacionAsistenciaRepository');
+const notificacionAsistenciaService = require('./notificacionAsistenciaService');
 const { clasificarHoraExtra, totalMinutos, claseDominante } = require('../../domain/asistencia/clasificarHoraExtra');
 const { CLASES } = require('../../domain/asistencia/reporteHorasExtra');
+const { assertAprobador, mensajesHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
 const { sumarDias, normalizarFecha } = require('../../utils/fechaBogota');
-const { NoEncontradoError, ConflictoJornadaError, ValidacionError } = require('../../errors/AppError');
+const { NoAutorizadoError, NoEncontradoError, ConflictoJornadaError, ValidacionError } = require('../../errors/AppError');
+
+// Horas extra (asistencia.md §32, flujo de §51): el jefe de operaciones las solicita por su personal
+// —el empleado ya no las pide— y las aprueba su director, quien gestiona la asistencia del jefe. Las
+// del flujo anterior (sin aprobador) las sigue resolviendo quien gestiona al empleado.
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -39,7 +45,7 @@ async function calcularTramos(usersCompanyId, fecha, horaInicio, horaFin, conn =
     });
 }
 
-// Normaliza y valida los tramos que manda el jefe al aprobar (ajuste manual): una fila por clase
+// Normaliza y valida los tramos que manda el director al aprobar (ajuste manual): una fila por clase
 // válida, con minutos enteros positivos; si repite una clase, se suman.
 function normalizarTramos(tramos) {
     const porClase = new Map();
@@ -63,67 +69,139 @@ async function adjuntarTramos(filas) {
     return filas.map((f) => ({ ...f, tramos: porId.get(f.idhora_extra) || [] }));
 }
 
-async function solicitar({ usersCompanyId, fecha, horaInicio, horaFin, motivo, solicitadoPor }) {
-    requireUsersCompanyId(usersCompanyId);
+// Solo a la gente que el jefe gestiona directamente (una consulta para todos).
+async function assertEquipoDirecto(jefeUsersCompanyId, empleados, conn = db) {
+    const ids = [...new Set(empleados.map(Number))];
+    if (ids.length === 0) throw new ValidacionError('Elija al menos un empleado');
+    const aCargo = new Set(await equipoRepo.subordinadosDe(jefeUsersCompanyId, ids, conn));
+    if (ids.some((id) => !aCargo.has(id))) throw new NoAutorizadoError('El empleado no está a su cargo');
+    return ids;
+}
+
+// El jefe pide horas extra para uno o varios de su equipo, en la misma franja. Cada persona queda en
+// su propia solicitud porque la clasificación depende de su turno de ese día.
+async function solicitar({ jefeUsersCompanyId, empleados, fecha, horaInicio, horaFin, motivo, solicitadoPor }) {
+    requireUsersCompanyId(jefeUsersCompanyId);
+    const motivoLimpio = String(motivo || '').trim();
+    if (!motivoLimpio) throw new ValidacionError('El motivo es obligatorio');
     const fechaStr = normalizarFecha(fecha);
-    const tramos = await calcularTramos(usersCompanyId, fechaStr, horaInicio, horaFin);
-    const minutosEstimados = totalMinutos(tramos);
-    if (minutosEstimados <= 0) throw new ValidacionError('La franja de horas extra no suma tiempo');
+    const ids = await assertEquipoDirecto(jefeUsersCompanyId, empleados);
+    const aprobador = await equipoRepo.jefeAreaDe(jefeUsersCompanyId);
+    assertAprobador(jefeUsersCompanyId, aprobador);
+
+    const clasificadas = await Promise.all(ids.map(async (id) => ({ id, tramos: await calcularTramos(id, fechaStr, horaInicio, horaFin) })));
+    if (clasificadas.some((c) => totalMinutos(c.tramos) <= 0)) throw new ValidacionError('La franja de horas extra no suma tiempo');
 
     const conn = await db.getConnection();
+    const creadas = [];
+    let notificaciones;
     try {
         await conn.beginTransaction();
-        const idhoraExtra = await horaExtraRepo.insertarSolicitud(
-            { usersCompanyId, fecha: fechaStr, horaInicio, horaFin, minutosEstimados, clase: claseDominante(tramos), motivo, solicitadoPor },
-            conn
-        );
-        await horaExtraRepo.insertarTramos(idhoraExtra, tramos, conn);
+        for (const { id, tramos } of clasificadas) {
+            const idhoraExtra = await horaExtraRepo.insertarSolicitud({
+                usersCompanyId: id, fecha: fechaStr, horaInicio, horaFin, minutosEstimados: totalMinutos(tramos), clase: claseDominante(tramos),
+                motivo: motivoLimpio, solicitadoPor, solicitanteUsersCompanyId: jefeUsersCompanyId, aprobadorUsersCompanyId: aprobador
+            }, conn);
+            await horaExtraRepo.insertarTramos(idhoraExtra, tramos, conn);
+            creadas.push(await horaExtraRepo.findDetalle(idhoraExtra, conn));
+        }
+        notificaciones = [{
+            usersCompanyId: aprobador,
+            tipo: 'hora_extra_solicitada',
+            horaExtraId: creadas[0].idhora_extra,
+            mensaje: mensajesHoraExtra.solicitada(creadas[0].solicitante, creadas.map((c) => c.empleado), fechaStr, horaInicio, horaFin)
+        }];
+        await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
-        return { success: true, idhora_extra: idhoraExtra, minutos_estimados: minutosEstimados, tramos };
     } catch (e) {
         await conn.rollback();
         throw e;
     } finally {
         conn.release();
     }
+    notificacionAsistenciaService.avisarEnVivo(notificaciones);
+    return { success: true, ids: creadas.map((c) => c.idhora_extra), aprobador: creadas[0].aprobador };
 }
 
-// El agente puede ver antes de enviar cómo quedaría clasificada su franja (sin guardar nada).
-async function previsualizar({ usersCompanyId, fecha, horaInicio, horaFin }) {
-    requireUsersCompanyId(usersCompanyId);
-    const tramos = await calcularTramos(usersCompanyId, normalizarFecha(fecha), horaInicio, horaFin);
-    return { tramos, minutos: totalMinutos(tramos) };
+// El jefe ve antes de enviar cómo quedaría clasificada la franja para cada persona (sin guardar nada).
+async function previsualizar({ jefeUsersCompanyId, empleados, fecha, horaInicio, horaFin }) {
+    requireUsersCompanyId(jefeUsersCompanyId);
+    const fechaStr = normalizarFecha(fecha);
+    const ids = await assertEquipoDirecto(jefeUsersCompanyId, empleados);
+    return Promise.all(ids.map(async (id) => {
+        const tramos = await calcularTramos(id, fechaStr, horaInicio, horaFin);
+        return { users_company_id: id, tramos, minutos: totalMinutos(tramos) };
+    }));
 }
 
+// Las del empleado, solo para consultar: desde §51 no las pide él.
 async function misHorasExtra({ usersCompanyId, estado }) {
     requireUsersCompanyId(usersCompanyId);
     const filas = await horaExtraRepo.findPorEmpleado(usersCompanyId, { estado });
     return adjuntarTramos(filas);
 }
 
+// Las que pidió este jefe, con su estado.
+async function misSolicitudes({ jefeUsersCompanyId, estado }) {
+    requireUsersCompanyId(jefeUsersCompanyId);
+    return adjuntarTramos(await horaExtraRepo.findPorSolicitante(jefeUsersCompanyId, { estado }));
+}
+
 async function bandeja({ directorUsersCompanyId, estado }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
-    const filas = await horaExtraRepo.findPorEquipo(empleados.map((e) => e.users_company_id), { estado });
+    const directos = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    const filas = await horaExtraRepo.findBandeja(directorUsersCompanyId, directos.map((e) => e.users_company_id), { estado });
     return adjuntarTramos(filas);
 }
 
-// Aprobar: el jefe confirma la clasificación o la ajusta (manda `tramos`). Los minutos aprobados son
-// la suma de los tramos efectivos. Si no manda tramos, se quedan los que calculó el servidor.
+// ¿Le toca a este director? La de otro responde 404, como en §25. Las del flujo anterior (sin
+// aprobador) son de quien gestiona hoy al empleado.
+async function solicitudParaResolver(directorUsersCompanyId, idhoraExtra) {
+    const solicitud = await horaExtraRepo.findDetalle(idhoraExtra);
+    if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
+    if (solicitud.aprobador_users_company_id) {
+        if (solicitud.aprobador_users_company_id !== directorUsersCompanyId) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
+    } else if (!(await equipoRepo.esSubordinado(directorUsersCompanyId, solicitud.users_company_id))) {
+        throw new NoEncontradoError('Solicitud de hora extra no encontrada');
+    }
+    if (solicitud.estado !== 'pendiente') throw new ConflictoJornadaError(`La solicitud de hora extra ya está ${solicitud.estado}`);
+    return solicitud;
+}
+
+// Avisos al resolver una del flujo nuevo: al jefe que la pidió y, si se aprobó, al empleado.
+function avisosDeResolucion(solicitud, aprobada, motivo) {
+    if (!solicitud.solicitante_users_company_id) return [];
+    const fecha = normalizarFecha(solicitud.fecha);
+    const base = { horaExtraId: solicitud.idhora_extra };
+    const avisos = [{
+        ...base,
+        usersCompanyId: solicitud.solicitante_users_company_id,
+        tipo: aprobada ? 'hora_extra_aprobada' : 'hora_extra_rechazada',
+        mensaje: aprobada
+            ? mensajesHoraExtra.aprobada(solicitud.empleado, fecha, solicitud.aprobador)
+            : mensajesHoraExtra.rechazada(solicitud.empleado, fecha, solicitud.aprobador, motivo)
+    }];
+    if (aprobada && solicitud.hora_inicio && solicitud.hora_fin) {
+        avisos.push({
+            ...base, usersCompanyId: solicitud.users_company_id, tipo: 'hora_extra_aprobada',
+            mensaje: mensajesHoraExtra.paraEmpleado(fecha, solicitud.hora_inicio, solicitud.hora_fin)
+        });
+    }
+    return avisos;
+}
+
+// Aprobar: el director confirma la clasificación o la ajusta (manda `tramos`). Los minutos aprobados
+// son la suma de los tramos efectivos. Si no manda tramos, se quedan los que calculó el servidor.
 async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario, aprobadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const solicitud = await horaExtraRepo.findById(idhoraExtra);
-    if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
-    await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
-    if (solicitud.estado !== 'pendiente') {
-        throw new ConflictoJornadaError(`La solicitud de hora extra ya está ${solicitud.estado === 'pendiente' ? 'resuelta' : solicitud.estado}`);
-    }
+    const solicitud = await solicitudParaResolver(directorUsersCompanyId, idhoraExtra);
 
     const ajuste = normalizarTramos(tramos);
     const efectivos = ajuste.length > 0 ? ajuste : await horaExtraRepo.findTramos(idhoraExtra);
     const minutosAprobados = totalMinutos(efectivos);
     if (minutosAprobados <= 0) throw new ValidacionError('La hora extra aprobada no suma tiempo');
 
+    const notificaciones = avisosDeResolucion(solicitud, true);
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
@@ -134,56 +212,39 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario
         );
         if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
         if (ajuste.length > 0) await horaExtraRepo.reemplazarTramos(idhoraExtra, efectivos, conn);
+        await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
-        return { success: true };
     } catch (e) {
         await conn.rollback();
         throw e;
     } finally {
         conn.release();
     }
+    notificacionAsistenciaService.avisarEnVivo(notificaciones);
+    return { success: true };
 }
 
 async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprobadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const solicitud = await horaExtraRepo.findById(idhoraExtra);
-    if (!solicitud) throw new NoEncontradoError('Solicitud de hora extra no encontrada');
-    await equipoService.assertEmpleadoACargo(directorUsersCompanyId, solicitud.users_company_id);
-    if (solicitud.estado !== 'pendiente') {
-        throw new ConflictoJornadaError(`La solicitud de hora extra ya está ${solicitud.estado === 'pendiente' ? 'resuelta' : solicitud.estado}`);
-    }
+    const solicitud = await solicitudParaResolver(directorUsersCompanyId, idhoraExtra);
+    const motivo = String(comentario || '').trim() || null;
 
-    const resuelta = await horaExtraRepo.resolver(idhoraExtra, { estado: 'rechazada', minutosAprobados: null, comentario, aprobadoPor });
-    if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
-    return { success: true };
-}
-
-// Asignar: el jefe crea una hora extra ya aprobada. Aquí sí elige la clase y los minutos a mano
-// (es una asignación directa), y se guarda como un tramo único.
-async function asignar({ directorUsersCompanyId, empleados, fecha, minutos, clase, motivo, aprobadoPor }) {
-    requireUsersCompanyId(directorUsersCompanyId);
-    for (const empleadoId of empleados) {
-        await equipoService.assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
-    }
-    const fechaStr = normalizarFecha(fecha);
-
+    const notificaciones = avisosDeResolucion(solicitud, false, motivo);
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const ids = [];
-        for (const empleadoId of empleados) {
-            const id = await horaExtraRepo.insertarAsignada({ usersCompanyId: empleadoId, fecha: fechaStr, minutos, clase, motivo, aprobadoPor }, conn);
-            await horaExtraRepo.insertarTramos(id, [{ clase, minutos }], conn);
-            ids.push(id);
-        }
+        const resuelta = await horaExtraRepo.resolver(idhoraExtra, { estado: 'rechazada', minutosAprobados: null, comentario: motivo, aprobadoPor }, conn);
+        if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
+        await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
-        return { success: true, ids };
     } catch (e) {
         await conn.rollback();
         throw e;
     } finally {
         conn.release();
     }
+    notificacionAsistenciaService.avisarEnVivo(notificaciones);
+    return { success: true };
 }
 
-module.exports = { solicitar, previsualizar, misHorasExtra, bandeja, aprobar, rechazar, asignar };
+module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };

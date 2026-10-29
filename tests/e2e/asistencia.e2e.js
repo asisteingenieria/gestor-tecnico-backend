@@ -294,30 +294,53 @@ async function main() {
     hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e2 });
     check('puede_marcar_salida = false y segundos_para_habilitar > 0',
         hoy.body.puede_marcar_salida === false && hoy.body.segundos_para_habilitar_salida > 0, hoy.body);
-    // El agente ingresa la franja (22:00-23:00 → siempre nocturna, nunca jornada ordinaria diurna):
-    // el servidor la clasifica solo en tramos (migración 074), sin que el agente elija la clase.
-    const prev = await http('POST', '/api/asistencia/horas-extra/previsualizar', { token: sesiones.e2, body: { fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00' } });
-    check('previsualizar clasificación → 200, 60 min', prev.status === 200 && prev.body?.minutos === 60, prev.body);
-    const sol = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.e2, body: { fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00', motivo: 'E2E cierre de campaña' } });
-    check('solicitar hora extra → 201 y se clasifica sola', sol.status === 201 && sol.body?.minutos_estimados === 60 && Array.isArray(sol.body?.tramos) && sol.body.tramos.length >= 1, sol.body);
-    const bandeja = await http('GET', '/api/asistencia/horas-extra?estado=pendiente', { token: sesiones.director });
-    const pendiente = (Array.isArray(bandeja.body) ? bandeja.body : bandeja.body?.horas_extra ?? bandeja.body?.data ?? [])
-        .find((h) => h.motivo === 'E2E cierre de campaña');
-    check('la solicitud llega a la bandeja del director con sus tramos', Boolean(pendiente) && Array.isArray(pendiente.tramos), bandeja.body);
-    if (pendiente) {
-        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/aprobar`, { token: sesiones.director, body: { tramos: [{ clase: 'extras_nocturnas', minutos: 45 }], comentario: 'E2E ok' } });
-        check('aprobar ajustando los tramos → 200', r.status === 200, r);
-        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/rechazar`, { token: sesiones.director, body: { comentario: 'E2E' } });
-        check('rechazar una ya aprobada → 409', r.status === 409, r);
-        r = await http('PUT', `/api/asistencia/horas-extra/${pendiente.idhora_extra}/aprobar`, { token: sesiones.director, body: {} });
-        check('reaprobar una ya resuelta → 409', r.status === 409, r);
+    // Desde §51 las horas extra las pide el jefe y las aprueba SU jefe (el director). En el seed el
+    // director (ficha 7) no tiene quien lo gestione: durante esta parte empleado4 hace de su director.
+    r = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.e2, body: { empleados: [EMP.e2], fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00', motivo: 'E2E' } });
+    check('el empleado ya no solicita horas extra → 403', r.status === 403, r);
+    r = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.director, body: { empleados: [EMP.e2], fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00', motivo: 'E2E' } });
+    check('jefe sin director en RRHH no puede solicitar → 422', r.status === 422, r);
+    await db.query('UPDATE contrato SET gestor_asistencia_id = ? WHERE users_company_id = ?', [EMP.e4, EMP.director]);
+    try {
+        // Franja 22:00-23:00 → siempre nocturna: el servidor la clasifica solo en tramos (migración 074).
+        const prev = await http('POST', '/api/asistencia/horas-extra/previsualizar', { token: sesiones.director, body: { empleados: [EMP.e2], fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00' } });
+        check('previsualizar clasificación por persona → 200, 60 min', prev.status === 200 && prev.body?.[0]?.minutos === 60, prev.body);
+        const sol = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.director, body: { empleados: [EMP.e2, EMP.e3], fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00', motivo: 'E2E cierre de campaña' } });
+        check('el jefe solicita para dos de su equipo → 201, una solicitud por persona', sol.status === 201 && sol.body?.ids?.length === 2, sol.body);
+        r = await http('POST', '/api/asistencia/horas-extra/solicitar', { token: sesiones.director, body: { empleados: [EMP.director], fecha: HOY, hora_inicio: '22:00', hora_fin: '23:00', motivo: 'E2E' } });
+        check('no puede pedir para alguien fuera de su equipo → 403', r.status === 403, r);
+        r = await http('GET', '/api/asistencia/horas-extra/mias', { token: sesiones.director });
+        check('el jefe ve sus solicitudes pendientes', Array.isArray(r.body) && r.body.filter((h) => h.motivo === 'E2E cierre de campaña' && h.estado === 'pendiente').length === 2, r.body);
+        r = await http('GET', '/api/asistencia/horas-extra?estado=pendiente', { token: sesiones.director });
+        check('no le llegan a su propia bandeja', Array.isArray(r.body) && !r.body.some((h) => h.motivo === 'E2E cierre de campaña'), r.body);
+        const bandeja = await http('GET', '/api/asistencia/horas-extra?estado=pendiente', { token: sesiones.e4 });
+        const deE2 = (Array.isArray(bandeja.body) ? bandeja.body : []).find((h) => h.motivo === 'E2E cierre de campaña' && h.users_company_id === EMP.e2);
+        const deE3 = (Array.isArray(bandeja.body) ? bandeja.body : []).find((h) => h.motivo === 'E2E cierre de campaña' && h.users_company_id === EMP.e3);
+        check('le llegan al director con tramos y nombres', Boolean(deE2 && deE3) && Array.isArray(deE2.tramos) && Boolean(deE2.empleado && deE2.solicitante), bandeja.body);
+        if (deE2) {
+            r = await http('PUT', `/api/asistencia/horas-extra/${deE2.idhora_extra}/aprobar`, { token: sesiones.director, body: {} });
+            check('el jefe no puede aprobar lo que él pidió → 404', r.status === 404, r);
+            r = await http('PUT', `/api/asistencia/horas-extra/${deE2.idhora_extra}/aprobar`, { token: sesiones.e4, body: { tramos: [{ clase: 'extras_nocturnas', minutos: 45 }], comentario: 'E2E ok' } });
+            check('el director aprueba ajustando los tramos → 200', r.status === 200, r);
+            r = await http('PUT', `/api/asistencia/horas-extra/${deE2.idhora_extra}/rechazar`, { token: sesiones.e4, body: { comentario: 'E2E' } });
+            check('rechazar una ya aprobada → 409', r.status === 409, r);
+        }
+        if (deE3) {
+            r = await http('PUT', `/api/asistencia/horas-extra/${deE3.idhora_extra}/rechazar`, { token: sesiones.e4, body: { comentario: 'E2E sin presupuesto' } });
+            check('el director rechaza la otra → 200', r.status === 200, r);
+        }
+        r = await http('GET', '/api/asistencia/mis-notificaciones', { token: sesiones.director });
+        const avisos = Array.isArray(r.body) ? r.body.filter((n) => n.hora_extra_id) : [];
+        check('al jefe le llegan la aprobación y el rechazo con su motivo',
+            avisos.some((n) => n.tipo === 'hora_extra_aprobada') && avisos.some((n) => n.tipo === 'hora_extra_rechazada' && n.mensaje.includes('E2E sin presupuesto')), r.body);
+    } finally {
+        await db.query('UPDATE contrato SET gestor_asistencia_id = NULL WHERE users_company_id = ?', [EMP.director]);
+        await db.query('DELETE FROM notificacion_asistencia WHERE hora_extra_id IN (SELECT idhora_extra FROM hora_extra WHERE fecha = ? AND users_company_id IN (?))', [HOY, Object.values(EMP)]);
     }
     r = await http('GET', '/api/asistencia/mis-horas-extra?estado=aprobada', { token: sesiones.e2 });
     check('empleado2 ve su hora extra aprobada (45 min)', JSON.stringify(r.body).includes('"minutos_aprobados":45'), r.body);
-    r = await http('POST', '/api/asistencia/horas-extra/asignar', { token: sesiones.director, body: { empleados: [EMP.e3], fecha: HOY, minutos: 30, clase: 'extras_diurnas', motivo: 'E2E asignada' } });
-    check('director asigna hora extra a empleado3 → 201', r.status === 201, r);
-    r = await http('GET', '/api/asistencia/mis-horas-extra', { token: sesiones.e3 });
-    check('la asignada nace aprobada', JSON.stringify(r.body).includes('E2E asignada') && JSON.stringify(r.body).includes('aprobada'), r.body);
+    r = await http('POST', '/api/asistencia/horas-extra/asignar', { token: sesiones.director, body: { empleados: [EMP.e3], fecha: HOY, minutos: 30, clase: 'extras_diurnas' } });
+    check('asignar horas extra ya aprobadas ya no existe → 404', r.status === 404, r);
     // El reporte del jefe se arma solo desde los tramos aprobados (migración 074).
     r = await http('GET', `/api/asistencia/reporte-horas-extra?periodo=${HOY.slice(0, 7)}`, { token: sesiones.director });
     check('reporte del jefe → 200 y suma los tramos aprobados', r.status === 200 && JSON.stringify(r.body).includes('total_horas'), r.body);

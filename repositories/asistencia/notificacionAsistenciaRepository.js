@@ -1,6 +1,6 @@
 const db = require('../../config/db');
 
-// Campana del portal (migración 084): avisos de asistencia por ficha (jefe, coordinador, empleado) o
+// Campana del portal (migración 084; horas extra desde la 085, §51): avisos de asistencia por ficha (jefe, coordinador, empleado) o
 // por usuario de `users` (financiera, que puede no tener ficha).
 const VISIBLES = 50;
 
@@ -8,9 +8,9 @@ async function insertarVarias(notificaciones, conn = db) {
     if (notificaciones.length === 0) return;
     await conn.query(
         `INSERT INTO notificacion_asistencia
-            (destinatario_users_company_id, destinatario_user_id, tipo, solicitud_cambio_turno_id, mensaje)
+            (destinatario_users_company_id, destinatario_user_id, tipo, solicitud_cambio_turno_id, hora_extra_id, mensaje)
          VALUES ?`,
-        [notificaciones.map((n) => [n.usersCompanyId ?? null, n.userId ?? null, n.tipo, n.solicitudCambioTurnoId ?? null, n.mensaje])]
+        [notificaciones.map((n) => [n.usersCompanyId ?? null, n.userId ?? null, n.tipo, n.solicitudCambioTurnoId ?? null, n.horaExtraId ?? null, n.mensaje])]
     );
 }
 
@@ -27,7 +27,7 @@ function destinatario({ usersCompanyId, userId }) {
 async function findPara(sesion, conn = db) {
     const { sql, parametros } = destinatario(sesion);
     const [filas] = await conn.query(
-        `SELECT idnotificacion_asistencia, tipo, solicitud_cambio_turno_id, mensaje, leida_en, creada_en
+        `SELECT idnotificacion_asistencia, tipo, solicitud_cambio_turno_id, hora_extra_id, mensaje, leida_en, creada_en
          FROM notificacion_asistencia
          WHERE ${sql}
          ORDER BY leida_en IS NOT NULL, creada_en DESC

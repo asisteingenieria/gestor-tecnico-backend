@@ -1,9 +1,11 @@
 const horaExtraService = require('../../services/asistencia/horaExtraService');
 const { autorDe } = require('./autor');
 
+// El jefe solicita por su equipo (§51): `empleados` es la lista de fichas.
 async function solicitar(req, res) {
     const resultado = await horaExtraService.solicitar({
-        usersCompanyId: req.user.users_company_id,
+        jefeUsersCompanyId: req.user.users_company_id,
+        empleados: req.body.empleados,
         fecha: req.body.fecha,
         horaInicio: req.body.hora_inicio,
         horaFin: req.body.hora_fin,
@@ -15,7 +17,8 @@ async function solicitar(req, res) {
 
 async function previsualizar(req, res) {
     const resultado = await horaExtraService.previsualizar({
-        usersCompanyId: req.user.users_company_id,
+        jefeUsersCompanyId: req.user.users_company_id,
+        empleados: req.body.empleados,
         fecha: req.body.fecha,
         horaInicio: req.body.hora_inicio,
         horaFin: req.body.hora_fin
@@ -29,6 +32,10 @@ async function misHorasExtra(req, res) {
         estado: req.query.estado
     });
     res.json(resultado);
+}
+
+async function misSolicitudes(req, res) {
+    res.json(await horaExtraService.misSolicitudes({ jefeUsersCompanyId: req.user.users_company_id, estado: req.query.estado }));
 }
 
 async function bandeja(req, res) {
@@ -60,17 +67,4 @@ async function rechazar(req, res) {
     res.json(resultado);
 }
 
-async function asignar(req, res) {
-    const resultado = await horaExtraService.asignar({
-        directorUsersCompanyId: req.user.users_company_id,
-        empleados: req.body.empleados,
-        fecha: req.body.fecha,
-        minutos: req.body.minutos,
-        clase: req.body.clase,
-        motivo: req.body.motivo,
-        aprobadoPor: autorDe(req)
-    });
-    res.status(201).json(resultado);
-}
-
-module.exports = { solicitar, previsualizar, misHorasExtra, bandeja, aprobar, rechazar, asignar };
+module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };
