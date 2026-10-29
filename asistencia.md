@@ -2814,3 +2814,86 @@ repo porque trae cédulas. Tabla temporal + `INSERT … SELECT … ON DUPLICATE 
    `node scripts/recalcularJornadas.js --desde=2026-10-24 --hasta=2026-10-31` (del 24 al 28 hay jornadas
    cerradas sin horario).
 2. `gestor_coordinadores_kevin_mayra.sql`, cuando el usuario lo decida.
+
+---
+
+## 50. Sesión 2026-10-29 — Solicitudes de cambio de turno (084)
+
+**Qué pidió el negocio:** los coordinadores le envían al jefe solicitudes de cambio de turno de cualquier
+empleado. El jefe las aprueba o las rechaza, y a cada parte le llega el aviso.
+
+**Reglas acordadas con el usuario:**
+- **Dos tipos.** *Cambio de horario*: un empleado pasa a otro turno en uno o varios días, máximo 31 por
+  solicitud. El turno nuevo puede ser una plantilla del jefe, horas a mano o descanso. *Intercambio*: dos
+  empleados cambian su turno en una fecha. Los dos deben tener turno ese día, turnos distintos y el mismo
+  jefe.
+- **Quién pide:** el coordinador, es decir, quien es `jefe_inmediato_id` de algún contrato activo. También
+  puede pedir quien gestiona un equipo. Puede pedir por **cualquier** empleado activo, no solo por los suyos.
+  No hay rol nuevo: lo resuelve `canSolicitarCambioTurno` (`middleware/auth.js`) en cada petición.
+- **Quién aprueba:** el gestor de asistencia del empleado, `COALESCE(gestor_asistencia_id, jefe_area_id)`
+  (§44). Queda fijado en la solicitud como `aprobador_users_company_id`. Si el empleado no tiene gestor, no
+  se puede pedir.
+- **El motivo es obligatorio al pedir** y el **motivo de rechazo es obligatorio al rechazar**. Al aprobar
+  se puede dejar un comentario opcional.
+- **Al aprobar, el horario se aplica solo.** Se escribe en `horario_asignado` en lote, con la nota
+  `Cambio de turno #id`. Cada día guarda una foto del turno anterior (`anterior_*`) para mostrar el antes y
+  el después. No se aprueba si algún día ya pasó.
+- No se pueden pedir fechas pasadas. No se puede pedir sobre un empleado y una fecha que ya tienen una
+  solicitud pendiente (409).
+- **Avisos** (tabla `notificacion_asistencia`): al pedir, al jefe y a financiera; al resolver, al
+  coordinador y a financiera, más un aviso a cada empleado afectado si se aprueba. Van en vivo por
+  `asistencia:notificacion` a la sala de la ficha, y a `asistencia:monitores` si hay un `users.id` de
+  financiera. Si el cambio aprobado toca el día de hoy, también se llama a `notificarCambioJornada`.
+
+**Migración 084** (`084_solicitud_cambio_turno.sql`), idempotente y sin dependencias:
+- `solicitud_cambio_turno`: cabecera, estado y quién pidió, aprueba y resolvió, con la ficha y con la
+  cuenta (`autorDe`).
+- `solicitud_cambio_turno_dia`: un registro por empleado y día, con el turno nuevo y la foto del anterior.
+- `notificacion_asistencia`: el destinatario es una ficha (`users_company_id`) o un `users.id` (financiera,
+  que no tiene ficha).
+
+**Backend** (cuatro capas):
+- `domain/asistencia/cambioTurno.js`: puro, con 14 pruebas.
+- `solicitudCambioTurnoRepository` y `notificacionAsistenciaRepository`.
+- `equipoRepository`: `esJefeInmediato`, `gestoresDe`, `empleadosActivosConGestor`.
+- `cambioTurnoService` y `notificacionAsistenciaService`.
+- `cambioTurnoController` y tres métodos nuevos en `alertaController` para las notificaciones.
+
+**Rutas** (`/api/asistencia`):
+
+| Ruta | Quién |
+|---|---|
+| `GET /mis-notificaciones`, `POST /mis-notificaciones/leidas`, `POST /mis-notificaciones/:id/leida` | cualquiera del portal |
+| `GET /cambios-turno/permisos` | cualquiera del portal → `{ puede_solicitar, puede_aprobar }` |
+| `GET /cambios-turno/empleados\|plantillas\|horarios\|mias`, `POST /cambios-turno` | `canSolicitarCambioTurno` |
+| `GET /cambios-turno/bandeja`, `PUT /cambios-turno/:id/aprobar\|rechazar` | `canDirigirEquipo`; la ajena da 404 |
+| `GET /financiera/cambios-turno` | `isFinanciera`, solo lectura |
+
+**Frontend** (`sebas-branch`):
+- `src/components/asistencia/CambiosTurno.jsx`. Para el coordinador: modal con buscador por nombre o
+  cédula, que muestra a qué jefe le llega la solicitud, y vista previa del turno actual → nuevo; pestaña
+  "Mis solicitudes". Para el jefe: "Por aprobar", con aprobar (comentario opcional) o rechazar (motivo
+  obligatorio). Para financiera (`financiera` prop): todas las solicitudes, solo lectura.
+- Rutas `asistencia/cambios-turno`, `operaciones/cambios-turno` y `recursos-humanos/cambios-turno`.
+- Menú: el portal la muestra si `getPermisos` lo permite, y al jefe con el contador de pendientes.
+  Financiera la tiene en `NAV_FINANCIERA`.
+- `CampanaAlertas` junta las alertas de traspasos con estas notificaciones, tiene "Marcar todas" y se
+  recarga por socket. Clicar un aviso de cambio de turno lleva a la pantalla. **La campana de
+  `RecursosHumanosLayout`, que era un botón muerto, ahora es `CampanaAlertas`.**
+
+**Verificación (local):**
+- `npm test`: 240/240.
+- E2E de API: 38 checks, incluido el socket, con limpieza al final (script de la sesión, fuera del repo).
+- Prueba en el navegador: un coordinador pidió un intercambio, al jefe le llegó por la campana con el
+  contador del menú, lo rechazó con motivo y la tarjeta muestra el motivo. Los datos de prueba se borraron.
+
+**Para producción:**
+1. Aplicar la 084. No tiene dependencias y va **antes** del backend: sin las tablas, las rutas nuevas y la
+   campana fallan.
+2. Desplegar backend y frontend juntos. El frontend llama a `/mis-notificaciones` en todas las pantallas
+   del portal y de financiera.
+3. Para que los coordinadores vean la opción hace falta que sean `jefe_inmediato_id` de alguien en RRHH.
+   Lo mismo que en §49: si la ficha no lo dice, el sistema no lo sabe.
+
+**Pendiente:** el aviso al coordinador cuando su solicitud vence porque llegó la fecha sin respuesta. Hoy
+queda pendiente y ya no se puede aprobar.
