@@ -157,7 +157,23 @@ async function empleadosActivosConGestor(conn = db) {
     return filas;
 }
 
+// Cargo del contrato activo más reciente, para mostrarlo bajo el nombre en la barra del portal.
+async function cargoDe(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT car.nombre AS cargo
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         JOIN cargo car ON car.idcargo = c.cargo_idcargo
+         WHERE c.users_company_id = ? AND ec.nombre IN (?, ?)
+         ORDER BY c.idcontrato DESC
+         LIMIT 1`,
+        [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
+    );
+    return filas[0]?.cargo || null;
+}
+
 module.exports = {
+    cargoDe,
     directorUserIdDe, jefeAreaDe, esSubordinado, subordinadosDe, tieneEmpleadosACargo, listaEmpleadosACargo,
     esJefeInmediato, gestoresDe, empleadosActivosConGestor
 };
