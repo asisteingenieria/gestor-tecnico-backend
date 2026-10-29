@@ -627,7 +627,7 @@ Todas las rutas pasan por `verifyToken`. Montaje en `index.js`:
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/mi-horario?desde=&hasta=` | Horarios asignados del rango (default: semana actual) |
+| `GET` | `/mi-horario?desde=&hasta=` | `{ campania, centro_costo, horarios }` del rango (default: semana actual); cada horario trae `plantilla`. Antes de §46 era un arreglo |
 | `GET` | `/mi-jornada/hoy` | Estado en vivo: contadores calculados, pausa activa, flags de botones |
 | `POST` | `/mi-jornada/entrada` | Marca entrada (idempotente) |
 | `POST` | `/mi-jornada/pausa` | Body `{ tipo: 'bano' \| 'almuerzo' }` |
@@ -673,7 +673,7 @@ referencia (evita depender del reloj del cliente) y resincroniza cada 60 s.
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `GET` | `/equipo` | Empleados a cargo con su estado de hoy en vivo |
+| `GET` | `/equipo` | Empleados a cargo con su estado de hoy en vivo, campaña, centro de costo y `turno` (§45, §47) |
 | `GET` | `/equipo/:empleadoId/jornadas?desde=&hasta=` | Historial de jornadas |
 | `GET` | `/equipo/:empleadoId/jornada/:fecha/trazabilidad` | Trazabilidad completa del día |
 | `GET` | `/equipo/estadisticas?desde=&hasta=` | Consolidado del equipo |
@@ -686,6 +686,9 @@ referencia (evita depender del reloj del cliente) y resincroniza cada 60 s.
 | `PUT` | `/horas-extra/:id/rechazar` | `{ comentario }` |
 | `POST` | `/horas-extra/asignar` | `{ empleados: [id], fecha, minutos, motivo }` → nace aprobada |
 | `POST` | `/equipo/jornada/:id/evento` | Registro manual con `origen='director'` y nota obligatoria |
+
+Financiera (`isFinanciera`) tiene sus rutas bajo `/financiera/…` (§32, §35-§37); la de la jornada de
+hoy en vivo de todos es `GET /financiera/en-vivo?campania_id=` (§47).
 
 ### 8.3 Socket.IO
 
@@ -2738,3 +2741,76 @@ tenía el histórico: el reporte mensual y la trazabilidad de cada persona. El t
 - Sin token, el endpoint responde 401.
 - `npm test` 226/226, e2e 127/127 (cubre `GET /equipo` por el camino nuevo) y build del frontend.
 - **No se revisó en el navegador.**
+
+## 48. Estado de §45-§47: commits y despliegue (2026-10-28)
+
+**Commits en `sebas-branch`, ya pusheados; el usuario hace el merge:**
+
+| Repo | Commit | Contenido |
+|---|---|---|
+| backend | `5c0dd30` | §45: migración 083, plantillas por centro de costo, `centro_costo_id` en crear/editar plantilla, equipo con campaña y centro |
+| frontend | `aea0d69` | §45: `GestionHorarios.jsx` agrupado y filtrado por centro, "Seleccionar todo" por centro, selector de centro en la plantilla |
+| backend | `4da7fee` | §46-§47: plantilla en los horarios, nueva forma de `/mi-horario`, centro y turno en financiera, `GET /financiera/en-vivo`, cálculo en lote `calcularEstadosDelDia` |
+| frontend | `1da8c4d` | §46-§47: Mi horario, Mi jornada, trazabilidades, reporte mensual con centro y turno, pantalla "Asistencia en vivo" de financiera |
+
+**Despliegue a producción, en este orden y en la misma ventana:**
+1. Migración **083** (copia en `Descargas 83_horario_plantilla_centro_costo.sql`). Sin la 083 el backend
+   nuevo falla al listar plantillas (`p.centro_costo_id` no existe).
+2. Backend: pull + `pm2 restart gestor-backend`.
+3. Frontend: pull + `npm install && npm run build`. **Va junto con el backend:** `/mi-horario` cambió
+   de arreglo a objeto, así que con un solo lado nuevo "Mi horario" y "Mi trazabilidad" dejan de cargar.
+
+**Pendiente después del despliegue:**
+- Revisión en el navegador, que no se hizo en local: "Asistencia en vivo" con una cuenta de
+  financiera, "Horarios del equipo" con un jefe (filtro y "Seleccionar todo" por centro) y "Mi horario"
+  con un agente.
+- Que los jefes creen sus plantillas por centro de costo: las existentes quedan como generales
+  (`centro_costo_id` NULL) hasta que alguien les asigne un centro.
+- Geraldin Cruz Ortiz debería ver 16 personas en su equipo y Manuel Quintero 3 (§44).
+
+## 49. Sesión 2026-10-28/29 — Malla de octubre y coordinadores de los jefes de área
+
+**Origen:** Kevin Buitrago filtraba "Horarios del equipo" por CBAT OUTBOUND y no veía a todos los de la
+malla de octubre (`Descargas/Mallas1.xlsx`, hoja `tab_mallas_turnos_mes`: un registro por persona y día del
+1 al 30, con `Entrada_Final`/`Salida_Final`/`Almuerzo_Final` y `Novedad`).
+
+**Diagnóstico (el filtro está bien: usa el `centro_costo_id` del contrato):**
+- La campaña T&T usa solo CBAT INBOUND, CBAT OUTBOUND y CBAT WHATSAPP. Los 30 + 70 + 34 que ve Kevin
+  en producción son todos sus agentes.
+- Kevin no ve a sus coordinadores (ADMINISTRATIVO CB) porque el HeadCount les pone como **jefe de área a
+  Nelson Acero**, así que los gestiona él. Con Mayra Barbosa pasa lo mismo: su jefe de área es Andrés Nuncira.
+- 58 personas de la malla tienen en el Gestor otro centro de costo que el del Excel (sobre todo líderes en
+  ADMINISTRATIVO CB que la malla pone en el centro operativo). Sin corregir: decisión pendiente de RRHH.
+- 29 de los 70 de CBAT OUTBOUND de Kevin no tienen malla en octubre: confirmar con RRHH si siguen activos.
+
+**Regla del negocio confirmada:** el jefe de área gestiona a todos los que tiene a cargo, incluidos los
+coordinadores, en todas las campañas.
+
+**Coordinadores → su jefe (SQL, sin migración ni código):** `gestor_asistencia_id` = Kevin (9 contratos) o
+Mayra (12) para quien les reporta directo (`jefe_inmediato_id`) y tiene otro jefe de área. No cambia
+`jefe_area_id`. Archivo `Descargas/gestor_coordinadores_kevin_mayra.sql`, fuera del repo (por cédula, en
+transacción, solo contratos activos sin gestor; idempotente). En local dio Kevin 133 → 142, Mayra 171 → 183,
+Nelson 24 → 15 y Andrés 68 → 56; se revirtió en local a pedido del usuario y **no está aplicado en ningún
+lado**. `headcountRRHH.js sincronizar` no lo pisa, pero tampoco lo calcula para un coordinador nuevo.
+
+**Horarios del 24 al 30 de octubre desde la malla:** `Descargas/horarios_malla_24_30_oct.sql`, fuera del
+repo porque trae cédulas. Tabla temporal + `INSERT … SELECT … ON DUPLICATE KEY UPDATE` sobre
+`(users_company_id, fecha)`, así que **reemplaza** el horario ya asignado. Cruza por cédula con `BINARY`
+(collation de producción) y solo fichas con contrato activo. Reglas de la malla:
+- Entrada a las 00:00 (12 a. m.) = **día libre** (`es_descanso = 1`), igual que `Libre`.
+- INC, VACACIONES, RETIRO y SUSPENSION = descanso con la novedad en `notas`.
+- **05:00–13:00 es intencional:** es el horario provisional que la malla les pone a los ingresos nuevos para
+  que al jefe le salte la alerta y lo cambie. Se carga tal cual, con la nota `PROVISIONAL: …` (31 días, 6
+  personas). Del 24 al 28 les va a salir llegada tarde hasta que el jefe corrija esos días.
+- 4 turnos con la salida antes de la entrada (07:00–02:30, etc.) se tomaron como error de 12 h y se les
+  sumaron 12 h a la salida. El sistema no maneja turnos que cruzan la medianoche.
+- La malla no trae el 31. Una persona de la malla no tiene ficha en el Gestor.
+
+**Aplicado en local** (2026-10-29): 1.614 horarios de 232 personas, 310 descansos, 31 provisionales. El
+`recalcularJornadas` no tuvo qué recalcular: la BD local no tiene jornadas reales después del 21.
+
+**Para producción:**
+1. `horarios_malla_24_30_oct.sql` y luego
+   `node scripts/recalcularJornadas.js --desde=2026-10-24 --hasta=2026-10-31` (del 24 al 28 hay jornadas
+   cerradas sin horario).
+2. `gestor_coordinadores_kevin_mayra.sql`, cuando el usuario lo decida.
