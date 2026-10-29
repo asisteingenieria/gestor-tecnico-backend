@@ -253,3 +253,15 @@ test('desconexión sin reconexión y sin horario: la jornada se detiene en la de
     assert.equal(resultado.cuentaJornada, false);
     assert.ok(resultado.desconexionActiva);
 });
+
+test('día de descanso trabajado: no hay llegada tarde contra las 00:00', () => {
+    const descanso = { ...HORARIO, hora_entrada: '00:00:00', hora_salida: '00:00:00', es_descanso: 1 };
+    const resultado = calcularJornada([evento('entrada', '09:00:00')], descanso, horaDia('10:00:00'));
+    assert.equal(resultado.minutosTarde, 0);
+    assert.ok(!resultado.alertas.includes('llegada_tarde'));
+});
+
+test('sin tolerancia: entrar 8 min después del turno son 8 min tarde', () => {
+    const resultado = calcularJornada([evento('entrada', '08:08:00')], { ...HORARIO, tolerancia_entrada_min: 0 }, horaDia('09:00:00'));
+    assert.equal(resultado.minutosTarde, 8);
+});

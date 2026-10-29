@@ -30,7 +30,7 @@ async function crear({ nombre, horaEntrada, horaSalida, minutosAlmuerzo, horaAlm
             (nombre, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, centro_costo_id, dueno_users_company_id, creado_por_user_id, creado_por_cuenta_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-            nombre, horaEntrada, horaSalida, minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 5,
+            nombre, horaEntrada, horaSalida, minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 0,
             centroCostoId ?? null, duenoUsersCompanyId, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null
         ]
     );

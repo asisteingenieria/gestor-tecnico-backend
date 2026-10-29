@@ -31,7 +31,7 @@ function horarioNuevo({ plantilla, valores, esDescanso }) {
     if (esDescanso) {
         return {
             horarioPlantillaId: null, horaEntrada: '00:00:00', horaSalida: '00:00:00', minutosAlmuerzo: 0,
-            horaAlmuerzoInicio: null, toleranciaEntradaMin: 5, esDescanso: true
+            horaAlmuerzoInicio: null, toleranciaEntradaMin: 0, esDescanso: true
         };
     }
     const base = plantilla
@@ -53,7 +53,7 @@ function horarioNuevo({ plantilla, valores, esDescanso }) {
         horaSalida,
         minutosAlmuerzo: base.minutosAlmuerzo ?? 60,
         horaAlmuerzoInicio: hhmmss(base.horaAlmuerzoInicio) ?? null,
-        toleranciaEntradaMin: base.toleranciaEntradaMin ?? 5,
+        toleranciaEntradaMin: base.toleranciaEntradaMin ?? 0,
         esDescanso: false
     };
 }

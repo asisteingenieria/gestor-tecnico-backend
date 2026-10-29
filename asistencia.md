@@ -3003,3 +3003,41 @@ Si quien solicita no tiene gestor, o se gestiona a sí mismo (Geraldin), la soli
 2. Backend y frontend juntos.
 3. Que cada jefe de operaciones tenga en RRHH a su director como gestor (jefe de área o gestor de
    asistencia). Si no, no puede solicitar. Hoy Kevin → Nelson y Mayra → Andrés ya están así.
+
+## 52. Sesión 2026-10-29 — Sin tolerancia de entrada (086)
+
+**Qué pasaba.** Heidy, con turno de 10:00, entró a las 10:08 y "Equipo hoy" la mostraba con 4 minutos
+tarde. Los minutos tarde se cuentan desde el fin de la tolerancia (`calcularJornada.js`, la entrada
+programada más `tolerancia_entrada_min`) y la tolerancia era de 5 minutos. Esos 5 no venían de la operación:
+eran el valor por defecto del módulo (045) y el SQL de la malla los copió en cada horario.
+`Mallas1.xlsx` no trae ninguna columna de tolerancia. El redondeo de segundos explica que 10:08 diera 4
+y no 3.
+
+**Decisión del usuario:** no hay tolerancia. Quien entra a las 10:08 con turno de 10:00 llegó 8 minutos
+tarde.
+
+**Cambios:**
+- **Migración 086:** pone en 0 el parámetro general `tolerancia_entrada_min`, el DEFAULT de
+  `horario_plantilla`, `horario_asignado` y `solicitud_cambio_turno_dia`, y todas las filas que ya existen
+  en esas tablas. Es idempotente.
+- **Código:** los `?? 5` de los repositorios de horario, plantilla y solicitudes, de `cambioTurno.js` y
+  el parámetro por defecto de `calcularJornada.js` pasan a 0. En el frontend, una plantilla nueva arranca
+  en 0 en `GestionHorarios.jsx`. Sigue siendo posible darle tolerancia a una plantilla, que es un campo
+  editable, pero ya nada la pone sola.
+- No cambia la fórmula. Con tolerancia en 0, "tarde" se cuenta desde la hora del turno.
+- **Día de descanso trabajado:** `calcularJornada` ya no cuenta minutos tarde cuando el horario es de
+  descanso. La entrada llega como 00:00 y alguien que entraba a las 9:00 salía con 9 h tarde.
+- **"Sin horario" en Equipo hoy:** sin turno, o en su día de descanso, la columna Llegada decía
+  "Puntual". Ahora muestra un cuadro gris (gris y azul si sigue en turno) con "Sin horario · en turno",
+  porque no hay contra qué medir la llegada. Es `claseHoy` en `EquipoAsistencia.jsx` y las claves
+  `sin_horario`/`curso_sin_horario` en `utils/llegadaAsistencia.js`.
+
+**Para producción:**
+1. Correr la 086.
+2. `node scripts/recalcularJornadas.js --desde=2026-10-01`, para que el histórico, el resumen mensual y
+   los reportes muestren los minutos tarde sin tolerancia.
+3. Backend y frontend (cambian solo los valores por defecto; sin la 086 el código nuevo igual respeta la
+   tolerancia que tenga cada horario).
+
+En local se aplicó la 086 (1.630 horarios, 1 plantilla) y se recalcularon 683 jornadas desde el
+2026-10-01. Tests: 248. La e2e crea sus plantillas con tolerancia 5 explícita y sigue esperando 55.

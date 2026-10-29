@@ -23,7 +23,7 @@ async function insertarDias(solicitudId, dias, conn = db) {
          VALUES ?`,
         [dias.map((d) => [
             solicitudId, d.usersCompanyId, d.fecha, d.horarioPlantillaId ?? null, d.horaEntrada, d.horaSalida, d.minutosAlmuerzo ?? 60,
-            d.horaAlmuerzoInicio ?? null, d.toleranciaEntradaMin ?? 5, d.esDescanso ? 1 : 0,
+            d.horaAlmuerzoInicio ?? null, d.toleranciaEntradaMin ?? 0, d.esDescanso ? 1 : 0,
             d.anteriorHoraEntrada ?? null, d.anteriorHoraSalida ?? null, d.anteriorEsDescanso ?? null, d.anteriorPlantilla ?? null
         ])]
     );

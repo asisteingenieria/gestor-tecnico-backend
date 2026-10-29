@@ -2,7 +2,7 @@ const { combinarFechaHora } = require('../../utils/fechaBogota');
 
 const PARAMETROS_DEFECTO = {
     minutos_habilitar_salida: 10,
-    tolerancia_entrada_min: 5,
+    tolerancia_entrada_min: 0,
     limite_bano_min_por_pausa: 15,
     limite_bano_min_por_dia: 30,
     desviacion_almuerzo_alerta_min: 15
@@ -162,7 +162,8 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         const horaEntradaProgramada = combinarFechaHora(horario.fecha, horario.hora_entrada);
         const tolerancia = horario.tolerancia_entrada_min ?? parametros.tolerancia_entrada_min;
         const limiteEntrada = new Date(horaEntradaProgramada.getTime() + tolerancia * 60000);
-        minutosTarde = Math.max(0, minutosEntre(limiteEntrada, entrada.ocurrido_en));
+        // Un día de descanso no tiene hora de entrada (viene como 00:00): no hay contra qué llegar tarde.
+        if (!horario.es_descanso) minutosTarde = Math.max(0, minutosEntre(limiteEntrada, entrada.ocurrido_en));
 
         const horaSalidaProgramada = combinarFechaHora(horario.fecha, horario.hora_salida);
         const habilitacion = new Date(horaSalidaProgramada.getTime() - parametros.minutos_habilitar_salida * 60000);

@@ -60,7 +60,7 @@ async function insertarVarios(filas, conn = db) {
                 notas = VALUES(notas)`,
             [lote.map((f) => [
                 f.usersCompanyId, f.fecha, f.horarioPlantillaId ?? null, f.horaEntrada, f.horaSalida,
-                f.minutosAlmuerzo ?? 60, f.horaAlmuerzoInicio ?? null, f.toleranciaEntradaMin ?? 5,
+                f.minutosAlmuerzo ?? 60, f.horaAlmuerzoInicio ?? null, f.toleranciaEntradaMin ?? 0,
                 f.esDescanso ? 1 : 0, f.creadoPor?.userId ?? null, f.creadoPor?.cuentaId ?? null, f.notas ?? null
             ])]
         );
@@ -86,7 +86,7 @@ async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada
             notas = VALUES(notas)`,
         [
             usersCompanyId, fecha, horarioPlantillaId ?? null, horaEntrada, horaSalida,
-            minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 5,
+            minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 0,
             esDescanso ? 1 : 0, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null, notas ?? null
         ]
     );
