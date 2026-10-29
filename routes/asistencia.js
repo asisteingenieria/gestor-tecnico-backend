@@ -32,7 +32,6 @@ const {
     bandejaHorasExtraQuerySchema,
     aprobarHoraExtraSchema,
     rechazarHoraExtraSchema,
-    asignarHoraExtraSchema,
     eventoManualSchema,
     periodoQuerySchema,
     reporteFinancieraQuerySchema,
@@ -59,8 +58,7 @@ router.post('/mi-jornada/salida', canRegistrarAsistencia, asyncHandler(marcajeCo
 router.get('/mi-jornada/:fecha/trazabilidad', canRegistrarAsistencia, validar(trazabilidadParamsSchema), asyncHandler(consultaController.trazabilidad));
 router.get('/mis-jornadas', canRegistrarAsistencia, validar(rangoQuerySchema), asyncHandler(consultaController.misJornadas));
 router.get('/mis-estadisticas', canRegistrarAsistencia, validar(rangoQuerySchema), asyncHandler(consultaController.misEstadisticas));
-router.post('/horas-extra/solicitar', canRegistrarAsistencia, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
-router.post('/horas-extra/previsualizar', canRegistrarAsistencia, validar(previsualizarHoraExtraSchema), asyncHandler(horaExtraController.previsualizar));
+// El empleado solo consulta sus horas extra: desde §51 las solicita su jefe.
 router.get('/mis-horas-extra', canRegistrarAsistencia, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misHorasExtra));
 // Campana: alertas de traspasos dirigidas a mi ficha (evaluación del encargo, retorno del trabajo en casa)
 router.get('/mis-alertas', canRegistrarAsistencia, asyncHandler(alertaController.misAlertas));
@@ -99,10 +97,14 @@ router.post('/horarios', canDirigirEquipo, validar(asignarHorarioSchema), asyncH
 router.put('/horarios/:id', canDirigirEquipo, validar(actualizarAsignacionSchema), asyncHandler(horarioController.actualizarAsignacion));
 router.delete('/horarios/:id', canDirigirEquipo, validar(idParamSchema), asyncHandler(horarioController.eliminarAsignacion));
 
+// Horas extra (§51): el jefe las solicita por su equipo y las aprueba su director (bandeja = las que
+// le toca aprobar; también las del flujo anterior de su propia gente).
+router.post('/horas-extra/solicitar', canDirigirEquipo, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
+router.post('/horas-extra/previsualizar', canDirigirEquipo, validar(previsualizarHoraExtraSchema), asyncHandler(horaExtraController.previsualizar));
+router.get('/horas-extra/mias', canDirigirEquipo, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misSolicitudes));
 router.get('/horas-extra', canDirigirEquipo, validar(bandejaHorasExtraQuerySchema), asyncHandler(horaExtraController.bandeja));
 router.put('/horas-extra/:id/aprobar', canDirigirEquipo, validar(aprobarHoraExtraSchema), asyncHandler(horaExtraController.aprobar));
 router.put('/horas-extra/:id/rechazar', canDirigirEquipo, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
-router.post('/horas-extra/asignar', canDirigirEquipo, validar(asignarHoraExtraSchema), asyncHandler(horaExtraController.asignar));
 
 // Reporte mensual de horas extras (§32). Se llena solo con las horas aprobadas: solo lectura.
 router.get('/reporte-horas-extra', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(reporteHorasExtraController.miReporte));

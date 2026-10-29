@@ -102,8 +102,8 @@ const canDirigirEquipo = async (req, res, next) => {
         next(err);
     }
 };
-// Cambios de turno (asistencia.md §50): los pide el coordinador, que es quien es jefe inmediato de
-// alguien con contrato activo (o un jefe de área). Como canDirigirEquipo, sale de RRHH en cada petición.
+// Cambios de turno (asistencia.md §50, flujo de §51): los pide el jefe de operaciones, quien gestiona
+// la asistencia de alguien. Como canDirigirEquipo, sale de RRHH en cada petición.
 const canSolicitarCambioTurno = async (req, res, next) => {
     if (!req.user) {
         return res.status(401).json({ msg: 'No autenticado' });
@@ -113,7 +113,7 @@ const canSolicitarCambioTurno = async (req, res, next) => {
         if (await puedeSolicitar(req.user.users_company_id)) {
             return next();
         }
-        return res.status(403).json({ msg: 'Solo los coordinadores pueden solicitar cambios de turno' });
+        return res.status(403).json({ msg: 'Solo quien gestiona un equipo puede solicitar cambios de turno' });
     } catch (err) {
         next(err);
     }

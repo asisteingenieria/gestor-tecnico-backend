@@ -6,16 +6,17 @@ async function permisos(req, res) {
 }
 
 async function empleados(req, res) {
-    res.json(await cambioTurnoService.empleadosSolicitables());
+    res.json(await cambioTurnoService.empleadosSolicitables({ usersCompanyId: req.user.users_company_id }));
 }
 
 async function plantillas(req, res) {
-    res.json(await cambioTurnoService.plantillasPara({ empleadoId: Number(req.query.empleadoId) }));
+    res.json(await cambioTurnoService.plantillasPara({ solicitanteUsersCompanyId: req.user.users_company_id }));
 }
 
 // `empleados` llega como "12,34" en la query.
 async function horarios(req, res) {
     const resultado = await cambioTurnoService.horariosDe({
+        solicitanteUsersCompanyId: req.user.users_company_id,
         empleados: String(req.query.empleados).split(',').map(Number).filter(Number.isInteger),
         desde: req.query.desde,
         hasta: req.query.hasta

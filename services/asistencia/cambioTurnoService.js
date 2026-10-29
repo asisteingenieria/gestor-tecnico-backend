@@ -9,47 +9,69 @@ const { notificarCambioJornada } = require('./notificacionService');
 const {
     MAX_DIAS_CAMBIO_TURNO, assertFechasSolicitables, horarioNuevo, diasCambioHorario, diasIntercambio, resumenSolicitud, mensajes
 } = require('../../domain/asistencia/cambioTurno');
+const { assertAprobador } = require('../../domain/asistencia/aprobacionJerarquica');
 const { fechaLaboral, sumarDias, normalizarFecha } = require('../../utils/fechaBogota');
 const {
     NoAutorizadoError, NoEncontradoError, ConflictoJornadaError, ReglaAsistenciaError, ValidacionError
 } = require('../../errors/AppError');
 
-// Solicitudes de cambio de turno (migración 084, asistencia.md §50). El coordinador (jefe inmediato de
-// alguien) pide el cambio de cualquier empleado activo; le llega a quien gestiona la asistencia de ese
-// empleado, que lo aprueba —y el horario se reemplaza solo— o lo rechaza con un motivo. Cada paso deja
-// una notificación en la campana: al jefe, al coordinador, a los empleados afectados y a financiera.
+// Solicitudes de cambio de turno (migración 084, asistencia.md §50; flujo de §51). El jefe de
+// operaciones —quien gestiona la asistencia del empleado— pide el cambio de alguien de su equipo; le
+// llega a SU jefe, el director, que lo aprueba —y el horario se reemplaza solo— o lo rechaza con un
+// motivo. Cada paso deja una notificación en la campana: al director, al jefe, a los empleados
+// afectados y a financiera.
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
 }
 
-// Coordinador = jefe inmediato de alguien. Un jefe de área también puede pedir (y luego aprobarse a sí
-// mismo), para no dejarlo por fuera si en su equipo nadie le reporta directo.
+// Solicita quien gestiona a alguien (el jefe de operaciones). No hay roles: sale de RRHH (§23).
 async function puedeSolicitar(usersCompanyId) {
     if (!usersCompanyId) return false;
-    return (await equipoRepo.esJefeInmediato(usersCompanyId)) || (await equipoRepo.tieneEmpleadosACargo(usersCompanyId));
+    return equipoRepo.tieneEmpleadosACargo(usersCompanyId);
 }
 
+// Aprueba quien tiene jefes a su cargo (el director). Lo mismo rige para las horas extra (§51), así que
+// la pantalla de horas extra también usa estos permisos.
 async function permisos({ usersCompanyId }) {
+    if (!usersCompanyId) return { puede_solicitar: false, puede_aprobar: false };
     return {
-        puede_solicitar: await puedeSolicitar(usersCompanyId),
-        puede_aprobar: Boolean(usersCompanyId) && await equipoRepo.tieneEmpleadosACargo(usersCompanyId)
+        puede_solicitar: await equipoRepo.tieneEmpleadosACargo(usersCompanyId),
+        puede_aprobar: await equipoRepo.tieneJefesACargo(usersCompanyId)
     };
 }
 
-async function empleadosSolicitables() {
-    return equipoRepo.empleadosActivosConGestor();
+// Su propio equipo. `gestor_id`/`gestor` es a quién le llega la solicitud: su director.
+async function empleadosSolicitables({ usersCompanyId }) {
+    requireUsersCompanyId(usersCompanyId);
+    const [empleados, director] = await Promise.all([
+        equipoRepo.listaEmpleadosACargo(usersCompanyId),
+        equipoRepo.gestorConNombreDe(usersCompanyId)
+    ]);
+    const aprobador = director && director.gestor_id !== usersCompanyId ? director : { gestor_id: null, gestor: null };
+    return empleados.map((e) => ({
+        users_company_id: e.users_company_id,
+        nombre: e.nombre_propio,
+        cedula: e.numero_identificacion,
+        cargo: e.cargo,
+        campania: e.campania,
+        centro_costo_id: e.centro_costo_id,
+        centro_costo: e.centro_costo,
+        ...aprobador
+    }));
 }
 
-// Las plantillas que se le ofrecen al coordinador son las del jefe que va a aprobar (dueño = su ficha).
-async function plantillasPara({ empleadoId }) {
-    const gestor = await equipoRepo.jefeAreaDe(empleadoId);
-    if (!gestor) throw new ReglaAsistenciaError('El empleado no tiene un jefe que gestione su asistencia');
-    return horarioPlantillaRepo.findPorDueno(gestor);
+// Las plantillas que se le ofrecen son las del jefe que pide (dueño = su ficha, §25).
+async function plantillasPara({ solicitanteUsersCompanyId }) {
+    requireUsersCompanyId(solicitanteUsersCompanyId);
+    return horarioPlantillaRepo.findPorDueno(solicitanteUsersCompanyId);
 }
 
-async function horariosDe({ empleados, desde, hasta }) {
-    const filas = await horarioAsignadoRepo.findRangoPorEmpleados(empleados, desde, hasta);
+// El turno actual de gente de su equipo (vista previa antes de pedir).
+async function horariosDe({ solicitanteUsersCompanyId, empleados, desde, hasta }) {
+    requireUsersCompanyId(solicitanteUsersCompanyId);
+    const propios = await equipoRepo.subordinadosDe(solicitanteUsersCompanyId, empleados);
+    const filas = await horarioAsignadoRepo.findRangoPorEmpleados(propios, desde, hasta);
     return filas.map((h) => ({ ...h, fecha: normalizarFecha(h.fecha) }));
 }
 
@@ -105,14 +127,11 @@ async function solicitar({
     }
     assertFechasSolicitables(fechas, fechaLaboral(new Date()));
 
-    const gestores = await equipoRepo.gestoresDe(ids);
-    if (ids.some((id) => !gestores.has(id))) {
-        throw new ReglaAsistenciaError('El empleado no tiene contrato activo o no tiene un jefe que gestione su asistencia');
-    }
-    const aprobador = gestores.get(ids[0]);
-    if (ids.some((id) => gestores.get(id) !== aprobador)) {
-        throw new ReglaAsistenciaError('Para intercambiar turnos, los dos empleados deben tener el mismo jefe');
-    }
+    if (new Set(ids).size !== ids.length) throw new ReglaAsistenciaError('Para intercambiar turnos elija dos empleados distintos');
+    const propios = new Set(await equipoRepo.subordinadosDe(solicitanteUsersCompanyId, ids));
+    if (ids.some((id) => !propios.has(id))) throw new NoAutorizadoError('El empleado no está a su cargo');
+    const aprobador = await equipoRepo.jefeAreaDe(solicitanteUsersCompanyId);
+    assertAprobador(solicitanteUsersCompanyId, aprobador);
 
     const actuales = porEmpleadoYFecha(await horarioAsignadoRepo.findRangoPorEmpleados(ids, fechas[0], fechas[fechas.length - 1]));
     let dias;
@@ -122,8 +141,8 @@ async function solicitar({
         let plantilla = null;
         if (plantillaId && !esDescanso) {
             plantilla = await horarioPlantillaRepo.findById(plantillaId);
-            // Solo plantillas del jefe que va a aprobar (las de otro responden 404, como en §25).
-            if (!plantilla || !plantilla.activo || plantilla.dueno_users_company_id !== aprobador) throw new NoEncontradoError('Plantilla no encontrada');
+            // Solo plantillas del jefe que pide (las de otro responden 404, como en §25).
+            if (!plantilla || !plantilla.activo || plantilla.dueno_users_company_id !== solicitanteUsersCompanyId) throw new NoEncontradoError('Plantilla no encontrada');
         }
         const nuevo = horarioNuevo({ plantilla, valores, esDescanso });
         const delEmpleado = new Map(fechas.map((f) => [f, actuales.get(`${ids[0]}|${f}`)]));
@@ -197,9 +216,9 @@ async function aprobar({ directorUsersCompanyId, id, comentario, resueltoPor }) 
         await conn.beginTransaction();
         solicitud = await solicitudParaResolver(id, directorUsersCompanyId, conn);
         const empleados = [...new Set(solicitud.dias.map((d) => d.users_company_id))];
-        // Puede haber cambiado de jefe desde que se pidió: el horario solo lo cambia quien lo gestiona hoy.
-        const aCargo = new Set(await equipoRepo.subordinadosDe(directorUsersCompanyId, empleados, conn));
-        if (empleados.some((e) => !aCargo.has(e))) throw new NoAutorizadoError('El empleado ya no está a su cargo');
+        // Puede haber cambiado de jefe desde que se pidió: solo se aplica si siguen en el equipo de quien lo pidió.
+        const aCargo = new Set(await equipoRepo.subordinadosDe(solicitud.solicitante_users_company_id, empleados, conn));
+        if (empleados.some((e) => !aCargo.has(e))) throw new NoAutorizadoError('El empleado ya no está en el equipo de quien pidió el cambio');
         if (solicitud.dias.some((d) => d.fecha < hoy)) {
             throw new ReglaAsistenciaError('La solicitud incluye días que ya pasaron: recházala y que pidan una nueva');
         }
