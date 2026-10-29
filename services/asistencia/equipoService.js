@@ -181,6 +181,7 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
             nombre: empleado.nombre_propio,
             documento: empleado.numero_identificacion,
             cargo: empleado.cargo,
+            centro_costo: empleado.centro_costo,
             jefe_area: empleado.directo ? null : empleado.jefe,
             ...resumenDeJornadas(jornadas)
         };
