@@ -25,6 +25,11 @@ async function esJefeDeEquipo(usersCompanyId) {
     return equipoRepo.tieneEmpleadosACargo(usersCompanyId);
 }
 
+async function cargoDe(usersCompanyId) {
+    if (!usersCompanyId) return null;
+    return equipoRepo.cargoDe(usersCompanyId);
+}
+
 async function equipo(directorUsersCompanyId) {
     requireUsersCompanyId(directorUsersCompanyId);
     const empleados = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
@@ -198,6 +203,7 @@ module.exports = {
     estadoEnVivo,
     assertEmpleadoACargo,
     esJefeDeEquipo,
+    cargoDe,
     equipo,
     jornadasDe,
     trazabilidadDe,
