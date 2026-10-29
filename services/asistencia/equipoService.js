@@ -87,6 +87,7 @@ async function estadoEnVivo(empleados) {
             } : null,
             estado: estadoCalculado.estado,
             minutos_trabajados: estadoCalculado.minutosTrabajados,
+            minutos_tarde: estadoCalculado.minutosTarde,
             pausa_activa: estadoCalculado.pausaActiva,
             desconexion_activa: estadoCalculado.desconexionActiva,
             alertas: estadoCalculado.alertas,
