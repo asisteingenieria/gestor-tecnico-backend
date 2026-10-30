@@ -259,6 +259,9 @@ const userCompanyController = {
             const reporte = await importEmpleadosService.confirmar(filas);
             res.json({ success: true, message: 'Importación completada', errores_parseo, ...reporte });
         } catch (error) {
+            if (error.codigo === 'NO_COINCIDE_CATALOGO') {
+                return res.status(409).json({ success: false, message: error.message, no_coinciden: error.noCoinciden });
+            }
             console.error('Error al confirmar import de empleados:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }

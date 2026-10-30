@@ -2523,3 +2523,44 @@ Salario sugerido por cliente + cargo:
 - Se probó en local con la tabla vacía y con dos corridas seguidas.
 - Efecto en local: el `CREATE TABLE IF NOT EXISTS` hace commit implícito, así que la prueba renumeró los IDs locales a 59–116. Son los mismos datos y nada referencia esos IDs.
 - **Pendiente en producción.** Sin dependencias; puede ir antes o después del código.
+
+## 45. Sesión 2026-10-30 — Homologación automática de catálogos en el cargue masivo y "Fin de contrato" de vuelta
+
+**Antes:** un valor del Excel que no coincidía con su catálogo se trataba así:
+- En los catálogos abiertos creaba una fila nueva y duplicada. Por ejemplo, "AGENTE DE CALL CENTER" creaba un cargo aparte de "AGENTE CALL CENTER".
+- En los cerrados (área, estado civil) quedaba vacío con una advertencia.
+
+**Decisión del usuario:** RRHH no elige en una pantalla cada vez. El cargue homologa solo al valor más parecido, y si algo no coincide no deja subir el archivo. Primero se hizo una versión con elección manual y equivalencias guardadas (migración 091); se descartó el mismo día y la 091 nunca llegó a commit.
+
+**Regla** (`utils/homologacionCatalogos.js::homologar`, solo cuando no hay coincidencia exacta sin tildes, signos ni mayúsculas):
+- **Puntaje:** el más parecido tiene que tener al menos 0,8. Es un coeficiente de Dice sobre bigramas, que sube a 0,75 si todas las palabras de uno están en el otro.
+- **Ventaja:** tiene que sacarle 0,1 o más al segundo; si no, no se elige a ciegas entre dos casi iguales.
+- **Números:** tiene que tener los mismos números ("CBAT 2" no es "CBAT 1").
+- **Si se cumple todo:** se usa ese valor y la vista previa y el resultado lo avisan como advertencia, por ejemplo: Cargo "AGENTE DE CALL CENTER" se tomó como "AGENTE CALL CENTER".
+- **Si no:** el valor "no coincide". La vista previa lo lista en rojo con sus filas y los parecidos (puntaje ≥ 0,45) y el botón de importar queda bloqueado. `confirmar` responde 409 `NO_COINCIDE_CATALOGO` sin escribir nada.
+
+**Catálogos cubiertos** (`CATALOGOS_HOMOLOGABLES` en el servicio):
+- tipo de identificación, ciudad, cliente, campaña, centro de costo, cargo, tipo de contrato, banco;
+- EPS, ARL, AFP, cesantías y caja;
+- área, modalidad, estado civil, tipo de cuenta y Rh.
+
+**Consecuencias:**
+- **El cargue ya no crea** cargos, campañas, clientes, centros de costo, ciudades ni entidades nuevos. Hoy no hay pantalla para crearlos: un cargo o una campaña de verdad nuevos se crean en la BD antes del cargue. Queda pendiente una pantalla de catálogos.
+- **La oleada sí se sigue creando sola,** porque cada cohorte trae una nueva y "OLD 142" se parece demasiado a "OLD 141".
+- **Género y parentesco** los sigue normalizando el lector, como antes.
+
+**"Fin de contrato" vuelve** (se había quitado en §44):
+- En el formulario se ve y es obligatorio al crear para contratos con fecha de fin (Fijo, Obra o labor, Aprendizaje, Prestación de servicios). Con Indefinido se oculta, y con Aprendizaje se sugiere a 6 meses.
+- En la plantilla es la columna opcional "Fecha Fin Contrato", con 59 columnas en total.
+
+**Verificación (local):**
+- **"Personal pend" (67 filas reales) y la plantilla llena:** 0 valores que no coinciden, 0 homologados y 0 catálogos nuevos. Los datos reales coinciden exacto.
+- **Archivo con "AGENTE DE CALL CENTER", "Operacion", "Presencialidad" y "Bancolombia SA":** los 4 se homologaron solos, se importó y quedó guardado bien.
+- **Archivo con cargo "JARDINERO", campaña "T Y T" y EPS "SURA SALUD":**
+  - la vista previa los marcó como "no coinciden" ("T Y T" con parecido T&T);
+  - confirmar devolvió 409 y no se creó nada;
+  - la oleada nueva "OLD 150" sí se habría creado.
+- Se probó en el navegador y los datos de prueba se borraron.
+- Pruebas en `tests/homologacionCatalogos.test.js`.
+
+**Hoja que se lee:** el cargue toma "TOTAL PERSONAL" (Excel viejo); si no está, la hoja "Empleados" de la plantilla, esté donde esté; si tampoco, la primera. El archivo se puede subir tal cual, con su hoja "Instrucciones", en cualquier orden.

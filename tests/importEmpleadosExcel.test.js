@@ -15,6 +15,15 @@ test('el Excel viejo de "TOTAL PERSONAL" se sigue leyendo por posición', () => 
     assert.equal(detectarColumnas(encabezado).formato, 'total_personal');
 });
 
+test('lee la hoja "Empleados" aunque "Instrucciones" vaya primero', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Columna', 'Obligatoria'], ['Cargo', 'Sí']]), 'Instrucciones');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tipo De Identificación', 'Número De Identificación'], ['CC', '123']]), 'Empleados');
+    const resultado = parsearArchivo(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    assert.equal(resultado.hoja, 'Empleados');
+    assert.equal(resultado.filas[0].numero_identificacion, '123');
+});
+
 test('la plantilla se lee por nombre de columna, en cualquier orden', () => {
     const buffer = libro('Empleados', [
         ['Salario', 'Primer Apellido', 'Número De Identificación', 'Tipo De Identificación', 'Primer Nombre', 'Campaña', 'Banco'],

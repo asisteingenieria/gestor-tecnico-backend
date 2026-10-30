@@ -484,7 +484,10 @@ function normalizarFila(fila, numeroFila, colExtra = {}, col = COL) {
  */
 function parsearArchivo(buffer) {
     const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-    const nombreHoja = wb.SheetNames.includes('TOTAL PERSONAL') ? 'TOTAL PERSONAL' : wb.SheetNames[0];
+    // Hoja a leer: "TOTAL PERSONAL" (Excel viejo), si no la hoja "Empleados" de la plantilla esté
+    // donde esté (así no importa si alguien mueve "Instrucciones" adelante), si no la primera.
+    const hojaEmpleados = wb.SheetNames.find(n => n.trim().toLowerCase() === 'empleados');
+    const nombreHoja = wb.SheetNames.includes('TOTAL PERSONAL') ? 'TOTAL PERSONAL' : (hojaEmpleados || wb.SheetNames[0]);
     const hoja = wb.Sheets[nombreHoja];
     const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: null });
     const colExtra = detectarColumnasNuevas(filasCrudas[0]);
