@@ -14,6 +14,7 @@ const SELECT_EMPLEADO = `
         cex.nombre AS ciudad_expedicion_nombre,
         CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido) AS nombre_completo,
         (SELECT COUNT(*) FROM activos a WHERE a.agente_id = uc.id) AS total_activos,
+        (SELECT COUNT(*) FROM empleado_documento ed WHERE ed.users_company_id = uc.id) AS documentos_cargados,
         c.idcontrato,
         c.fecha_ingreso,
         cam.nombre  AS campania_nombre,

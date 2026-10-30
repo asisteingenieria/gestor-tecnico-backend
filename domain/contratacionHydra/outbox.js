@@ -34,7 +34,8 @@ function decidirResultadoEnvio({ status, codigo = null, intentosPrevios }, polit
 // Ruta del endpoint de Hydra para cada tipo de aviso.
 const RUTA_POR_TIPO = {
     candidato_registrado: '/contrataciones',
-    candidato_descartado: '/descartes'
+    candidato_descartado: '/descartes',
+    candidato_examen: '/examenes'
 };
 
 module.exports = { decidirResultadoEnvio, RUTA_POR_TIPO };

@@ -42,6 +42,16 @@ const descartarSchema = {
     body: { motivo: { requerido: true, tipo: 'texto' } }
 };
 
+// Exámenes médicos (SST, migración 089). La nota es obligatoria solo para "no aprobó"
+// (lo valida el dominio).
+const examenSchema = {
+    ...idParamSchema,
+    body: {
+        evento: { requerido: true, enum: ['asistio', 'no_asistio', 'aprobado', 'no_aprobado'] },
+        nota: { tipo: 'texto' }
+    }
+};
+
 const guardarMapeoSchema = {
     body: {
         catalogo: { requerido: true, enum: CATALOGOS },
@@ -75,6 +85,7 @@ module.exports = {
     seccionParamsSchema,
     verificacionSchema,
     descartarSchema,
+    examenSchema,
     guardarMapeoSchema,
     registrarLoteSchema,
     listarEnviosQuerySchema,

@@ -194,6 +194,18 @@ function validarCancelacionHydra(body) {
     return errores;
 }
 
+// POST /candidatos/:hydraCandidatoId/examenes/continuidad — decisión de selección sobre
+// un candidato que no asistió a los exámenes médicos (migración 089).
+function validarContinuidadHydra(body) {
+    const errores = [];
+    if (!esObjeto(body)) return ['El cuerpo debe ser un objeto JSON'];
+    if (typeof body.continuar !== 'boolean') errores.push('continuar debe ser true o false');
+    const v = crearVerificador(errores, '');
+    v.texto('nota', body.nota, { max: 1000 });
+    v.texto('decidido_por', body.decidido_por, { max: 150 });
+    return errores;
+}
+
 // PUT /candidatos/:hydraCandidatoId/documentos/:tipo — un archivo en base64. El hash y
 // el contenido real se comprueban en la recepción, después de decodificar.
 function validarDocumentoHydra(body, req) {
@@ -224,6 +236,7 @@ module.exports = {
     validarLoteHydra,
     validarCandidatoHydra,
     validarCancelacionHydra,
+    validarContinuidadHydra,
     validarDocumentoHydra,
     hydraCandidatoIdParamSchema
 };

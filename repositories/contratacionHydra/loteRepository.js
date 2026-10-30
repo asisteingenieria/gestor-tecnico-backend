@@ -29,7 +29,10 @@ async function findAll({ estado } = {}, conn = db) {
                 COALESCE(SUM(c.estado = 'pendiente'), 0) AS pendientes,
                 COALESCE(SUM(c.estado = 'listo'), 0) AS listos,
                 COALESCE(SUM(c.estado = 'registrado'), 0) AS registrados,
-                COALESCE(SUM(c.estado IN ('descartado', 'cancelado_hydra')), 0) AS fuera_del_lote
+                COALESCE(SUM(c.estado IN ('descartado', 'cancelado_hydra', 'no_apto')), 0) AS fuera_del_lote,
+                -- Exámenes médicos de SST por resolver (migración 089): candidatos en curso sin aprobar.
+                COALESCE(SUM(c.estado IN ('pendiente', 'listo') AND c.examen_estado <> 'aprobado'), 0) AS examenes_pendientes,
+                COALESCE(SUM(c.estado IN ('pendiente', 'listo') AND c.examen_estado = 'no_asistio'), 0) AS examenes_no_asistio
          FROM hydra_lote l
          LEFT JOIN hydra_candidato c ON c.hydra_lote_id = l.idhydra_lote
          ${where}
@@ -43,7 +46,9 @@ async function findAll({ estado } = {}, conn = db) {
         pendientes: Number(r.pendientes),
         listos: Number(r.listos),
         registrados: Number(r.registrados),
-        fuera_del_lote: Number(r.fuera_del_lote)
+        fuera_del_lote: Number(r.fuera_del_lote),
+        examenes_pendientes: Number(r.examenes_pendientes),
+        examenes_no_asistio: Number(r.examenes_no_asistio)
     }));
 }
 

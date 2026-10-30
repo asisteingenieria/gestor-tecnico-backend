@@ -3,11 +3,12 @@ const NovedadRrhh = require('../models/NovedadRrhh');
 const Traspaso = require('../models/Traspaso');
 const Vacaciones = require('../models/Vacaciones');
 const Retiro = require('../models/Retiro');
+const EmpleadoDocumento = require('../models/EmpleadoDocumento');
 const importEmpleadosExcel = require('../utils/importEmpleadosExcel');
 const importEmpleadosService = require('../services/importEmpleadosService');
 const { validarObligatorios } = require('../utils/validarEmpleado');
 const fs = require('fs');
-const { soportesNovedad, soportesTraspaso } = require('../middleware/uploadSoportesRrhh');
+const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 const { fechaLaboral } = require('../utils/fechaBogota');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
@@ -60,6 +61,17 @@ const rutaArchivoSoporte = soportesNovedad.ruta;
 const borrarArchivoSoporte = soportesNovedad.borrar;
 
 // Envía un archivo de soporte (novedad o traspaso) con su nombre original, para verlo en el navegador.
+// Los primeros bytes de un PDF son "%PDF-".
+async function empiezaComoPdf(ruta) {
+    const handle = await fs.promises.open(ruta, 'r');
+    try {
+        const { buffer, bytesRead } = await handle.read(Buffer.alloc(5), 0, 5, 0);
+        return bytesRead === 5 && buffer.toString('latin1') === '%PDF-';
+    } finally {
+        await handle.close();
+    }
+}
+
 function enviarSoporte(res, soporte, ruta) {
     if (!ruta || !fs.existsSync(ruta)) {
         return res.status(404).json({ success: false, message: 'Soporte no encontrado' });
@@ -204,9 +216,11 @@ const userCompanyController = {
             // soporte están en disco: se recogen antes y se borran después del commit.
             const archivosNovedades = await NovedadRrhh.archivosDeEmpleado(id);
             const archivosTraspasos = await Traspaso.archivosDeEmpleado(id);
+            const archivosDocumentos = await EmpleadoDocumento.archivosDeEmpleado(id);
             await UserCompany.delete(id);
             archivosNovedades.forEach(borrarArchivoSoporte);
             archivosTraspasos.forEach(soportesTraspaso.borrar);
+            archivosDocumentos.forEach(documentosEmpleado.borrar);
             res.json({ success: true, message: 'Empleado eliminado exitosamente. Los activos asignados quedaron sin empleado.' });
         } catch (error) {
             console.error('Error al eliminar empleado:', error);
@@ -455,6 +469,82 @@ const userCompanyController = {
             res.json({ success: true, message: 'Soporte eliminado', soportes: await NovedadRrhh.getSoportes(req.params.novedadId) });
         } catch (error) {
             console.error('Error al eliminar soporte de la novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ==================== DOCUMENTOS DEL EMPLEADO (migración 088) ====================
+    // Documentación del empleado y contrato y anexos: un PDF unificado por tipo, hasta 50 MB.
+
+    async getDocumentosEmpleado(req, res) {
+        try {
+            if (!await UserCompany.getById(req.params.id)) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            res.json({ success: true, documentos: await EmpleadoDocumento.getByEmpleado(req.params.id) });
+        } catch (error) {
+            console.error('Error al obtener documentos del empleado:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async subirDocumentoEmpleado(req, res) {
+        const { id, tipo } = req.params;
+        const descartar = () => req.file && documentosEmpleado.borrar(req.file.filename);
+        try {
+            if (!EmpleadoDocumento.esTipoValido(tipo)) {
+                descartar();
+                return res.status(400).json({ success: false, message: 'Tipo de documento no válido' });
+            }
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'Falta el archivo PDF' });
+            }
+            // El mime lo declara el navegador: se comprueba que el contenido sea de verdad un PDF.
+            if (!await empiezaComoPdf(req.file.path)) {
+                descartar();
+                return res.status(400).json({ success: false, message: 'El archivo no es un PDF válido' });
+            }
+            if (!await UserCompany.getById(id)) {
+                descartar();
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            const anterior = await EmpleadoDocumento.guardar(id, tipo, {
+                nombre: req.file.filename, nombreOriginal: req.file.originalname, mime: req.file.mimetype, tamano: req.file.size
+            }, req.user?.id);
+            if (anterior) documentosEmpleado.borrar(anterior);
+            res.status(201).json({ success: true, message: 'Documento cargado', documentos: await EmpleadoDocumento.getByEmpleado(id) });
+        } catch (error) {
+            descartar();
+            console.error('Error al cargar documento del empleado:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async descargarDocumentoEmpleado(req, res) {
+        try {
+            if (!EmpleadoDocumento.esTipoValido(req.params.tipo)) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+            const documento = await EmpleadoDocumento.get(req.params.id, req.params.tipo);
+            enviarSoporte(res, documento, documento && documentosEmpleado.ruta(documento.archivo));
+        } catch (error) {
+            console.error('Error al descargar documento del empleado:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async eliminarDocumentoEmpleado(req, res) {
+        try {
+            const archivo = EmpleadoDocumento.esTipoValido(req.params.tipo)
+                ? await EmpleadoDocumento.eliminar(req.params.id, req.params.tipo)
+                : null;
+            if (!archivo) {
+                return res.status(404).json({ success: false, message: 'Documento no encontrado' });
+            }
+            documentosEmpleado.borrar(archivo);
+            res.json({ success: true, message: 'Documento eliminado', documentos: await EmpleadoDocumento.getByEmpleado(req.params.id) });
+        } catch (error) {
+            console.error('Error al eliminar documento del empleado:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },

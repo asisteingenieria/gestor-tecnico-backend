@@ -6,6 +6,7 @@ const catalogoRepo = require('../../repositories/contratacionHydra/catalogoRepos
 const envioRepo = require('../../repositories/contratacionHydra/envioRepository');
 const documentoRepo = require('../../repositories/contratacionHydra/documentoRepository');
 const documentosService = require('./documentosService');
+const examenesService = require('./examenesService');
 const { cargarResolver, evaluarCandidato, fechaDeNegocio, recalcularEstadoLote } = require('./evaluacionService');
 const { enTransaccion } = require('./transaccion');
 const {
@@ -72,6 +73,8 @@ function presentarCandidato(candidato, evaluacion, verificaciones) {
         numero_identificacion: candidato.numero_identificacion,
         cargo_hydra: candidato.cargo_hydra,
         estado: candidato.estado,
+        // Exámenes médicos de SST (migración 089); null = anterior a SST.
+        examen_estado: candidato.examen_estado ?? null,
         motivo_descarte: candidato.motivo_descarte,
         reintegro_users_company_id: candidato.users_company_existente_id,
         users_company_id: candidato.users_company_id,
@@ -146,7 +149,8 @@ async function obtenerCandidato(id) {
         lote,
         candidato: {
             ...presentarDetalle(candidato, evaluacion, verificaciones),
-            documentos: await documentosService.documentosDeCandidato(candidato)
+            documentos: await documentosService.documentosDeCandidato(candidato),
+            examenes: await examenesService.examenesDeCandidato(id)
         }
     };
 }

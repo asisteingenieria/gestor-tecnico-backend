@@ -4,7 +4,7 @@ const userCompanyController = require('../controllers/userCompanyController');
 const { verifyToken } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
-const { soportesNovedad, soportesTraspaso } = require('../middleware/uploadSoportesRrhh');
+const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 
 // Gestión completa del módulo de empleados: exclusiva de Recursos Humanos (y admin).
 const verificarRecursosHumanos = (req, res, next) => {
@@ -88,6 +88,11 @@ router.delete('/vacaciones/:vacacionesId', verificarRecursosHumanos, userCompany
 router.get('/:id',                       verificarRecursosHumanos, userCompanyController.getById);
 router.get('/:id/activos',               verificarRecursosHumanos, userCompanyController.getActivos);
 router.get('/:id/retiro',                verificarRecursosHumanos, userCompanyController.getRetiro);
+// Documentación del empleado y contrato y anexos (migración 088): PDF de hasta 50 MB.
+router.get('/:id/documentos',                    verificarRecursosHumanos, userCompanyController.getDocumentosEmpleado);
+router.put('/:id/documentos/:tipo',              verificarRecursosHumanos, documentosEmpleado.middleware, userCompanyController.subirDocumentoEmpleado);
+router.get('/:id/documentos/:tipo/archivo',      verificarRecursosHumanos, userCompanyController.descargarDocumentoEmpleado);
+router.delete('/:id/documentos/:tipo',           verificarRecursosHumanos, userCompanyController.eliminarDocumentoEmpleado);
 router.post('/',                         verificarRecursosHumanos, userCompanyController.create);
 router.post('/:id/retiro',               verificarRecursosHumanos, userCompanyController.registrarRetiro);
 router.put('/:id',                       verificarRecursosHumanos, userCompanyController.update);

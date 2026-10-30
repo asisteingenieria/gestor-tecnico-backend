@@ -16,9 +16,10 @@ const TIPOS_PERMITIDOS = {
     'image/webp': ['.webp']
 };
 const TAMANO_MAXIMO_MB = 10;
+const MENSAJE_TIPOS = 'Solo se aceptan archivos PDF o imagen (JPG, PNG, WEBP)';
 
-const fileFilter = (req, file, cb) => {
-    const extensiones = TIPOS_PERMITIDOS[file.mimetype];
+const crearFileFilter = (tipos) => (req, file, cb) => {
+    const extensiones = tipos[file.mimetype];
     if (extensiones && extensiones.includes(path.extname(file.originalname).toLowerCase())) return cb(null, true);
     cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'archivo'));
 };
@@ -26,7 +27,8 @@ const fileFilter = (req, file, cb) => {
 // Devuelve el middleware (un archivo en el campo "archivo") y las utilidades de disco de una
 // carpeta de storage/. Los errores de multer (tipo o tamaño) responden 400 con un mensaje claro,
 // en vez de caer al errorHandler global como 500.
-function crearSoportesRrhh(carpeta) {
+// `opciones` cambia los tipos aceptados y el tamaño (los documentos del empleado: solo PDF, 50 MB).
+function crearSoportesRrhh(carpeta, { tipos = TIPOS_PERMITIDOS, maximoMb = TAMANO_MAXIMO_MB, mensajeTipos = MENSAJE_TIPOS } = {}) {
     const directorio = path.join(RAIZ_STORAGE, carpeta);
     fs.mkdirSync(directorio, { recursive: true });
 
@@ -37,15 +39,15 @@ function crearSoportesRrhh(carpeta) {
         destination: (req, file, cb) => cb(null, directorio),
         filename: (req, file, cb) => cb(null, nombreGenerado(path.extname(file.originalname).toLowerCase()))
     });
-    const upload = multer({ storage, fileFilter, limits: { fileSize: TAMANO_MAXIMO_MB * 1024 * 1024, files: 1 } });
+    const upload = multer({ storage, fileFilter: crearFileFilter(tipos), limits: { fileSize: maximoMb * 1024 * 1024, files: 1 } });
 
     function middleware(req, res, next) {
         upload.single('archivo')(req, res, (err) => {
             if (!err) return next();
             const message = err.code === 'LIMIT_FILE_SIZE'
-                ? `El archivo supera el máximo de ${TAMANO_MAXIMO_MB} MB`
+                ? `El archivo supera el máximo de ${maximoMb} MB`
                 : err.code === 'LIMIT_UNEXPECTED_FILE'
-                    ? 'Solo se aceptan archivos PDF o imagen (JPG, PNG, WEBP)'
+                    ? mensajeTipos
                     : `No se pudo recibir el archivo: ${err.message}`;
             res.status(400).json({ success: false, message });
         });
@@ -78,5 +80,11 @@ module.exports = {
     soportesNovedad: crearSoportesRrhh('novedades'),
     soportesTraspaso: crearSoportesRrhh('traspasos'),
     // Documentos de contratación que envía Hydra (migración 087).
-    documentosContratacion: crearSoportesRrhh('contratacion-hydra')
+    documentosContratacion: crearSoportesRrhh('contratacion-hydra'),
+    // Documentación del empleado y contrato y anexos (migración 088): PDF unificados, más pesados.
+    documentosEmpleado: crearSoportesRrhh('empleados', {
+        tipos: { 'application/pdf': ['.pdf'] },
+        maximoMb: 50,
+        mensajeTipos: 'Solo se aceptan archivos PDF'
+    })
 };

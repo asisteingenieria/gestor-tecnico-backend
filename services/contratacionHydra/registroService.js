@@ -63,6 +63,11 @@ async function registrarLote({ loteId, simular, usuarioId }) {
                 errores.push(`${etiqueta}: tiene secciones pendientes o desactualizadas`);
                 continue;
             }
+            // Control final de SST (migración 089): solo se registran los aprobados.
+            if (candidato.examen_estado !== 'aprobado') {
+                errores.push(`${etiqueta}: SST no ha aprobado sus exámenes médicos`);
+                continue;
+            }
             // Hoja de vida y tratamiento de datos firmados (migración 087): Hydra los manda
             // después del lote; hasta que lleguen, no se registra.
             const tipos = documentos.filter((d) => d.hydra_candidato_id === candidato.idhydra_candidato).map((d) => d.tipo);

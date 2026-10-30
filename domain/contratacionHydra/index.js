@@ -6,6 +6,7 @@ const { crearResolverCatalogo } = require('./resolverCatalogo');
 const { aplicarCambiosSeccion } = require('./edicionSeccion');
 const outbox = require('./outbox');
 const documentos = require('./documentos');
+const examenes = require('./examenes');
 
 module.exports = {
     ...secciones,
@@ -14,6 +15,7 @@ module.exports = {
     ...mapeo,
     ...outbox,
     ...documentos,
+    ...examenes,
     crearResolverCatalogo,
     aplicarCambiosSeccion
 };
