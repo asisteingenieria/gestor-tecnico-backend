@@ -675,3 +675,47 @@ Detalle completo en `asistencia.md` §23-§27; pendientes vigentes en §28.
 - La `ASISLOCK_API_KEY` de producción se pegó en el chat: rotarla.
 - El login no tiene límite de intentos y ahora hay 389 cuentas cuyo usuario es la cédula.
 - Nadie puede restablecer desde la interfaz la clave de una cuenta de empleado.
+
+## 15. Sesión 2026-10-30 — Documentos de Hydra y del empleado, rol SST y exámenes médicos
+
+### 15.1 Qué se hizo
+
+| Cambio | Migración | Qué hace | Detalle |
+|---|---|---|---|
+| **Documentos de contratación desde Hydra** | Gestor 087, Hydra 021 | Hydra envía la hoja de vida y el tratamiento de datos firmados, más los soportes de antecedentes, al pasar el candidato a contratación | `conexionhydra.md` §15 |
+| **Documentos del empleado** | 088 | En la ficha, RRHH carga "Documentación del empleado" y "Contrato y anexos": dos PDF unificados de hasta 50 MB, en `storage/empleados/`. Hay un aviso de "Faltan documentos", un filtro en el listado y vista previa del PDF | `claude/modulo recursoshumanos.md` §42 |
+| **Rol `sst` y exámenes médicos** | Gestor 089, Hydra 022 | Ver abajo | `conexionhydra.md` §16 |
+
+**Rol SST y exámenes médicos:**
+- SST recibe los candidatos de Hydra y lleva el control final: marca si el candidato **asistió** a los exámenes médicos y si los **aprobó**.
+- RRHH sigue completando las 7 secciones, pero **solo registra a los aprobados**.
+- **No asistió**: nota opcional. Selección decide en Hydra, en la pantalla *Exámenes médicos*, si le da continuidad:
+  - si continúa, queda reagendado y SST vuelve a marcar;
+  - si no, sale del proceso.
+- **No aprobó**: nota obligatoria. El candidato queda `no_apto` en Gestor y `no_apto_examenes` en Hydra.
+- **Traza**: cada marca queda guardada, en `hydra_candidato_examen` y en `contratacion_examenes`.
+- **Decisiones del usuario**: "SST exámenes, RRHH registra", "Botones en Hydra" y "Cambia de estado".
+
+### 15.2 La pantalla "Contratación Hydra" de Gestor
+
+Tiene tres pestañas; el detalle está en `conexionhydra.md` §16.5:
+- **Lotes recibidos**: los candidatos que manda Hydra, con su checklist, sus exámenes y sus documentos.
+- **Avisos a Hydra**: la bandeja de salida de lo que Gestor le informa a Hydra (registrado, descartado, marcas de examen). Muestra el estado de cada aviso y permite reintentar los fallidos.
+- **Equivalencias de catálogo**: a qué valor de Gestor corresponde cada nombre de catálogo de Hydra que no casa solo. Por ejemplo, "Sura EPS" frente a "SURA" y "EPS Sura". Se crean desde el candidato y se revisan ahí.
+
+### 15.3 Producción (en curso)
+
+Detalle en `conexionhydra.md` §16.6. Resumen:
+- La **089** paró en Workbench con el **error 1175** después de sus dos `ALTER`. El resto se entregó como `089b_sst_examenes_medicos_resto.sql`.
+- La **022 de Hydra** se corrió por error contra `call_center_support`. No aplicó nada, pero hay que correrla en la base de Hydra.
+- Falta, en este orden:
+  1. confirmar la 089b, la 087 y la 088;
+  2. merge y despliegue de los 4 repos;
+  3. aplicar la 021 y la 022 en Hydra;
+  4. crear el usuario SST;
+  5. correr `verificar-hydra`.
+
+### 15.4 Lecciones
+
+- **Workbench trae activo el modo de actualización segura.** Toda migración con `UPDATE` sin llave en el `WHERE` necesita `SET SQL_SAFE_UPDATES = 0` antes y `= 1` después. Ya pasó con la 086 y la 089.
+- **Antes de correr una migración en Workbench, verificar la base con `SELECT DATABASE()`.** Gestor y Hydra son bases y servidores distintos.

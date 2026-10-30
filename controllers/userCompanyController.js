@@ -32,7 +32,7 @@ const MENSAJE_REFERENCIA_INVALIDA = 'Alguno de los datos seleccionados (empleado
 
 // Un archivo que no es Excel (o un Excel sin la hoja de empleados) se leía como "0 filas" y la
 // previsualización salía en blanco sin explicar nada.
-const ARCHIVO_SIN_EMPLEADOS = 'El archivo no tiene filas de empleados: revisa que sea el Excel de la plantilla (hoja "TOTAL PERSONAL")';
+const ARCHIVO_SIN_EMPLEADOS = 'El archivo no tiene filas de empleados: revisa que sea la plantilla de empleados (hoja "Empleados") con al menos una fila llena';
 
 const fechaDia = (f) => (f ? String(f).slice(0, 10) : '');
 

@@ -1462,3 +1462,45 @@ aprobó**. Cada marca se le informa a selección (Hydra).
     - en la pantalla, menú de dos entradas, sin "Registrar lote" ni checklist.
   - **Hydra**: reenviar y cancelar un candidato cerrado por exámenes dan 409.
 - Usuario local de prueba: `prueba.sst`, con la clave del seed.
+
+### 16.5 Qué es cada pestaña de "Contratación Hydra" en Gestor
+
+La pantalla `/recursos-humanos/contratacion-hydra` tiene tres pestañas. SST solo ve la primera.
+
+| Pestaña | Para qué sirve | Quién |
+|---|---|---|
+| **Lotes recibidos** | Lo que envía Hydra. Cada lote muestra su avance, los exámenes médicos por resolver y su estado. Al abrir uno se ven sus candidatos. En cada candidato hay un panel con: <br>• **Checklist**: las 7 secciones que RRHH completa y verifica; <br>• **Exámenes médicos**: lo que marca SST, con su traza; <br>• **Documentos**: firmados y antecedentes (087); <br>• **Datos de Hydra**: lo que llegó tal cual. | RRHH (completa, descarta y registra) y SST (solo exámenes) |
+| **Avisos a Hydra** | Bandeja de salida (outbox `hydra_envio_saliente`): cada mensaje que Gestor le manda a Hydra. <br>• **Registrado**: en Hydra pasa a `contratado`. <br>• **Descartado**: incluye el motivo. <br>• **Examen** (089): cada marca de SST. <br>Cada aviso muestra su estado (pendiente, enviado o fallido), los intentos y el último error. Un fallido se puede **reintentar** desde ahí. Por ejemplo, queda fallido si Hydra estaba caído o no tenía la 022. Sirve para confirmar que Hydra se enteró. Los manda el cron `scripts/despacharEnviosHydra.js`. | RRHH |
+| **Equivalencias de catálogo** | Tabla `hydra_mapeo_catalogo`. Hydra envía sus catálogos por **código y nombre propios**: EPS, AFP, cesantías, caja, ARL, cargo, ciudad, parentesco… Cuando un valor no existe en Gestor o coincide con más de uno, el campo del candidato queda **"sin mapear"**. Por ejemplo, "Sura EPS" frente a "SURA" y "EPS Sura". RRHH elige a cuál corresponde y la elección se guarda como equivalencia. Desde ese momento Gestor traduce ese valor solo. Además, guardar una equivalencia la aplica en el acto a los candidatos pendientes o listos (ver §13). Normalmente se crean desde el panel del candidato; la pestaña sirve para revisarlas, corregirlas o crearlas por adelantado. **"Sin equivalencias" es normal** mientras no haya llegado un valor que no se resuelva solo. | RRHH |
+
+### 16.6 Despliegue en producción (2026-10-30)
+
+**Gestor:**
+- **Migraciones**: se entregaron en `Descargas/` la 087, la 088 y la 089.
+- **Código**:
+  - backend: `af6d60c` (087), `b0afc40`, `7f47d95` y `bb773eb`, en `sebas-branch`;
+  - frontend: `b0c377e` y `e8fdf62`;
+  - el merge lo hace el usuario.
+- **La 089 se cortó a la mitad.** En Workbench paró con el **error 1175** (modo de actualización segura) en el primer `UPDATE`. Para entonces ya se habían aplicado los dos `ALTER`: el rol `sst` y la columna `examen_estado`.
+- **Arreglo de la 089**: el resto se entregó aparte en `Descargas/089b_sst_examenes_medicos_resto.sql`:
+  - con `SET SQL_SAFE_UPDATES = 0/1` alrededor de los `UPDATE`;
+  - después, la tabla de traza y el ENUM de `hydra_envio_saliente`.
+
+  La 089 del repo ya trae ese `SET` (`bb773eb`). **No correr la 089 completa otra vez**: el `ADD COLUMN` da el error 1060.
+- **Falta confirmar**:
+  - que la 089b terminó bien;
+  - que la 087 y la 088 se corrieron;
+  - el despliegue del código;
+  - `client_max_body_size 50m` en nginx (088).
+
+**Hydra:**
+- **Código**: backend `966696f` (021) y `7682426` (022); frontend `3ce13e3` y `1e0429f`, en `sebas-branch`.
+- **Migraciones**: la 021 y la 022 se entregaron en `Descargas/`.
+- **Primer intento fallido**: la 022 se corrió en Workbench contra la base del **Gestor** (`call_center_support`) y dio `Table 'call_center_support.estados_candidato' doesn't exist`. No aplicó nada: la primera sentencia es ese `INSERT`, y ninguna tabla de la 021 ni de la 022 existe en Gestor (se comprobó).
+- **Las migraciones de Hydra van en la base de Hydra** (`DB_NAME` del `.env` de Hydra; en local es `ReclutamientoNuevo`), en su propio servidor:
+  - con `npm run migrate` después de `npm run migrate:estado`;
+  - o a mano, comprobando antes `SELECT DATABASE()` y que exista `estados_candidato`.
+
+  Si se aplican a mano, hay que registrarlas en `migraciones_aplicadas`.
+- **Pendiente**: aplicar la 021, si producción no la tiene, y la 022 en la base correcta. Después: deploy, crear el usuario SST en Gestor, `npm run verificar-hydra` y la prueba con un candidato.
+- **Permiso `decidir_continuidad_examenes`**: quedó para Administrador, Selección y Contratación. Falta que el usuario decida si se le quita a Contratación (sería un `DELETE` en `rol_permisos`). El requerimiento dice que "selección determina".

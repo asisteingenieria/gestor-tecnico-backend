@@ -1,6 +1,8 @@
 const XLSX = require('xlsx');
 
-// Índices de columna (0-based) de la hoja "TOTAL PERSONAL" del Excel real de RRHH.
+// Formato VIEJO: índices de columna (0-based) de la hoja "TOTAL PERSONAL" del Excel real de RRHH.
+// La plantilla actual (y la hoja "Personal pend" del HeadCount) se leen por NOMBRE de columna:
+// ver COLUMNAS_POR_NOMBRE más abajo.
 // El header de la hoja repite "Tipo De Identificación"/"Identificación" varias veces
 // por celdas combinadas en el original — por eso se parsea por POSICIÓN, no por nombre
 // de columna. Ver asistencia.md / claude/modulo recursoshumanos.md para el origen del
@@ -139,6 +141,90 @@ function detectarColumnasNuevas(headerRow) {
     return col;
 }
 
+// Formato actual (plantilla descargable desde 2026-10-30, misma base que la hoja "Personal pend" del
+// HeadCount): cada campo se busca por el nombre de su columna, en cualquier orden. Una columna que el
+// archivo no traiga deja el campo vacío. Nombres ya normalizados con normalizarHeader.
+const COLUMNAS_POR_NOMBRE = {
+    CLIENTE: ['cliente'],
+    FECHA_EXPEDICION: ['fecha de expedicion'],
+    CIUDAD_EXPEDICION: ['lugar expedicion identificacion', 'lugar de expedicion'],
+    PRIMER_NOMBRE: ['primer nombre'], SEGUNDO_NOMBRE: ['segundo nombre'],
+    PRIMER_APELLIDO: ['primer apellido'], SEGUNDO_APELLIDO: ['segundo apellido'],
+    GENERO: ['genero'], RH: ['rh'],
+    TIPO_CONTRATO: ['tipo de contrato'],
+    CIUDAD_LABORA: ['ciudad donde labora'],
+    OLEADA: ['oleada'],
+    FECHA_INGRESO: ['fecha de ingreso'],
+    AREA: ['area'],
+    CAMPANIA: ['campana'],
+    CENTRO_COSTO_NOMBRE: ['nombre_centro_costo', 'nombre centro costo', 'centro de costo'],
+    CENTRO_COSTO_CODIGO: ['codigo_centro_costo', 'codigo centro costo'],
+    CARGO_SSFF: ['cargo en ssff'],
+    USUARIO_SSFF: ['usuario ssff'],
+    CARGO: ['cargo'],
+    SALARIO: ['salario'], BONO_NO_PRESTACIONAL: ['bono no prestacional'], BONO_CAFETERIA: ['bono cafeteria'],
+    DIRECTOR_AREA: ['director de area'], JEFE_AREA: ['jefe de area'], JEFE_INMEDIATO: ['jefe inmediato'],
+    FECHA_FIN_PERIODO_PRUEBA: ['fecha fin periodo de prueba'], FECHA_FIN_CONTRATO: ['fecha fin contrato'],
+    FECHA_NACIMIENTO: ['fecha de nacimiento'],
+    CIUDAD_NACIMIENTO: ['ciudad de nacimiento'],
+    TIPO_DIRECCION: ['tipo de direccion'],
+    DIRECCION: ['direccion'], BARRIO: ['barrio'],
+    TELEFONO: ['telefono'], EMAIL: ['e-mail', 'email', 'correo'],
+    ESTADO_CIVIL: ['estado civil'], NUMERO_HIJOS: ['numero de hijos'],
+    CONTACTO_EMERGENCIA: ['contacto de emergencia'], PARENTESCO: ['parentesco'],
+    TELEFONO_CONTACTO: ['telefono contacto de emergencia'],
+    TIPO_CUENTA: ['tipo de cuenta'], NUMERO_CUENTA: ['numero de cuenta'],
+    BANCO: ['banco'],
+    ARL: ['arl'], ARL_FECHA_AFILIACION: ['fecha de afiliacion arl'], TARIFA_ARL: ['tarifaarl', 'tarifa arl'],
+    EPS: ['eps'], EPS_FECHA_AFILIACION: ['fecha afiliacion eps'],
+    AFP: ['afp'], AFP_FECHA_AFILIACION: ['fecha de afiliacion afp', 'fecha d eafiliacion afp'],
+    CESANTIAS: ['fondo cesantias'], CESANTIAS_FECHA_AFILIACION: ['fecha afiliacion fondo de cesantias'],
+    CAJA: ['caja de compensacion'], CAJA_FECHA_AFILIACION: ['fecha de afiliacion a caja'],
+    VACUNA_TIPO: ['vacuna covid19 tipo de vacuna'], PRIMERA_DOSIS: ['primera dosis'], SEGUNDA_DOSIS: ['segunda dosis'],
+    MODALIDAD: ['modalidad'],
+    SERIAL_DIADEMA: ['serial diadema'], LOCKER: ['locker'],
+    RUT: ['rut'], PISO: ['piso'], CARNET: ['carnet'],
+    ANALISTA_ENCARGADO: ['analista encargado'],
+    DOTACION: ['dotacion'], TALLA_CAMISA: ['talla camisa'], TALLA_PANTALON: ['talla pantalon'], TALLA_CALZADO: ['talla calzado'],
+    OBSERVACIONES: ['observaciones'],
+    FECHA_CERTIFICACION_LABORAL: ['fecha entrega certificacion laboral y cesantias']
+};
+
+// Identificación en la plantilla: nombres únicos. Las hojas del HeadCount repiten "Tipo De
+// Identificación" (celdas combinadas del original) y ahí el bloque va por posición, igual que en COL.
+const IDENTIFICACION_POR_NOMBRE = {
+    TIPO_ID: ['tipo de identificacion'], NUM_ID: ['numero de identificacion'],
+    TIPO_ID_2: ['tipo de identificacion secundaria'], NUM_ID_2: ['numero de identificacion secundaria']
+};
+const IDENTIFICACION_POR_POSICION = { TIPO_ID: 2, NUM_ID: 3, TIPO_ID_2: 4, NUM_ID_2: 5, TIPO_ID_3: 6, NUM_ID_3: 7 };
+
+/**
+ * Posición de cada campo según el encabezado del archivo. El formato viejo de "TOTAL PERSONAL" se
+ * reconoce por su columna "Numero de cuenta Correcta" (que en realidad es el banco) y se sigue
+ * leyendo por posición (COL); cualquier otro archivo se lee por nombre de columna.
+ */
+function detectarColumnas(headerRow) {
+    const headers = (headerRow || []).map(normalizarHeader);
+    if (headers.includes('numero de cuenta correcta')) return { formato: 'total_personal', col: COL };
+
+    const buscar = (alias) => headers.findIndex(h => alias.includes(h));
+    const col = {};
+    for (const [clave, alias] of Object.entries(COLUMNAS_POR_NOMBRE)) {
+        const idx = buscar(alias);
+        if (idx !== -1) col[clave] = idx;
+    }
+    const tiposRepetidos = headers.filter(h => h === 'tipo de identificacion').length > 1;
+    if (tiposRepetidos) {
+        Object.assign(col, IDENTIFICACION_POR_POSICION);
+    } else {
+        for (const [clave, alias] of Object.entries(IDENTIFICACION_POR_NOMBRE)) {
+            const idx = buscar(alias);
+            if (idx !== -1) col[clave] = idx;
+        }
+    }
+    return { formato: 'por_nombre', col };
+}
+
 const MAP_GENERO = { M: 'Masculino', F: 'Femenino' };
 const MAP_MODALIDAD = { PRESENCIAL: 'Presencial', 'TRABAJO EN CASA': 'Remoto' };
 // "Tipo De Dirección" del Excel (Urbano/Rural) — catálogo nuevo `zona_direccion`
@@ -166,15 +252,15 @@ const MAP_PARENTESCO = {
     HIJA: 'Hijo(a)', HIJO: 'Hijo(a)'
 };
 
-function elegirIdentificacionSecundaria(fila, advertencias, numeroFila) {
+function elegirIdentificacionSecundaria(fila, advertencias, numeroFila, col) {
     const par = (tipoCol, numCol) => {
         const tipo = limpio(fila[tipoCol]);
         const num = limpio(fila[numCol]);
         if (!tipo || !num || Number(num) === 0) return null;
         return { tipo, numero: num };
     };
-    const a = par(COL.TIPO_ID_2, COL.NUM_ID_2);
-    const b = par(COL.TIPO_ID_3, COL.NUM_ID_3);
+    const a = par(col.TIPO_ID_2, col.NUM_ID_2);
+    const b = par(col.TIPO_ID_3, col.NUM_ID_3);
     if (a && b) {
         advertencias.push(`Fila ${numeroFila}: trae dos identificaciones secundarias distintas, se guardó solo la primera (${a.tipo} ${a.numero}).`);
         return a;
@@ -187,15 +273,16 @@ function elegirIdentificacionSecundaria(fila, advertencias, numeroFila) {
  * listo para que la capa de servicio resuelva catálogos e inserte. No toca la BD.
  * `colExtra`: posiciones de los campos de la migración 050 detectadas por nombre de
  * columna (ver detectarColumnasNuevas) — puede no traer todas, o ninguna.
+ * `col`: posición de cada campo (COL para el formato viejo, o la que arma detectarColumnas).
  */
-function normalizarFila(fila, numeroFila, colExtra = {}) {
+function normalizarFila(fila, numeroFila, colExtra = {}, col = COL) {
     const advertencias = [];
 
     // primer_apellido es NOT NULL en el esquema. Hay empleados reales con un solo
     // apellido, que el Excel deja en la celda de "Segundo Apellido" y la de "Primer
     // Apellido" vacía — se promueve para no perder el dato ni violar la columna.
-    let primerApellido = limpio(fila[COL.PRIMER_APELLIDO]);
-    let segundoApellido = limpio(fila[COL.SEGUNDO_APELLIDO]);
+    let primerApellido = limpio(fila[col.PRIMER_APELLIDO]);
+    let segundoApellido = limpio(fila[col.SEGUNDO_APELLIDO]);
     if (!primerApellido && segundoApellido) {
         primerApellido = segundoApellido;
         segundoApellido = null;
@@ -203,23 +290,23 @@ function normalizarFila(fila, numeroFila, colExtra = {}) {
     }
 
     const tipoIdCodigo = (() => {
-        const raw = limpio(fila[COL.TIPO_ID]);
+        const raw = limpio(fila[col.TIPO_ID]);
         if (!raw) return null;
         const codigo = raw.toUpperCase();
         return MAP_TIPO_ID_CODIGO[codigo] || codigo;
     })();
 
-    const idSecundaria = elegirIdentificacionSecundaria(fila, advertencias, numeroFila);
+    const idSecundaria = elegirIdentificacionSecundaria(fila, advertencias, numeroFila, col);
     const tipoIdSecundariaCodigo = idSecundaria
         ? (MAP_TIPO_ID_CODIGO[idSecundaria.tipo.toUpperCase()] || idSecundaria.tipo.toUpperCase())
         : null;
 
-    let estadoCivilRaw = limpio(fila[COL.ESTADO_CIVIL]);
+    let estadoCivilRaw = limpio(fila[col.ESTADO_CIVIL]);
     if (esPlaceholderPendiente(estadoCivilRaw)) estadoCivilRaw = null;
 
-    const parentescoRaw = limpio(fila[COL.PARENTESCO]);
-    const contactoRaw = limpio(fila[COL.CONTACTO_EMERGENCIA]);
-    const telContactoRaw = limpio(fila[COL.TELEFONO_CONTACTO]);
+    const parentescoRaw = limpio(fila[col.PARENTESCO]);
+    const contactoRaw = limpio(fila[col.CONTACTO_EMERGENCIA]);
+    const telContactoRaw = limpio(fila[col.TELEFONO_CONTACTO]);
     const contactoEsPendiente = esPlaceholderPendiente(parentescoRaw) || esPlaceholderPendiente(contactoRaw) || esPlaceholderPendiente(telContactoRaw);
 
     let contactoEmergencia = null;
@@ -233,121 +320,121 @@ function normalizarFila(fila, numeroFila, colExtra = {}) {
         };
     }
 
-    const generoRaw = limpio(fila[COL.GENERO]);
+    const generoRaw = limpio(fila[col.GENERO]);
     const generoNombre = generoRaw ? (MAP_GENERO[generoRaw.toUpperCase()] || null) : null;
     if (generoRaw && !generoNombre) advertencias.push(`Fila ${numeroFila}: género "${generoRaw}" no reconocido, se dejó vacío.`);
 
-    const modalidadRaw = limpio(fila[COL.MODALIDAD]);
+    const modalidadRaw = limpio(fila[col.MODALIDAD]);
     const modalidadNombre = modalidadRaw ? (MAP_MODALIDAD[modalidadRaw.toUpperCase()] || modalidadRaw) : null;
 
-    const tipoCuentaRaw = limpio(fila[COL.TIPO_CUENTA]);
+    const tipoCuentaRaw = limpio(fila[col.TIPO_CUENTA]);
     const tipoCuentaNombre = tipoCuentaRaw ? (MAP_TIPO_CUENTA[tipoCuentaRaw.toUpperCase()] || tipoCuentaRaw) : null;
 
-    const bancoNombre = limpiarBanco(fila[COL.BANCO]);
+    const bancoNombre = limpiarBanco(fila[col.BANCO]);
 
     // Vacunación: "NO"/"SIN INFORMACIÓN" significa que no se vacunó -> no se crea registro.
-    const vacunaRaw = limpio(fila[COL.VACUNA_TIPO]);
+    const vacunaRaw = limpio(fila[col.VACUNA_TIPO]);
     const sinVacuna = !vacunaRaw || ['NO', 'SIN INFORMACIÓN', 'SIN INFORMACION'].includes(vacunaRaw.toUpperCase());
     const vacunacion = sinVacuna ? null : {
         tipo_vacuna_nombre: vacunaRaw,
-        primera_dosis: fechaISO(fila[COL.PRIMERA_DOSIS]),
-        segunda_dosis: fechaISO(fila[COL.SEGUNDA_DOSIS])
+        primera_dosis: fechaISO(fila[col.PRIMERA_DOSIS]),
+        segunda_dosis: fechaISO(fila[col.SEGUNDA_DOSIS])
     };
 
     // Diadema: solo si trae un serial real (no "P"/"N/A").
-    const diademaRaw = limpio(fila[COL.SERIAL_DIADEMA]);
+    const diademaRaw = limpio(fila[col.SERIAL_DIADEMA]);
     const diademaSerial = (diademaRaw && diademaRaw.toUpperCase() !== 'P') ? diademaRaw : null;
 
-    const lockerRaw = limpio(fila[COL.LOCKER]);
+    const lockerRaw = limpio(fila[col.LOCKER]);
 
     // Carnet: la columna es un ESTADO ("Entregado"/"Pendiente"/"P"), no un identificador.
-    const carnetRaw = limpio(fila[COL.CARNET]);
+    const carnetRaw = limpio(fila[col.CARNET]);
     const carnetEntregado = !!(carnetRaw && carnetRaw.toUpperCase() === 'ENTREGADO');
 
-    const dotacionRaw = limpio(fila[COL.DOTACION]);
-    const tallaCamisa = limpio(fila[COL.TALLA_CAMISA]);
-    const tallaPantalon = limpio(fila[COL.TALLA_PANTALON]);
-    const tallaCalzado = limpio(fila[COL.TALLA_CALZADO]);
+    const dotacionRaw = limpio(fila[col.DOTACION]);
+    const tallaCamisa = limpio(fila[col.TALLA_CAMISA]);
+    const tallaPantalon = limpio(fila[col.TALLA_PANTALON]);
+    const tallaCalzado = limpio(fila[col.TALLA_CALZADO]);
     const tieneDotacion = (dotacionRaw && dotacionRaw.toUpperCase() === 'SI') || tallaCamisa || tallaPantalon || tallaCalzado;
 
     return {
         numero_fila: numeroFila,
-        nombre_completo: [fila[COL.PRIMER_NOMBRE], fila[COL.SEGUNDO_NOMBRE], primerApellido, segundoApellido]
+        nombre_completo: [fila[col.PRIMER_NOMBRE], fila[col.SEGUNDO_NOMBRE], primerApellido, segundoApellido]
             .map(limpio).filter(Boolean).join(' '),
         advertencias,
 
-        cliente_nombre: limpio(fila[COL.CLIENTE]),
+        cliente_nombre: limpio(fila[col.CLIENTE]),
         tipo_id_codigo: tipoIdCodigo,
-        numero_identificacion: limpio(fila[COL.NUM_ID]),
+        numero_identificacion: limpio(fila[col.NUM_ID]),
         tipo_id_secundaria_codigo: tipoIdSecundariaCodigo,
         numero_identificacion_secundaria: idSecundaria ? idSecundaria.numero : null,
-        fecha_expedicion: fechaISO(fila[COL.FECHA_EXPEDICION]),
-        ciudad_expedicion_nombre: limpio(fila[COL.CIUDAD_EXPEDICION]),
+        fecha_expedicion: fechaISO(fila[col.FECHA_EXPEDICION]),
+        ciudad_expedicion_nombre: limpio(fila[col.CIUDAD_EXPEDICION]),
 
-        primer_nombre: limpio(fila[COL.PRIMER_NOMBRE]),
-        segundo_nombre: limpio(fila[COL.SEGUNDO_NOMBRE]),
+        primer_nombre: limpio(fila[col.PRIMER_NOMBRE]),
+        segundo_nombre: limpio(fila[col.SEGUNDO_NOMBRE]),
         primer_apellido: primerApellido,
         segundo_apellido: segundoApellido,
         genero_nombre: generoNombre,
-        grupo_sanguineo_nombre: limpio(fila[COL.RH]),
+        grupo_sanguineo_nombre: limpio(fila[col.RH]),
 
         tipo_contrato_nombre: (() => {
-            const raw = limpio(fila[COL.TIPO_CONTRATO]);
+            const raw = limpio(fila[col.TIPO_CONTRATO]);
             return raw ? (MAP_TIPO_CONTRATO[raw.toUpperCase()] || raw) : null;
         })(),
-        ciudad_labora_nombre: limpio(fila[COL.CIUDAD_LABORA]),
-        oleada_nombre: limpio(fila[COL.OLEADA]),
-        fecha_ingreso: fechaISO(fila[COL.FECHA_INGRESO]),
+        ciudad_labora_nombre: limpio(fila[col.CIUDAD_LABORA]),
+        oleada_nombre: limpio(fila[col.OLEADA]),
+        fecha_ingreso: fechaISO(fila[col.FECHA_INGRESO]),
         area_nombre: (() => {
-            const raw = limpio(fila[COL.AREA]);
+            const raw = limpio(fila[col.AREA]);
             return raw ? (MAP_AREA[raw.toUpperCase()] || raw) : null;
         })(),
-        campania_nombre: limpio(fila[COL.CAMPANIA]),
-        centro_costo_nombre: limpio(fila[COL.CENTRO_COSTO_NOMBRE]),
-        centro_costo_codigo: limpio(fila[COL.CENTRO_COSTO_CODIGO]),
-        usuario_ssff: limpio(fila[COL.USUARIO_SSFF]),
-        cargo_nombre: limpio(fila[COL.CARGO]),
-        cargo_ssff: limpio(fila[COL.CARGO_SSFF]),
-        salario: numero(fila[COL.SALARIO]),
-        bono_no_prestacional: numero(fila[COL.BONO_NO_PRESTACIONAL]),
-        bono_cafeteria: numero(fila[COL.BONO_CAFETERIA]),
-        director_area_nombre: limpio(fila[COL.DIRECTOR_AREA]),
-        jefe_area_nombre: limpio(fila[COL.JEFE_AREA]),
-        jefe_inmediato_nombre: limpio(fila[COL.JEFE_INMEDIATO]),
-        fecha_fin_periodo_prueba: fechaISO(fila[COL.FECHA_FIN_PERIODO_PRUEBA]),
-        fecha_fin_contrato: fechaISO(fila[COL.FECHA_FIN_CONTRATO]),
-        observaciones: limpio(fila[COL.OBSERVACIONES]),
-        fecha_entrega_certificacion_laboral: fechaISO(fila[COL.FECHA_CERTIFICACION_LABORAL]),
+        campania_nombre: limpio(fila[col.CAMPANIA]),
+        centro_costo_nombre: limpio(fila[col.CENTRO_COSTO_NOMBRE]),
+        centro_costo_codigo: limpio(fila[col.CENTRO_COSTO_CODIGO]),
+        usuario_ssff: limpio(fila[col.USUARIO_SSFF]),
+        cargo_nombre: limpio(fila[col.CARGO]),
+        cargo_ssff: limpio(fila[col.CARGO_SSFF]),
+        salario: numero(fila[col.SALARIO]),
+        bono_no_prestacional: numero(fila[col.BONO_NO_PRESTACIONAL]),
+        bono_cafeteria: numero(fila[col.BONO_CAFETERIA]),
+        director_area_nombre: limpio(fila[col.DIRECTOR_AREA]),
+        jefe_area_nombre: limpio(fila[col.JEFE_AREA]),
+        jefe_inmediato_nombre: limpio(fila[col.JEFE_INMEDIATO]),
+        fecha_fin_periodo_prueba: fechaISO(fila[col.FECHA_FIN_PERIODO_PRUEBA]),
+        fecha_fin_contrato: fechaISO(fila[col.FECHA_FIN_CONTRATO]),
+        observaciones: limpio(fila[col.OBSERVACIONES]),
+        fecha_entrega_certificacion_laboral: fechaISO(fila[col.FECHA_CERTIFICACION_LABORAL]),
 
-        fecha_nacimiento: fechaISO(fila[COL.FECHA_NACIMIENTO]),
-        ciudad_nacimiento_nombre: limpio(fila[COL.CIUDAD_NACIMIENTO]),
+        fecha_nacimiento: fechaISO(fila[col.FECHA_NACIMIENTO]),
+        ciudad_nacimiento_nombre: limpio(fila[col.CIUDAD_NACIMIENTO]),
         zona_direccion_nombre: (() => {
-            const raw = limpio(fila[COL.TIPO_DIRECCION]);
+            const raw = limpio(fila[col.TIPO_DIRECCION]);
             return raw ? (MAP_ZONA_DIRECCION[raw.toUpperCase()] || null) : null;
         })(),
-        direccion: limpio(fila[COL.DIRECCION]),
-        barrio: limpio(fila[COL.BARRIO]),
-        telefono: limpio(fila[COL.TELEFONO]),
-        email: limpio(fila[COL.EMAIL]),
+        direccion: limpio(fila[col.DIRECCION]),
+        barrio: limpio(fila[col.BARRIO]),
+        telefono: limpio(fila[col.TELEFONO]),
+        email: limpio(fila[col.EMAIL]),
         estado_civil_raw: estadoCivilRaw,
-        numero_hijos: numero(fila[COL.NUMERO_HIJOS]),
+        numero_hijos: numero(fila[col.NUMERO_HIJOS]),
         contacto_emergencia: contactoEmergencia,
 
-        cuenta_numero: limpio(fila[COL.NUMERO_CUENTA]),
+        cuenta_numero: limpio(fila[col.NUMERO_CUENTA]),
         cuenta_tipo_nombre: tipoCuentaNombre,
         banco_nombre: bancoNombre,
 
-        arl_nombre: limpio(fila[COL.ARL]),
-        arl_fecha_afiliacion: fechaISO(fila[COL.ARL_FECHA_AFILIACION]),
-        tarifa_arl: numero(fila[COL.TARIFA_ARL], null),
-        eps_nombre: limpio(fila[COL.EPS]),
-        eps_fecha_afiliacion: fechaISO(fila[COL.EPS_FECHA_AFILIACION]),
-        afp_nombre: limpio(fila[COL.AFP]),
-        afp_fecha_afiliacion: fechaISO(fila[COL.AFP_FECHA_AFILIACION]),
-        cesantias_nombre: limpio(fila[COL.CESANTIAS]),
-        cesantias_fecha_afiliacion: fechaISO(fila[COL.CESANTIAS_FECHA_AFILIACION]),
-        caja_nombre: limpio(fila[COL.CAJA]),
-        caja_fecha_afiliacion: fechaISO(fila[COL.CAJA_FECHA_AFILIACION]),
+        arl_nombre: limpio(fila[col.ARL]),
+        arl_fecha_afiliacion: fechaISO(fila[col.ARL_FECHA_AFILIACION]),
+        tarifa_arl: numero(fila[col.TARIFA_ARL], null),
+        eps_nombre: limpio(fila[col.EPS]),
+        eps_fecha_afiliacion: fechaISO(fila[col.EPS_FECHA_AFILIACION]),
+        afp_nombre: limpio(fila[col.AFP]),
+        afp_fecha_afiliacion: fechaISO(fila[col.AFP_FECHA_AFILIACION]),
+        cesantias_nombre: limpio(fila[col.CESANTIAS]),
+        cesantias_fecha_afiliacion: fechaISO(fila[col.CESANTIAS_FECHA_AFILIACION]),
+        caja_nombre: limpio(fila[col.CAJA]),
+        caja_fecha_afiliacion: fechaISO(fila[col.CAJA_FECHA_AFILIACION]),
 
         vacunacion,
 
@@ -357,9 +444,9 @@ function normalizarFila(fila, numeroFila, colExtra = {}) {
         locker_numero: lockerRaw,
         carnet_entregado: carnetEntregado,
 
-        rut: limpio(fila[COL.RUT]),
-        piso: limpio(fila[COL.PISO]),
-        analista_encargado_nombre: limpio(fila[COL.ANALISTA_ENCARGADO]),
+        rut: limpio(fila[col.RUT]),
+        piso: limpio(fila[col.PISO]),
+        analista_encargado_nombre: limpio(fila[col.ANALISTA_ENCARGADO]),
 
         dotacion: tieneDotacion ? { talla_camisa: tallaCamisa, talla_pantalon: tallaPantalon, talla_calzado: tallaCalzado } : null,
         // La misma señal "DOTACIÓN"="SI" que ya decide si se guarda el historial de
@@ -391,6 +478,13 @@ function parsearArchivo(buffer) {
     const hoja = wb.Sheets[nombreHoja];
     const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: null });
     const colExtra = detectarColumnasNuevas(filasCrudas[0]);
+    const { formato, col } = detectarColumnas(filasCrudas[0]);
+    // Campos cuya columna no viene en el archivo: al actualizar un empleado existente, el
+    // servicio conserva lo que ya tenía en vez de vaciarlo (importEmpleadosService::conservarAusentes).
+    const camposAusentes = [
+        ...Object.keys(COL).filter(clave => col[clave] === undefined),
+        ...Object.keys(CAMPOS_NUEVOS_POR_NOMBRE).filter(clave => colExtra[clave] === undefined)
+    ];
 
     const filas = [];
     const erroresParseo = [];
@@ -400,13 +494,13 @@ function parsearArchivo(buffer) {
         if (!cruda || cruda.every(v => v === null || v === undefined || v === '')) continue; // fila vacía
         const numeroFila = i + 1; // número de fila tal como se ve en Excel
         try {
-            filas.push(normalizarFila(cruda, numeroFila, colExtra));
+            filas.push({ ...normalizarFila(cruda, numeroFila, colExtra, col), campos_ausentes: camposAusentes });
         } catch (e) {
             erroresParseo.push({ fila: numeroFila, mensaje: `No se pudo leer la fila: ${e.message}` });
         }
     }
 
-    return { hoja: nombreHoja, total_filas: filas.length, filas, errores_parseo: erroresParseo };
+    return { hoja: nombreHoja, formato, total_filas: filas.length, filas, errores_parseo: erroresParseo };
 }
 
-module.exports = { parsearArchivo, normalizarFila, limpio, fechaISO, numero };
+module.exports = { parsearArchivo, normalizarFila, detectarColumnas, limpio, fechaISO, numero };

@@ -2432,3 +2432,94 @@ Probado en local 2026-10-30: subida de 0,4 KB / 30 MB / 40 MB, reemplazo, rechaz
 servidor), de un HTML con extensión `.pdf`, de una imagen y de un tipo inválido; 401 sin sesión;
 previsualización, eliminación y filtro en el navegador. No se probó en el navegador el alta completa
 (solo que `AgentForm` pasa el empleado creado a `onSuccess`).
+
+## 43. Sesión 2026-10-30 — Plantilla de cargue masivo con los campos de "Personal pend"
+
+**Pedido.** La plantilla descargable ("Descargar plantilla" en "Cargar Excel") traía las ~100
+columnas de "TOTAL PERSONAL", muchas en desuso, y confundía. Se rehízo con los campos de la hoja
+"Personal pend" del HeadCount, que es como RRHH arma hoy los ingresos (§41).
+
+**Plantilla** (`ImportEmpleadosModal.jsx::COLUMNAS_PLANTILLA`, `plantilla_empleados.xlsx`):
+- **Hoja "Empleados"**: 58 columnas. Son los campos de "Personal pend" que el import guarda, más:
+  - **Tipo De Contrato** y **Ciudad Donde Labora**: el import los exige (`CAMPOS_CONTRATO_OBLIGATORIOS`) y "Personal pend" no los trae. En el último cargue se rellenaron con CTI y Bogotá (§41).
+- **Hoja "Instrucciones"**: dice qué columnas son obligatorias y cómo llenar cada una.
+- **Identificación**: con nombres únicos, "Número De Identificación" y "Tipo/Número De Identificación Secundaria". Antes había 4 "Tipo De Identificación" repetidas.
+- **Se quitaron**:
+  - de "Personal pend": las dos columnas "Estado", "Nombre Propio" (se calcula) y las de retiro (fechas, tipo, motivo, justificación). El import no las lee; los retiros se registran aparte.
+  - de "TOTAL PERSONAL", porque ya no se usan: Cargo/Usuario SSFF, Bono cafetería, Tipo de dirección, fechas de afiliación, traslados y Tarifa ARL, vacuna COVID, piso, certificación laboral y los campos de nómina de la 050.
+
+**Lector** (`utils/importEmpleadosExcel.js`):
+- `detectarColumnas` decide cómo se lee el archivo:
+  - si trae "Numero de cuenta Correcta", es el **Excel viejo de "TOTAL PERSONAL"** y se sigue leyendo **por posición** (`COL`, sin cambios);
+  - cualquier otro se lee **por nombre de columna** (`COLUMNAS_POR_NOMBRE`), en cualquier orden.
+- Con "Tipo De Identificación" repetida (las hojas del HeadCount), el bloque de identificación va por posición. Así la hoja "Personal pend" también se puede subir tal cual.
+- Cada fila lleva `campos_ausentes`: los campos cuya columna no trae el archivo.
+
+**Sin borrar datos al actualizar** (`importEmpleadosService::conservarAusentes`):
+- Antes, actualizar un empleado existente reescribía todos sus campos con lo del archivo.
+- Ahora, si la columna **no viene** en el archivo, se conserva el valor actual: SSFF, piso, fechas de contrato, bonos, tarifa y fechas de afiliación, zona de dirección y campos de nómina. Mapa en `CONSERVAR_SI_FALTA`.
+- Una celda vacía de una columna que **sí** viene sigue vaciando el campo, como antes.
+
+**Probado (local):**
+- "TOTAL PERSONAL" del HeadCount: 389 filas, idénticas al lector anterior.
+- "Personal pend" leída por nombre coincide con el Excel convertido de §41. Solo cambian diadema y locker en las 7 bajas, que el script vació a propósito.
+- La plantilla llenada con los 67 empleados de "Personal pend":
+  - todas las columnas reconocidas y ningún obligatorio vacío;
+  - la vista previa del import dio 0 errores.
+- Al confirmar un empleado existente con la plantilla, se actualizó el teléfono (columna presente) y se conservaron usuario y cargo SSFF, piso, fin de contrato, tarifa ARL y fecha de afiliación EPS (columnas ausentes). El salario no abrió un historial nuevo. Los datos de prueba se revirtieron.
+- Pruebas en `tests/importEmpleadosExcel.test.js`; `npm test` pasa con 271.
+
+## 44. Sesión 2026-10-30 — Formulario de nuevo empleado igual a la plantilla, jefes y salario
+
+**Decisión del usuario:** el formulario manual (`AgentForm.jsx`) queda con los mismos campos que la
+plantilla de cargue masivo (§43). Esto **reemplaza la regla de §18** (campos solo de las hojas
+"Nuevo Epleado" y "EJEMPLO").
+
+**Campos del formulario:**
+- **Quitados de la vista:** libreta militar, zona, tipo de vivienda, cargo SSFF, usuario SSFF, piso, fin de contrato, empresa, periodo de pago, tipo cotizante, bono cafetería, tarifa ARL y las fechas de afiliación EPS/ARL/AFP/caja.
+  - Siguen en el estado del formulario: al editar se reenvían tal cual y no se borran.
+  - Aprendizaje sigue calculando el fin de contrato a 6 meses aunque el campo no se vea.
+  - Sin tarifa propia, el costo de nómina usa el porcentaje general de ARL.
+  - Empresa, periodo de pago, tipo cotizante, zona, vivienda y tarifa ARL ya no son obligatorios al crear (el backend nunca los exigió).
+- **Agregados en "Otros":** Analista encargado y Observaciones.
+  - Al crear, el analista se muestra como informativo ("Se asigna a quien registra al empleado"): el backend lo toma del login y no del formulario (§18).
+  - Al editar, el analista es un buscador sobre todos los empleados.
+- Ciudad de residencia y RUT se quedan: la plantilla trae RUT, y la ciudad completa la dirección.
+
+**Filtros validados contra los 458 contratos activos.** Cada empleado se simuló como nuevo, quitándolo de las cadenas de mando.
+
+Jefes, filtrados por campaña + cargo:
+
+| Rol | Su jefe real aparece | Sugerencia que acierta |
+|---|---|---|
+| Jefe inmediato | 426/454 | 62 (solo se sugiere cuando hay uno) |
+| Jefe de área | 439/455 | 386 |
+| Director | 445/450 | 387 |
+
+- Los casos que fallan son equipos nuevos o cambios de jefe.
+- **Cambio:** debajo de los sugeridos aparece un grupo "Otros jefes" con las 44 personas que ya son jefe o director de alguien. Esas 44 cubren a todos los jefes reales.
+
+Salario sugerido por cliente + cargo:
+- 420 coinciden con el salario real;
+- 8 distintos (por ejemplo, salarios negociados);
+- 3 ambiguos que incluyen el real;
+- 27 sin referencia.
+
+**Corrección del salario sugerido:**
+- Al cambiar de una combinación con salario único (por ejemplo Claro + Agente call center, $1.750.905) a una sin salario único (por ejemplo Asiste + Ayudante de obra, que tiene 3), el campo conservaba el salario anterior y quedaba desbloqueado.
+- Ahora, si el salario lo había puesto la sugerencia, el campo se vacía; uno escrito a mano se respeta.
+
+**Prueba en el navegador (local, 2026-10-30), con la cuenta de prueba `prueba.rrhh` (clave del seed):**
+- **Filtros:** Claro dejó 9 campañas y 16 cargos. T&T + Agente call center sugirió el salario $1.750.905 bloqueado, 12 jefes inmediatos sugeridos + 32 en "Otros jefes", y dejó prellenados jefe de área y director.
+- **Jefe de "Otros jefes":** al elegirlo se mantiene, sin pisar el resto de la jefatura.
+- **Alta completa:** se guardó sin los campos quitados.
+- **Edición:** se actualizaron el teléfono y el analista; piso, empresa, usuario SSFF y tarifa ARL, puestos a mano en la BD, se conservaron, y no se abrió un historial salarial nuevo.
+- El empleado de prueba (cédula 9000000099) se borró después, junto con su aviso a AsisLock.
+
+**Migración 090 `salario_referencia_por_nombre`:**
+- Carga en producción las 58 filas de `salario_referencia`, buscando cliente y cargo por nombre con `COLLATE utf8mb4_0900_ai_ci` en los dos lados.
+- En producción la tabla estaba vacía desde §29.3, así que no había salario sugerido ni filtro de cargo por cliente.
+- Es idempotente. Al final lista las filas cuyo cliente o cargo no existe con ese nombre (debe salir vacío).
+- Se probó en local con la tabla vacía y con dos corridas seguidas.
+- Efecto en local: el `CREATE TABLE IF NOT EXISTS` hace commit implícito, así que la prueba renumeró los IDs locales a 59–116. Son los mismos datos y nada referencia esos IDs.
+- **Pendiente en producción.** Sin dependencias; puede ir antes o después del código.
