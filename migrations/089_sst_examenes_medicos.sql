@@ -52,12 +52,17 @@ ALTER TABLE `hydra_candidato`
     COMMENT 'Exámenes médicos (SST). Solo los aprobados se registran. NULL = anterior a SST'
     AFTER `estado`;
 
+-- Workbench trae el modo de actualización segura (error 1175): se apaga solo para estos UPDATE.
+SET SQL_SAFE_UPDATES = 0;
+
 UPDATE `hydra_candidato` SET `examen_estado` = NULL
 WHERE `estado` IN ('registrado', 'descartado', 'cancelado_hydra');
 
 -- Los candidatos en curso pasan a necesitar el examen: 'listo' ya no basta para registrar.
 UPDATE `hydra_candidato` SET `estado` = 'pendiente' WHERE `estado` = 'listo';
 UPDATE `hydra_lote` SET `estado` = 'abierto' WHERE `estado` = 'listo';
+
+SET SQL_SAFE_UPDATES = 1;
 
 -- 3. Traza de exámenes ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `hydra_candidato_examen` (
