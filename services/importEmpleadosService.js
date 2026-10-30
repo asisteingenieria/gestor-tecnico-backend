@@ -422,6 +422,61 @@ async function construirDataEmpleado(fila, resolver, advertencias) {
     return data;
 }
 
+// Columna que no viene en el archivo → dónde va en `data` y dónde está en getByIdCompleto. La
+// plantilla actual (2026-10-30) ya no trae varias columnas del Excel viejo: sin esto, actualizar un
+// empleado existente le borraría esos datos. Las claves son las de COL y CAMPOS_NUEVOS_POR_NOMBRE
+// de utils/importEmpleadosExcel.js.
+const CONSERVAR_SI_FALTA = {
+    USUARIO_SSFF: [['usuario_ssff', 'usuario_ssff']],
+    CARGO_SSFF: [['contrato.cargo_ssff', 'contrato.cargo_ssff']],
+    PISO: [['contrato.piso', 'contrato.piso']],
+    FECHA_FIN_CONTRATO: [['contrato.fecha_fin_contrato', 'contrato.fecha_fin_contrato']],
+    FECHA_FIN_PERIODO_PRUEBA: [['contrato.fecha_fin_periodo_prueba', 'contrato.fecha_fin_periodo_prueba']],
+    OBSERVACIONES: [['contrato.observaciones', 'contrato.observaciones']],
+    FECHA_CERTIFICACION_LABORAL: [['contrato.fecha_entrega_certificacion_laboral', 'contrato.fecha_entrega_certificacion_laboral']],
+    BONO_CAFETERIA: [['salario.bono_cafeteria', 'salario_actual.bono_cafeteria']],
+    BONO_NO_PRESTACIONAL: [['salario.bono_no_prestacional', 'salario_actual.bono_no_prestacional']],
+    TARIFA_ARL: [['seguridad_social.tarifa_arl', 'seguridad_social.tarifa_arl']],
+    ARL_FECHA_AFILIACION: [['seguridad_social.arl_fecha_afiliacion', 'seguridad_social.arl_fecha_afiliacion']],
+    EPS_FECHA_AFILIACION: [['seguridad_social.eps_fecha_afiliacion', 'seguridad_social.eps_fecha_afiliacion']],
+    AFP_FECHA_AFILIACION: [['seguridad_social.afp_fecha_afiliacion', 'seguridad_social.afp_fecha_afiliacion']],
+    CESANTIAS_FECHA_AFILIACION: [['seguridad_social.cesantias_fecha_afiliacion', 'seguridad_social.cesantias_fecha_afiliacion']],
+    CAJA_FECHA_AFILIACION: [['seguridad_social.caja_fecha_afiliacion', 'seguridad_social.caja_fecha_afiliacion']],
+    TIPO_DIRECCION: [['direccion.zona_direccion_id', 'direccion.zona_direccion_id']],
+    EMPRESA: [['contrato.empresa_id', 'contrato.empresa_id']],
+    CLASE: [['contrato.clase_contrato_id', 'contrato.clase_contrato_id']],
+    PERIODO_PAGO: [['contrato.periodo_pago_id', 'contrato.periodo_pago_id']],
+    CLASIFICACION_DIAN: [['contrato.clasificacion_dian_id', 'contrato.clasificacion_dian_id']],
+    TIPO_SENA: [['contrato.tipo_sena_id', 'contrato.tipo_sena_id']],
+    TIPO_COTIZANTE: [['contrato.tipo_cotizante_id', 'contrato.tipo_cotizante_id']],
+    SUBTIPO_COTIZANTE: [['contrato.subtipo_cotizante_id', 'contrato.subtipo_cotizante_id']],
+    DECLARANTE: [['declarante_renta', 'declarante_renta']],
+    LIBRETA_MILITAR: [['libreta_militar_numero', 'libreta_militar_numero']]
+};
+
+const leerRuta = (obj, ruta) => ruta.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+const escribirRuta = (obj, ruta, valor) => {
+    const partes = ruta.split('.');
+    const ultimo = partes.pop();
+    const destino = partes.reduce((o, k) => o?.[k], obj);
+    if (destino && typeof destino === 'object') destino[ultimo] = valor;
+};
+// Las fechas de la BD llegan como Date (pool en UTC): se devuelven como 'YYYY-MM-DD'.
+const comoValor = (v) => (v instanceof Date && !isNaN(v) ? v.toISOString().slice(0, 10) : v);
+
+/** Completa `data` con los valores actuales del empleado en los campos cuya columna no trae el archivo. */
+async function conservarAusentes(data, camposAusentes, usersCompanyId) {
+    const rutas = (camposAusentes || []).flatMap(clave => CONSERVAR_SI_FALTA[clave] || []);
+    if (rutas.length === 0) return;
+    const actual = await UserCompany.getByIdCompleto(usersCompanyId);
+    if (!actual) return;
+    for (const [destino, origen] of rutas) {
+        // La dirección solo se reescribe si el archivo trae una; si no, no hay qué completar.
+        if (destino.startsWith('direccion.') && !data.direccion?.direccion) continue;
+        escribirRuta(data, destino, comoValor(leerRuta(actual, origen)) ?? null);
+    }
+}
+
 function validarContrato(data) {
     const faltantes = Object.entries(CAMPOS_CONTRATO_OBLIGATORIOS)
         .filter(([campo]) => !data.contrato[campo])
@@ -584,6 +639,7 @@ async function confirmar(filas) {
             let ucId;
             let accion;
             if (existeId) {
+                await conservarAusentes(data, fila.campos_ausentes, existeId);
                 await UserCompany.update(existeId, data);
                 ucId = existeId;
                 accion = 'actualizado';
