@@ -44,3 +44,16 @@ test('cada fila lleva los campos cuya columna no trae el archivo, para conservar
     assert.ok(fila.campos_ausentes.includes('EMPRESA'));
     assert.ok(!fila.campos_ausentes.includes('NUM_ID'));
 });
+
+test('el parentesco acepta los sinónimos del HeadCount y los nombres del catálogo', () => {
+    const buffer = libro('Empleados', [
+        ['Tipo De Identificación', 'Número De Identificación', 'Contacto De Emergencia', 'Parentesco', 'Telefono Contacto de Emergencia'],
+        ['CC', '1', 'A', 'ESPOSA', '300'],
+        ['CC', '2', 'B', 'Compañero(a)', '300'],
+        ['CC', '3', 'C', 'hermano(a)', '300'],
+        ['CC', '4', 'D', 'Conyuge', '300'],
+        ['CC', '5', 'E', 'VECINA', '300']
+    ]);
+    const parentescos = parsearArchivo(buffer).filas.map(f => f.contacto_emergencia.parentesco_nombre);
+    assert.deepEqual(parentescos, ['Cónyuge', 'Compañero(a)', 'Hermano(a)', 'Cónyuge', 'Otro']);
+});
