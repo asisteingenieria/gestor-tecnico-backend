@@ -2815,6 +2815,17 @@ repo porque trae cédulas. Tabla temporal + `INSERT … SELECT … ON DUPLICATE 
    cerradas sin horario).
 2. `gestor_coordinadores_kevin_mayra.sql`, cuando el usuario lo decida.
 
+**Lo que trae la malla (revisado el 2026-10-29, en producción ya cargada):** `Mallas1.xlsx` es una copia,
+sin filtros, de la tabla `tab_mallas_turnos_mes` de la base `db_asistencia` (Power Query por ODBC, DSN
+`wf`). Trae de 227 a 241 personas por día (de 228 a 233 del 24 al 30) contra unas 400 fichas activas en
+RRHH: 252 personas distintas, de las que 19 solo tienen turnos hasta el 9 o el 16 (retiros) y el SQL
+cargó 233. Están todos los centros de costo, pero incompletos. Ejemplo: Carla Molina (ingreso 26 ago) y
+Carlos Morales (11 sep), de CBAT y a cargo de Kevin, están activos en RRHH pero no aparecen en la malla.
+A quien no tiene malla en `db_asistencia` no le llega horario: hay que cargárselo allá y volver a exportar,
+o que el jefe se lo asigne en Gestión de horarios. Diagnóstico de solo lectura:
+`Descargas/diagnostico_sin_horario_hoy.sql`, fuera del repo (activos sin horario hoy, por gestor y centro).
+La malla **no trae tolerancia**: los 5 minutos que cargó el SQL eran el valor por defecto del módulo (§52).
+
 ---
 
 ## 50. Sesión 2026-10-29 — Solicitudes de cambio de turno (084)
@@ -3032,12 +3043,54 @@ tarde.
   porque no hay contra qué medir la llegada. Es `claseHoy` en `EquipoAsistencia.jsx` y las claves
   `sin_horario`/`curso_sin_horario` en `utils/llegadaAsistencia.js`.
 
-**Para producción:**
-1. Correr la 086.
-2. `node scripts/recalcularJornadas.js --desde=2026-10-01`, para que el histórico, el resumen mensual y
-   los reportes muestren los minutos tarde sin tolerancia.
-3. Backend y frontend (cambian solo los valores por defecto; sin la 086 el código nuevo igual respeta la
-   tolerancia que tenga cada horario).
+**Producción:**
+1. **La 086 se corrió el 2026-10-29.** En MySQL Workbench dio el error 1175 (modo de actualización segura,
+   el `WHERE` no usa una llave): se le agregó `SET SQL_SAFE_UPDATES = 0` al inicio y `= 1` al final, y se
+   corrió de nuevo después de un `ROLLBACK`.
+2. `node scripts/recalcularJornadas.js --desde=2026-10-01` **después del pull del backend**, para que el
+   recálculo tome también la corrección del día de descanso.
+3. Backend `2acd291` y frontend `f9ae2ec` en `sebas-branch`, pendientes de merge y despliegue. Sin ellos,
+   una plantilla nueva arrancaría con 5 y un horario sin tolerancia explícita quedaría en 5.
 
 En local se aplicó la 086 (1.630 horarios, 1 plantilla) y se recalcularon 683 jornadas desde el
 2026-10-01. Tests: 248. La e2e crea sus plantillas con tolerancia 5 explícita y sigue esperando 55.
+
+## 53. Sesión 2026-10-29 — "Equipo" unificado (Hoy | Histórico) y columna Llegada
+
+**Pedido del usuario:** juntar "Equipo hoy" y "Equipo · mes" en una sola entrada de menú, "Equipo", y
+que el histórico distinga por cargo y por centro de costo. Además, que el día de hoy diga si la persona
+llegó puntual o tarde y si sigue en turno.
+
+**Frontend:**
+- Un solo ítem de menú, "Equipo" (`AsistenciaLayout.jsx`). Abre la vista de hoy y un selector
+  segmentado **Hoy | Histórico** (`SelectorVistaEquipo.jsx`, estilo `.ai-seg` en `components.css`) pasa
+  al mensual. Las rutas no cambian.
+- **Histórico** (`EquipoMensual.jsx`): agrupa por centro de costo, por cargo o sin agrupar; filtra por
+  centro, por cargo y por nombre; los KPIs se calculan en el cliente sobre lo filtrado (`totalesDe`); la
+  columna de hoy va resaltada y el CSV trae el centro de costo.
+- **Cuadrito de llegada**, igual en hoy y en el histórico (`src/utils/llegadaAsistencia.js`, con `CELDA`
+  y `claseDia`, y `CuadroLlegada.jsx`; las constantes van en utils por el lint `react-refresh`):
+  - verde = puntual; amarillo = tarde; rojo = ausente;
+  - mitad verde y mitad azul = llegó puntual y sigue en turno; mitad amarillo y mitad azul = llegó tarde y
+    sigue en turno;
+  - gris (gris y azul si sigue en turno) = sin horario o en su día de descanso (§52).
+- **Equipo hoy** (`EquipoAsistencia.jsx`):
+  - Columna **Llegada** después de Ingreso: el cuadrito y "Puntual · en turno", "Tarde · 20 min · en
+    turno", "… · terminó", "Aún no llega", "Ausente" o "Sin horario · en turno".
+  - **Estado** muestra solo el estado y, al lado, cada alerta por su nombre ("Baño excedido", "Almuerzo
+    excedido", "Hora extra sin aprobar"…). Antes decía "En turno · +N alerta": solo salía con llegada
+    tarde pero contaba todas las alertas del día. La llegada tarde ya no se repite ahí porque tiene su
+    columna.
+  - El icono de Acciones pasó a un botón **"Detalle de hoy"** (la misma trazabilidad del día).
+  - El CSV trae la columna Llegada y las alertas por nombre.
+  - Financiera ve esta misma tabla en "Asistencia en vivo".
+
+**Backend:** `resumenMensualEquipo` devuelve `centro_costo` y `estadoEnVivo` devuelve `minutos_tarde`. Sin
+migración.
+
+**Cómo se calcula "tarde":** desde la hora del turno más la tolerancia del horario, que desde la 086 es 0
+(§52). La pantalla muestra el login sin segundos y el cálculo los redondea: entrar a las 10:08:40 con turno
+de 10:00 da 9 minutos.
+
+**Commits:** backend `9d2d713` y `470391e`, frontend `2572fba` y `35eae7b`, **desplegados en producción
+el 2026-10-29**. La corrección "Sin horario" va en frontend `f9ae2ec` (§52).

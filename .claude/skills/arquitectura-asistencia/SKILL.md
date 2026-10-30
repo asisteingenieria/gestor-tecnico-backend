@@ -186,3 +186,12 @@ async function iniciarPausa({ usersCompanyId, tipo, contexto }) {
 - ¿Una ruta de equipo con un `verifyRole` de rol en vez de `canDirigirEquipo`?
 - ¿Un `req.user.id` guardado como autor sin pasar por `autorDe(req)`?
 - ¿Un bucle con `await` por empleado donde cabría una consulta o un lote?
+
+## Reglas del negocio que ya se decidieron
+
+- **No hay tolerancia de entrada** (asistencia.md §52, migración 086): `tolerancia_entrada_min` es 0 en el
+  parámetro, en los DEFAULT y en los valores por defecto del código. No vuelvas a poner `?? 5`. Una
+  plantilla puede tener tolerancia propia solo si alguien la escribe.
+- **Un día de descanso no tiene hora de entrada** (viene como 00:00): no se calcula llegada tarde contra él.
+- **Sin horario no se sabe si llegó tarde**: la pantalla lo muestra como "Sin horario", nunca como
+  "Puntual" (§52-§53).
