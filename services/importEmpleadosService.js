@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const UserCompany = require('../models/UserCompany');
+const { sugerencias, homologar } = require('../utils/homologacionCatalogos');
 
 const CAMPOS_CONTRATO_OBLIGATORIOS = {
     campania_id: 'campaña', area_id: 'área', centro_costo_id: 'centro de costo',
@@ -52,7 +53,60 @@ const SINONIMOS_ENTIDAD_SS = Object.fromEntries([
 function mapaDesdeFilas(rows) {
     const m = new Map();
     for (const r of rows) m.set(normalizar(r.nombre), r.id);
+    m.filas = rows; // para sugerir parecidos al homologar
     return m;
+}
+
+// Catálogos que se homologan (§45 de modulo recursoshumanos.md): un valor del archivo que no
+// coincide exacto con ningún nombre se toma como el más parecido si es claramente ese (ver
+// utils/homologacionCatalogos.js::homologar) y queda una advertencia; si ninguno lo es, el valor "no
+// coincide" y el archivo completo se rechaza: el cargue ya no crea cargos, campañas, ciudades... nuevos.
+// La oleada no está aquí: cada cohorte trae una nueva y se sigue creando sola.
+const CATALOGOS_HOMOLOGABLES = {
+    tipo_identificacion: 'Tipo de identificación', ciudad: 'Ciudad', cliente: 'Cliente', campania: 'Campaña',
+    centro_costo: 'Centro de costo', cargo: 'Cargo', tipo_contrato: 'Tipo de contrato', banco: 'Banco',
+    eps: 'EPS', arl: 'ARL', afp: 'AFP', cesantias: 'Fondo de cesantías', caja: 'Caja de compensación',
+    area: 'Área', modalidad: 'Modalidad', estado_civil: 'Estado civil', tipo_cuenta: 'Tipo de cuenta',
+    grupo_sanguineo: 'Grupo sanguíneo (Rh)'
+};
+// Id de marcador de un valor que no coincide, en la vista previa: evita que la fila salga además con
+// "falta el cargo" cuando lo que pasa es que el cargo no coincide.
+const MARCADOR_NO_COINCIDE = -1;
+
+function crearHomologacion() {
+    const noCoinciden = new Map();
+    const aplicadas = new Map();
+    return {
+        filaActual: null,
+        noCoinciden,
+        aplicadas,
+        /** null = catálogo fuera de homologación; si no { id } o { noCoincide }. */
+        decidir(catalogo, valor, mapa) {
+            const etiqueta = CATALOGOS_HOMOLOGABLES[catalogo];
+            if (!etiqueta) return null;
+            const filas = mapa.filas || [];
+            const elegido = homologar(valor, filas);
+            const clave = `${catalogo}|${normalizar(valor)}`;
+            if (elegido) {
+                aplicadas.set(clave, `${etiqueta} "${valor}" se tomó como "${elegido.nombre}".`);
+                return { id: elegido.id };
+            }
+            let item = noCoinciden.get(clave);
+            if (!item) {
+                item = { etiqueta, valor, filas: [], parecidos: sugerencias(valor, filas, { minimo: 0.45 }).map(p => p.nombre) };
+                noCoinciden.set(clave, item);
+            }
+            if (this.filaActual != null && !item.filas.includes(this.filaActual)) item.filas.push(this.filaActual);
+            return { noCoincide: true };
+        }
+    };
+}
+
+/** Texto de un valor que no coincide, para la vista previa y el error del cargue. */
+function describirNoCoincide(n) {
+    const filas = `fila${n.filas.length > 1 ? 's' : ''} ${n.filas.join(', ')}`;
+    const parecidos = n.parecidos.length ? ` Parecidos en el catálogo: ${n.parecidos.join(', ')}.` : '';
+    return `${n.etiqueta} "${n.valor}" (${filas}) no coincide con el catálogo de RRHH.${parecidos}`;
 }
 
 // Catálogos con un conjunto cerrado de valores: nunca se crean filas nuevas, solo se
@@ -111,14 +165,21 @@ async function cargarCatalogosFijos() {
 // `cache` vive durante todo el import para no repetir SELECTs ni crear el mismo valor
 // dos veces dentro del mismo lote. En modo previsualización (dryRun) nunca inserta:
 // devuelve un id negativo de marcador y solo registra qué se crearía.
-function crearBuscadorAbierto(dryRun, nuevosPorTabla) {
+function crearBuscadorAbierto(dryRun, nuevosPorTabla, homologacion) {
     const cache = new Map();
-    return async function buscarOCrear(cacheKey, cargar, crear, valorCrudo, etiqueta) {
+    return async function buscarOCrear(cacheKey, cargar, crear, valorCrudo, etiqueta, catalogo) {
         if (!valorCrudo) return null;
         if (!cache.has(cacheKey)) cache.set(cacheKey, await cargar());
         const mapa = cache.get(cacheKey);
         const norm = normalizar(valorCrudo);
         if (mapa.has(norm)) return mapa.get(norm);
+
+        const decision = homologacion.decidir(catalogo, valorCrudo, mapa);
+        if (decision?.id) {
+            mapa.set(norm, decision.id);
+            return decision.id;
+        }
+        if (decision?.noCoincide) return dryRun ? MARCADOR_NO_COINCIDE : null;
 
         const valorLimpio = (valorCrudo.replace(/\([^)]*\)/g, '').trim() || valorCrudo.trim());
         if (dryRun) {
@@ -141,10 +202,23 @@ function crearBuscadorAbierto(dryRun, nuevosPorTabla) {
 async function crearResolver({ dryRun }) {
     const fijos = await cargarCatalogosFijos();
     const nuevosPorTabla = {};
-    const buscarOCrear = crearBuscadorAbierto(dryRun, nuevosPorTabla);
+    const homologacion = crearHomologacion();
+    const buscarOCrear = crearBuscadorAbierto(dryRun, nuevosPorTabla, homologacion);
+
+    // Catálogo cerrado que se homologa: nunca crea filas.
+    const cerrado = (catalogo, mapa, nombre) => {
+        if (!nombre) return null;
+        const id = mapa.get(normalizar(nombre));
+        if (id) return id;
+        const decision = homologacion.decidir(catalogo, nombre, mapa);
+        if (decision?.id) return decision.id;
+        if (decision?.noCoincide) return dryRun ? MARCADOR_NO_COINCIDE : null;
+        return null;
+    };
 
     return {
         nuevosPorTabla,
+        homologacion,
 
         identificacion: (codigo) => buscarOCrear(
             'tipo_identificacion',
@@ -153,7 +227,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO tipo_identificacion (nombre, codigo) VALUES (?, ?)', [valor, valor]);
                 return r.insertId;
             },
-            codigo, 'tipo_identificacion'
+            codigo, 'tipo_identificacion', 'tipo_identificacion'
         ),
 
         ciudad: (nombre) => buscarOCrear(
@@ -163,7 +237,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO ciudad (nombre) VALUES (?)', [valor]);
                 return r.insertId;
             },
-            nombre, 'ciudad'
+            nombre, 'ciudad', 'ciudad'
         ),
 
         cliente: (nombre) => buscarOCrear(
@@ -175,7 +249,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO cliente (nombre, nit) VALUES (?, ?)', [valor, nitPlaceholder]);
                 return r.insertId;
             },
-            nombre, 'cliente (sin NIT real, revisar manualmente)'
+            nombre, 'cliente (sin NIT real, revisar manualmente)', 'cliente'
         ),
 
         campania: async (nombre, clienteId) => buscarOCrear(
@@ -185,7 +259,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO campania (nombre, Cliente_idCliente) VALUES (?, ?)', [valor, clienteId]);
                 return r.insertId;
             },
-            nombre, 'campaña'
+            nombre, 'campaña', 'campania'
         ),
 
         centroCosto: (nombre, codigo) => buscarOCrear(
@@ -195,7 +269,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO centro_costo (codigo, nombre) VALUES (?, ?)', [codigo || valor, valor]);
                 return r.insertId;
             },
-            nombre, 'centro_costo'
+            nombre, 'centro_costo', 'centro_costo'
         ),
 
         cargo: (nombre) => buscarOCrear(
@@ -205,7 +279,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO cargo (nombre) VALUES (?)', [valor]);
                 return r.insertId;
             },
-            nombre, 'cargo'
+            nombre, 'cargo', 'cargo'
         ),
 
         tipoContrato: (nombre) => buscarOCrear(
@@ -215,7 +289,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO tipo_contrato (nombre) VALUES (?)', [valor]);
                 return r.insertId;
             },
-            nombre, 'tipo_contrato'
+            nombre, 'tipo_contrato', 'tipo_contrato'
         ),
 
         banco: (nombre) => buscarOCrear(
@@ -225,7 +299,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO banco (nombre) VALUES (?)', [valor]);
                 return r.insertId;
             },
-            SINONIMOS_BANCO[nombre?.toUpperCase()] || nombre, 'banco'
+            SINONIMOS_BANCO[nombre?.toUpperCase()] || nombre, 'banco', 'banco'
         ),
 
         // La oleada es NOT NULL fecha_inicio; al crear una nueva se usa la fecha de
@@ -237,7 +311,7 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO oleada (nombre, fecha_inicio) VALUES (?, ?)', [valor, fechaIngresoProxy]);
                 return r.insertId;
             },
-            nombre, 'oleada'
+            nombre, 'oleada', 'oleada'
         ),
 
         entidadSeguridadSocial: (tipo, nombre) => buscarOCrear(
@@ -249,16 +323,16 @@ async function crearResolver({ dryRun }) {
                 const [r] = await db.query('INSERT INTO entidad_seguridad_social (tipo, nombre, vigente) VALUES (?, ?, 0)', [tipo, valor]);
                 return r.insertId;
             },
-            SINONIMOS_ENTIDAD_SS[`${tipo}:${normalizar(nombre)}`] || nombre, `entidad_seguridad_social (${tipo})`
+            SINONIMOS_ENTIDAD_SS[`${tipo}:${normalizar(nombre)}`] || nombre, `entidad_seguridad_social (${tipo})`, tipo.toLowerCase()
         ),
 
         // ---- catálogos cerrados (solo lectura, no crean filas) ----
         genero: (nombre) => fijos.genero.get(normalizar(nombre)) ?? null,
-        grupoSanguineo: (nombre) => fijos.grupoSanguineo.get(normalizar(nombre)) ?? null,
-        estadoCivil: (nombre) => fijos.estadoCivil.get(normalizar(nombre)) ?? null,
-        modalidad: (nombre) => fijos.modalidad.get(normalizar(nombre)) ?? null,
-        tipoCuenta: (nombre) => fijos.tipoCuenta.get(normalizar(nombre)) ?? null,
-        area: (nombre) => fijos.area.get(normalizar(nombre)) ?? null,
+        grupoSanguineo: (nombre) => cerrado('grupo_sanguineo', fijos.grupoSanguineo, nombre),
+        estadoCivil: (nombre) => cerrado('estado_civil', fijos.estadoCivil, nombre),
+        modalidad: (nombre) => cerrado('modalidad', fijos.modalidad, nombre),
+        tipoCuenta: (nombre) => cerrado('tipo_cuenta', fijos.tipoCuenta, nombre),
+        area: (nombre) => cerrado('area', fijos.area, nombre),
         zonaDireccion: (nombre) => fijos.zonaDireccion.get(normalizar(nombre)) ?? null,
         parentesco: (nombre) => fijos.parentesco.get(normalizar(nombre)) ?? fijos.parentesco.get(normalizar('Otro')) ?? null,
         tipoVacuna: (nombre) => fijos.tipoVacuna.get(normalizar(nombre)) ?? null,
@@ -290,11 +364,8 @@ async function construirDataEmpleado(fila, resolver, advertencias) {
     const generoId = fila.genero_nombre ? resolver.genero(fila.genero_nombre) : null;
     const grupoSanguineoId = fila.grupo_sanguineo_nombre ? resolver.grupoSanguineo(fila.grupo_sanguineo_nombre) : null;
 
-    let estadoCivilId = null;
-    if (fila.estado_civil_raw) {
-        estadoCivilId = resolver.estadoCivil(fila.estado_civil_raw);
-        if (!estadoCivilId) advertencias.push(`Fila ${fila.numero_fila}: estado civil "${fila.estado_civil_raw}" no reconocido, se dejó vacío.`);
-    }
+    // Sin coincidencia, estado civil / área / modalidad / tipo de cuenta / Rh se homologan (§45).
+    const estadoCivilId = fila.estado_civil_raw ? resolver.estadoCivil(fila.estado_civil_raw) : null;
 
     const clienteId = await resolver.cliente(fila.cliente_nombre);
     const campaniaId = await resolver.campania(fila.campania_nombre, clienteId);
@@ -305,7 +376,6 @@ async function construirDataEmpleado(fila, resolver, advertencias) {
     const oleadaId = await resolver.oleada(fila.oleada_nombre, fila.fecha_ingreso);
 
     const areaId = fila.area_nombre ? resolver.area(fila.area_nombre) : null;
-    if (fila.area_nombre && !areaId) advertencias.push(`Fila ${fila.numero_fila}: área "${fila.area_nombre}" no reconocida, se dejó vacía.`);
 
     const epsId = fila.eps_nombre ? await resolver.entidadSeguridadSocial('EPS', fila.eps_nombre) : null;
     const arlId = fila.arl_nombre ? await resolver.entidadSeguridadSocial('ARL', fila.arl_nombre) : null;
@@ -486,7 +556,7 @@ function validarContrato(data) {
     return null;
 }
 
-async function previsualizar(filas) {
+async function analizar(filas) {
     const resolver = await crearResolver({ dryRun: true });
     const advertencias = [];
     let aCrear = 0;
@@ -494,6 +564,7 @@ async function previsualizar(filas) {
     const errores = [];
 
     for (const fila of filas) {
+        resolver.homologacion.filaActual = fila.numero_fila;
         try {
             const data = await construirDataEmpleado(fila, resolver, advertencias);
             const errorValidacion = validarContrato(data);
@@ -508,14 +579,24 @@ async function previsualizar(filas) {
         }
     }
 
+    const { noCoinciden, aplicadas } = resolver.homologacion;
     return {
         total_filas: filas.length,
         a_crear: aCrear,
         a_actualizar: aActualizar,
         catalogos_nuevos: resolver.nuevosPorTabla,
-        advertencias: [...advertencias, ...filas.flatMap(f => f.advertencias)],
+        // Si hay alguno, el archivo no se puede cargar (ver confirmar).
+        no_coinciden: [...noCoinciden.values()]
+            .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta) || a.valor.localeCompare(b.valor))
+            .map(describirNoCoincide),
+        advertencias: [...aplicadas.values(), ...advertencias, ...filas.flatMap(f => f.advertencias)],
         errores
     };
+}
+
+/** Vista previa del cargue. */
+async function previsualizar(filas) {
+    return analizar(filas);
 }
 
 // ---- tablas auxiliares (vacunación / dotación / recursos) — mejor esfuerzo, no
@@ -620,13 +701,26 @@ async function resolverJefesYAnalistas(resultadosExitosos, filasPorNumero, adver
     }
 }
 
+/**
+ * Carga el archivo. Si algún valor no coincide con su catálogo no escribe nada: lanza un error con
+ * `codigo = 'NO_COINCIDE_CATALOGO'` y los valores en `noCoinciden`.
+ */
 async function confirmar(filas) {
-    const resolver = await crearResolver({ dryRun: false });
+    const previa = await analizar(filas);
+    if (previa.no_coinciden.length > 0) {
+        const error = new Error('El archivo no se cargó: hay valores que no coinciden con los catálogos de RRHH. Corrígelos en el Excel y vuelve a subirlo.');
+        error.codigo = 'NO_COINCIDE_CATALOGO';
+        error.noCoinciden = previa.no_coinciden;
+        throw error;
+    }
+
     const advertencias = [];
+    const resolver = await crearResolver({ dryRun: false });
     const resultados = [];
     const filasPorNumero = new Map(filas.map(f => [f.numero_fila, f]));
 
     for (const fila of filas) {
+        resolver.homologacion.filaActual = fila.numero_fila;
         try {
             const data = await construirDataEmpleado(fila, resolver, advertencias);
             const errorValidacion = validarContrato(data);
@@ -668,7 +762,7 @@ async function confirmar(filas) {
         actualizados: resultados.filter(r => r.accion === 'actualizado').length,
         con_error: resultados.filter(r => r.accion === 'error').length,
         catalogos_nuevos: resolver.nuevosPorTabla,
-        advertencias: [...advertencias, ...filas.flatMap(f => f.advertencias)],
+        advertencias: [...resolver.homologacion.aplicadas.values(), ...advertencias, ...filas.flatMap(f => f.advertencias)],
         resultados
     };
 }

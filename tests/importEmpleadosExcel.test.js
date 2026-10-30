@@ -15,6 +15,15 @@ test('el Excel viejo de "TOTAL PERSONAL" se sigue leyendo por posición', () => 
     assert.equal(detectarColumnas(encabezado).formato, 'total_personal');
 });
 
+test('lee la hoja "Empleados" aunque "Instrucciones" vaya primero', () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Columna', 'Obligatoria'], ['Cargo', 'Sí']]), 'Instrucciones');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Tipo De Identificación', 'Número De Identificación'], ['CC', '123']]), 'Empleados');
+    const resultado = parsearArchivo(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    assert.equal(resultado.hoja, 'Empleados');
+    assert.equal(resultado.filas[0].numero_identificacion, '123');
+});
+
 test('la plantilla se lee por nombre de columna, en cualquier orden', () => {
     const buffer = libro('Empleados', [
         ['Salario', 'Primer Apellido', 'Número De Identificación', 'Tipo De Identificación', 'Primer Nombre', 'Campaña', 'Banco'],
@@ -43,4 +52,17 @@ test('cada fila lleva los campos cuya columna no trae el archivo, para conservar
     assert.ok(fila.campos_ausentes.includes('USUARIO_SSFF'));
     assert.ok(fila.campos_ausentes.includes('EMPRESA'));
     assert.ok(!fila.campos_ausentes.includes('NUM_ID'));
+});
+
+test('el parentesco acepta los sinónimos del HeadCount y los nombres del catálogo', () => {
+    const buffer = libro('Empleados', [
+        ['Tipo De Identificación', 'Número De Identificación', 'Contacto De Emergencia', 'Parentesco', 'Telefono Contacto de Emergencia'],
+        ['CC', '1', 'A', 'ESPOSA', '300'],
+        ['CC', '2', 'B', 'Compañero(a)', '300'],
+        ['CC', '3', 'C', 'hermano(a)', '300'],
+        ['CC', '4', 'D', 'Conyuge', '300'],
+        ['CC', '5', 'E', 'VECINA', '300']
+    ]);
+    const parentescos = parsearArchivo(buffer).filas.map(f => f.contacto_emergencia.parentesco_nombre);
+    assert.deepEqual(parentescos, ['Cónyuge', 'Compañero(a)', 'Hermano(a)', 'Cónyuge', 'Otro']);
 });

@@ -251,6 +251,16 @@ const MAP_PARENTESCO = {
     AMIGA: 'Amigo(a)', AMIGO: 'Amigo(a)',
     HIJA: 'Hijo(a)', HIJO: 'Hijo(a)'
 };
+// Los nombres del catálogo de RRHH también valen tal cual (la plantilla los sugiere): "Hermano(a)",
+// "Cónyuge", "Compañero(a)"… Se comparan sin tildes ni mayúsculas.
+const PARENTESCOS_CATALOGO = ['Madre', 'Padre', 'Hermano(a)', 'Hijo(a)', 'Cónyuge', 'Compañero(a)',
+    'Abuelo(a)', 'Tío(a)', 'Primo(a)', 'Amigo(a)', 'Otro'];
+const sinTildes = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+function parentescoDe(texto) {
+    return MAP_PARENTESCO[texto.toUpperCase()]
+        || PARENTESCOS_CATALOGO.find(p => sinTildes(p) === sinTildes(texto))
+        || null;
+}
 
 function elegirIdentificacionSecundaria(fila, advertencias, numeroFila, col) {
     const par = (tipoCol, numCol) => {
@@ -311,7 +321,7 @@ function normalizarFila(fila, numeroFila, colExtra = {}, col = COL) {
 
     let contactoEmergencia = null;
     if (!contactoEsPendiente && contactoRaw && telContactoRaw && parentescoRaw) {
-        const parentescoNombre = MAP_PARENTESCO[parentescoRaw.toUpperCase()];
+        const parentescoNombre = parentescoDe(parentescoRaw);
         if (!parentescoNombre) advertencias.push(`Fila ${numeroFila}: parentesco "${parentescoRaw}" no reconocido, se guardó como "Otro".`);
         contactoEmergencia = {
             nombre: contactoRaw,
@@ -474,7 +484,10 @@ function normalizarFila(fila, numeroFila, colExtra = {}, col = COL) {
  */
 function parsearArchivo(buffer) {
     const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-    const nombreHoja = wb.SheetNames.includes('TOTAL PERSONAL') ? 'TOTAL PERSONAL' : wb.SheetNames[0];
+    // Hoja a leer: "TOTAL PERSONAL" (Excel viejo), si no la hoja "Empleados" de la plantilla esté
+    // donde esté (así no importa si alguien mueve "Instrucciones" adelante), si no la primera.
+    const hojaEmpleados = wb.SheetNames.find(n => n.trim().toLowerCase() === 'empleados');
+    const nombreHoja = wb.SheetNames.includes('TOTAL PERSONAL') ? 'TOTAL PERSONAL' : (hojaEmpleados || wb.SheetNames[0]);
     const hoja = wb.Sheets[nombreHoja];
     const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: null });
     const colExtra = detectarColumnasNuevas(filasCrudas[0]);
