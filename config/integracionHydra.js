@@ -41,6 +41,8 @@ module.exports = Object.freeze({
     toleranciaTimestampSegundos: 300,
     maxCandidatosPorLote: 200,
     limiteCuerpo: '1mb',
+    // Un documento (migración 087) viaja en base64: 10 MB de archivo son ~13,4 MB de JSON.
+    limiteCuerpoDocumento: '15mb',
 
     salida,
     salidaConfigurada: Boolean(salida.url && salida.apiKey && salida.secreto),

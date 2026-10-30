@@ -1,16 +1,20 @@
 const { createHash } = require('node:crypto');
-const { AppError, NoEncontradoError } = require('../../errors/AppError');
+const { AppError, NoEncontradoError, ValidacionError } = require('../../errors/AppError');
 const loteRepo = require('../../repositories/contratacionHydra/loteRepository');
 const candidatoRepo = require('../../repositories/contratacionHydra/candidatoRepository');
 const verificacionRepo = require('../../repositories/contratacionHydra/verificacionRepository');
 const empleadoRepo = require('../../repositories/contratacionHydra/empleadoRepository');
 const peticionRepo = require('../../repositories/contratacionHydra/peticionEntranteRepository');
+const documentoRepo = require('../../repositories/contratacionHydra/documentoRepository');
+const { documentosContratacion } = require('../../middleware/uploadSoportesRrhh');
 const { cargarResolver, evaluarCandidato, fechaDeNegocio, recalcularEstadoLote } = require('./evaluacionService');
 const { enTransaccion } = require('./transaccion');
 const {
     mapearPayloadHydra,
     fusionarReenvioHydra,
-    assertHydraPuedeActualizar
+    assertHydraPuedeActualizar,
+    problemaDelArchivo,
+    FORMATOS
 } = require('../../domain/contratacionHydra');
 
 // Recepción de lo que envía Hydra (conexionhydra.md §5.1). Todo caso de uso corre en una
@@ -210,6 +214,57 @@ async function cancelarCandidato(hydraCandidatoExternoId, motivo, contexto) {
     });
 }
 
+// Un documento del candidato (migración 087, conexionhydra.md §15): uno por tipo; un
+// reenvío lo reemplaza. Se acepta en cualquier estado del candidato y del lote, también
+// ya registrado: el documento queda en su ficha.
+//
+// El archivo se escribe dentro de la transacción y se borra si algo falla; el anterior
+// se borra solo después del commit.
+async function recibirDocumento(hydraCandidatoExternoId, body, contexto) {
+    const contenido = Buffer.from(body.contenido_base64, 'base64');
+    const sha256 = createHash('sha256').update(contenido).digest('hex');
+    const problema = problemaDelArchivo({ mime: body.mime_type, contenido, sha256: body.sha256, sha256Real: sha256 });
+    if (problema) throw new ValidacionError('Documento inválido', [problema]);
+
+    let archivoNuevo = null;
+    try {
+        const resultado = await conIdempotencia(contexto, async (conn) => {
+            await bloquearLoteDeCandidato(hydraCandidatoExternoId, conn);
+            const candidato = await candidatoRepo.findByExternoIdParaActualizar(hydraCandidatoExternoId, conn);
+            const anterior = await documentoRepo.findByCandidatoYTipoParaActualizar(candidato.idhydra_candidato, body.tipo, conn);
+            const respuesta = (status, resultadoDocumento) => ({
+                status,
+                body: {
+                    success: true,
+                    documento: { hydra_candidato_id: hydraCandidatoExternoId, tipo: body.tipo, resultado: resultadoDocumento }
+                }
+            });
+
+            // Mismo contenido (p. ej. "reenviar" en Hydra): no se reescribe el archivo.
+            if (anterior?.sha256 === sha256) return respuesta(200, 'sin_cambios');
+
+            archivoNuevo = await documentosContratacion.guardar(contenido, FORMATOS[body.mime_type].extension);
+            await documentoRepo.guardar({
+                hydraCandidatoId: candidato.idhydra_candidato,
+                tipo: body.tipo,
+                nombre: body.nombre,
+                nombreOriginal: body.nombre_archivo,
+                mime: body.mime_type,
+                tamanoBytes: contenido.length,
+                sha256,
+                archivo: archivoNuevo
+            }, conn);
+            return { ...respuesta(anterior ? 200 : 201, anterior ? 'reemplazado' : 'creado'), archivoAnterior: anterior?.archivo };
+        });
+
+        if (resultado.archivoAnterior) documentosContratacion.borrar(resultado.archivoAnterior);
+        return { status: resultado.status, body: resultado.body };
+    } catch (error) {
+        if (archivoNuevo) documentosContratacion.borrar(archivoNuevo);
+        throw error;
+    }
+}
+
 async function consultarCandidato(hydraCandidatoExternoId) {
     const resumen = await candidatoRepo.findEstadoByExternoId(hydraCandidatoExternoId);
     if (!resumen) throw new NoEncontradoError(`Gestor no tiene el candidato ${hydraCandidatoExternoId}`);
@@ -228,4 +283,4 @@ async function consultarCandidato(hydraCandidatoExternoId) {
     };
 }
 
-module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, consultarCandidato };
+module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, recibirDocumento, consultarCandidato };

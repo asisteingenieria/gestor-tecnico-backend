@@ -9,6 +9,7 @@
 // Campos que el contrato no conoce se ignoran (Hydra puede agregar campos sin romper).
 
 const { maxCandidatosPorLote } = require('../config/integracionHydra');
+const { TIPO_DOCUMENTO, SHA256, FORMATOS } = require('../domain/contratacionHydra/documentos');
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -133,6 +134,19 @@ function validarCandidato(c, prefijo, errores) {
     if (v.objeto('consentimiento', c.consentimiento)) {
         v.fecha('consentimiento.fecha', c.consentimiento.fecha);
     }
+
+    // Migración 087: qué documentos firmados vienen y qué antecedentes faltan. Los
+    // archivos llegan después, cada uno por PUT /candidatos/:id/documentos/:tipo.
+    if (v.objeto('documentos', c.documentos)) {
+        for (const campo of ['firmados', 'antecedentes_faltantes']) {
+            const lista = c.documentos[campo];
+            if (lista === undefined || lista === null) continue;
+            if (!Array.isArray(lista) || lista.length > 20 || lista.some((x) => typeof x !== 'string' || x.length > 120)) {
+                errores.push(`${prefijo}.documentos.${campo} debe ser una lista de textos`);
+            }
+        }
+        v.texto('documentos.nota_antecedentes', c.documentos.nota_antecedentes, { max: 500 });
+    }
 }
 
 function validarLoteHydra(body) {
@@ -180,6 +194,28 @@ function validarCancelacionHydra(body) {
     return errores;
 }
 
+// PUT /candidatos/:hydraCandidatoId/documentos/:tipo — un archivo en base64. El hash y
+// el contenido real se comprueban en la recepción, después de decodificar.
+function validarDocumentoHydra(body, req) {
+    const errores = [];
+    if (!esObjeto(body)) return ['El cuerpo debe ser un objeto JSON'];
+    const v = crearVerificador(errores, '');
+
+    if (!TIPO_DOCUMENTO.test(req.params.tipo ?? '')) errores.push('El tipo de documento de la URL no es válido');
+    if (body.tipo !== req.params.tipo) errores.push('tipo no coincide con el de la URL');
+    v.texto('nombre', body.nombre, { requerido: true, max: 120 });
+    v.texto('nombre_archivo', body.nombre_archivo, { requerido: true, max: 255 });
+    v.texto('mime_type', body.mime_type, { requerido: true, max: 100 });
+    if (typeof body.mime_type === 'string' && !FORMATOS[body.mime_type]) {
+        errores.push('mime_type debe ser application/pdf, image/jpeg o image/png');
+    }
+    v.texto('sha256', body.sha256, { requerido: true });
+    v.patron('sha256', body.sha256, SHA256, 'debe ser el SHA-256 en hexadecimal (64 caracteres)');
+    v.texto('contenido_base64', body.contenido_base64, { requerido: true });
+    v.patron('contenido_base64', body.contenido_base64, /^[A-Za-z0-9+/]*={0,2}$/, 'no es base64 válido');
+    return errores;
+}
+
 const hydraCandidatoIdParamSchema = {
     params: { hydraCandidatoId: { requerido: true, tipo: 'entero' } }
 };
@@ -188,5 +224,6 @@ module.exports = {
     validarLoteHydra,
     validarCandidatoHydra,
     validarCancelacionHydra,
+    validarDocumentoHydra,
     hydraCandidatoIdParamSchema
 };

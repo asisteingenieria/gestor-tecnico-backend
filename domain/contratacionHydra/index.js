@@ -5,6 +5,7 @@ const mapeo = require('./mapearPayloadHydra');
 const { crearResolverCatalogo } = require('./resolverCatalogo');
 const { aplicarCambiosSeccion } = require('./edicionSeccion');
 const outbox = require('./outbox');
+const documentos = require('./documentos');
 
 module.exports = {
     ...secciones,
@@ -12,6 +13,7 @@ module.exports = {
     ...estados,
     ...mapeo,
     ...outbox,
+    ...documentos,
     crearResolverCatalogo,
     aplicarCambiosSeccion
 };

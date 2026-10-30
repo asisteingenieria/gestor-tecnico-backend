@@ -4,9 +4,12 @@ const candidatoRepo = require('../../repositories/contratacionHydra/candidatoRep
 const verificacionRepo = require('../../repositories/contratacionHydra/verificacionRepository');
 const catalogoRepo = require('../../repositories/contratacionHydra/catalogoRepository');
 const envioRepo = require('../../repositories/contratacionHydra/envioRepository');
+const documentoRepo = require('../../repositories/contratacionHydra/documentoRepository');
+const documentosService = require('./documentosService');
 const { cargarResolver, evaluarCandidato, fechaDeNegocio, recalcularEstadoLote } = require('./evaluacionService');
 const { enTransaccion } = require('./transaccion');
 const {
+    resumenDocumentos,
     SECCIONES,
     CATALOGOS,
     hashSeccion,
@@ -101,10 +104,11 @@ async function obtenerLote(id) {
     const lote = await loteRepo.findById(id);
     if (!lote) throw new NoEncontradoError('El lote no existe');
 
-    const [candidatos, verificaciones, resolver] = await Promise.all([
+    const [candidatos, verificaciones, resolver, documentos] = await Promise.all([
         candidatoRepo.findByLote(id),
         verificacionRepo.findByLote(id),
-        cargarResolver()
+        cargarResolver(),
+        documentoRepo.findTiposByLote(id)
     ]);
 
     return {
@@ -113,7 +117,16 @@ async function obtenerLote(id) {
         candidatos: candidatos.map((candidato) => {
             const propias = verificaciones.filter((v) => v.hydra_candidato_id === candidato.idhydra_candidato);
             const evaluacion = evaluarCandidato({ candidato, lote, resolver, verificaciones: propias });
-            return presentarCandidato(candidato, evaluacion, propias);
+            const tipos = documentos.filter((d) => d.hydra_candidato_id === candidato.idhydra_candidato).map((d) => d.tipo);
+            const resumen = resumenDocumentos(candidato.datos_hydra, tipos);
+            return {
+                ...presentarCandidato(candidato, evaluacion, propias),
+                documentos: {
+                    recibidos: tipos.length,
+                    firmados_pendientes: resumen.firmados_pendientes.length,
+                    antecedentes_faltantes: resumen.antecedentes_faltantes.length
+                }
+            };
         })
     };
 }
@@ -128,7 +141,14 @@ async function obtenerCandidato(id) {
         cargarResolver()
     ]);
     const evaluacion = evaluarCandidato({ candidato, lote, resolver, verificaciones });
-    return { success: true, lote, candidato: presentarDetalle(candidato, evaluacion, verificaciones) };
+    return {
+        success: true,
+        lote,
+        candidato: {
+            ...presentarDetalle(candidato, evaluacion, verificaciones),
+            documentos: await documentosService.documentosDeCandidato(candidato)
+        }
+    };
 }
 
 // ---------------------------------------------------------------------------

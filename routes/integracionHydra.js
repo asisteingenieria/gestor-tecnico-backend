@@ -11,6 +11,7 @@ const {
     validarLoteHydra,
     validarCandidatoHydra,
     validarCancelacionHydra,
+    validarDocumentoHydra,
     hydraCandidatoIdParamSchema
 } = require('../validators/integracionHydraSchemas');
 
@@ -19,7 +20,12 @@ const {
 // aquí se lee crudo, se autentica y recién entonces se parsea el JSON. Un cuerpo sin
 // firma válida nunca llega a parsearse.
 
-router.use(express.raw({ type: 'application/json', limit: config.limiteCuerpo }));
+// Los documentos (§15) admiten un cuerpo mayor que el resto; el límite general sigue en 1 MB.
+const RUTA_DOCUMENTO = /^\/candidatos\/\d+\/documentos\/[^/]+$/;
+const crudoGeneral = express.raw({ type: 'application/json', limit: config.limiteCuerpo });
+const crudoDocumento = express.raw({ type: 'application/json', limit: config.limiteCuerpoDocumento });
+
+router.use((req, res, next) => (RUTA_DOCUMENTO.test(req.path) ? crudoDocumento : crudoGeneral)(req, res, next));
 router.use((req, res, next) => {
     req.rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     req.body = undefined;
@@ -40,11 +46,14 @@ router.post('/lotes', validarCuerpo(validarLoteHydra), asyncHandler(integracionC
 router.put('/candidatos/:hydraCandidatoId', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarCandidatoHydra), asyncHandler(integracionController.actualizarCandidato));
 router.post('/candidatos/:hydraCandidatoId/cancelar', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarCancelacionHydra), asyncHandler(integracionController.cancelarCandidato));
 router.get('/candidatos/:hydraCandidatoId', validar(hydraCandidatoIdParamSchema), asyncHandler(integracionController.consultarCandidato));
+router.put('/candidatos/:hydraCandidatoId/documentos/:tipo', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarDocumentoHydra), asyncHandler(integracionController.recibirDocumento));
 
 // Errores del parser crudo → respuestas del contrato; el resto sigue a errorHandler.
 router.use((err, req, res, next) => {
     if (err.type === 'entity.too.large') {
-        return next(new AppError(`El cuerpo supera el límite de ${config.limiteCuerpo}`, 413, 'LOTE_DEMASIADO_GRANDE'));
+        return RUTA_DOCUMENTO.test(req.path)
+            ? next(new AppError(`El documento supera el límite de ${config.limiteCuerpoDocumento}`, 413, 'DOCUMENTO_DEMASIADO_GRANDE'))
+            : next(new AppError(`El cuerpo supera el límite de ${config.limiteCuerpo}`, 413, 'LOTE_DEMASIADO_GRANDE'));
     }
     next(err);
 });
