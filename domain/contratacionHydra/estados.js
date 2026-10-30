@@ -3,17 +3,19 @@ const { CLAVES_SECCION } = require('./secciones');
 
 // Estados de hydra_candidato y hydra_lote (conexionhydra.md §6.1). Los no terminales se
 // DERIVAN de los datos; nunca se asignan a mano.
-const ESTADOS_CANDIDATO = ['pendiente', 'listo', 'registrado', 'descartado', 'cancelado_hydra'];
-const ESTADOS_CANDIDATO_TERMINALES = ['registrado', 'descartado', 'cancelado_hydra'];
+// 'no_apto': no aprobó los exámenes médicos de SST (migración 089).
+const ESTADOS_CANDIDATO = ['pendiente', 'listo', 'registrado', 'descartado', 'cancelado_hydra', 'no_apto'];
+const ESTADOS_CANDIDATO_TERMINALES = ['registrado', 'descartado', 'cancelado_hydra', 'no_apto'];
 // Candidatos que ya no cuentan para decidir si el lote está listo.
-const ESTADOS_CANDIDATO_FUERA_DEL_LOTE = ['descartado', 'cancelado_hydra'];
+const ESTADOS_CANDIDATO_FUERA_DEL_LOTE = ['descartado', 'cancelado_hydra', 'no_apto'];
 
 const ESTADOS_LOTE = ['abierto', 'listo', 'registrado', 'cancelado'];
 const ESTADOS_LOTE_TERMINALES = ['registrado', 'cancelado'];
 
-function estadoCandidato(estadoActual, completitud) {
+// Listo = secciones completas y verificadas por RRHH Y exámenes médicos aprobados por SST.
+function estadoCandidato(estadoActual, completitud, examenEstado) {
     if (ESTADOS_CANDIDATO_TERMINALES.includes(estadoActual)) return estadoActual;
-    return completitud.listo ? 'listo' : 'pendiente';
+    return completitud.listo && examenEstado === 'aprobado' ? 'listo' : 'pendiente';
 }
 
 // Un lote está listo cuando le queda al menos un candidato activo y todos los activos
@@ -71,7 +73,7 @@ function assertLoteRegistrable(estadoLoteActual, estadosCandidatos) {
         const pendientes = estadosCandidatos.filter((e) => e === 'pendiente').length;
         throw new ReglaContratacionError(
             pendientes > 0
-                ? `Hay ${pendientes} candidato(s) con secciones pendientes: complétalos o descártalos`
+                ? `Hay ${pendientes} candidato(s) pendientes (secciones por completar o exámenes médicos sin aprobar): complétalos o descártalos`
                 : 'El lote no tiene candidatos para registrar'
         );
     }

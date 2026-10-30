@@ -2,6 +2,7 @@ const rrhhService = require('../../services/contratacionHydra/rrhhService');
 const registroService = require('../../services/contratacionHydra/registroService');
 const despachoService = require('../../services/contratacionHydra/despachoService');
 const documentosService = require('../../services/contratacionHydra/documentosService');
+const examenesService = require('../../services/contratacionHydra/examenesService');
 
 // Endpoints de RRHH sobre el staging de contratación (conexionhydra.md §8). Sin try/catch:
 // los envuelve asyncHandler y los errores los responde middleware/errorHandler.js.
@@ -37,6 +38,16 @@ async function marcarVerificacion(req, res) {
 
 async function descartarCandidato(req, res) {
     res.json(await rrhhService.descartarCandidato({ id: Number(req.params.id), motivo: req.body.motivo }));
+}
+
+// Exámenes médicos (SST, migración 089).
+async function marcarExamen(req, res) {
+    res.json(await examenesService.marcarExamen({
+        id: Number(req.params.id),
+        evento: req.body.evento,
+        nota: req.body.nota,
+        usuarioId: req.user.id
+    }));
 }
 
 async function opcionesCatalogos(req, res) {
@@ -107,6 +118,7 @@ module.exports = {
     guardarSeccion,
     marcarVerificacion,
     descartarCandidato,
+    marcarExamen,
     opcionesCatalogos,
     listarMapeos,
     guardarMapeo

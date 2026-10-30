@@ -120,8 +120,8 @@ const canSolicitarCambioTurno = async (req, res, next) => {
 };
 // recursosHumanos: su cuenta ya está vinculada a su ficha (es el "analista encargado" de las
 // altas), así que ve su propia asistencia con ella en vez de tener cuenta de empleado aparte.
-// financiera (§32) también tiene su cuenta vinculada a su ficha y ve su propia asistencia.
-const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'recursosHumanos', 'financiera', 'admin']);
+// financiera (§32) y sst (089) también tienen su cuenta vinculada a su ficha y ven su propia asistencia.
+const canRegistrarAsistencia = verifyRole(['empleado', 'director_operaciones', 'recursosHumanos', 'financiera', 'sst', 'admin']);
 
 // Middleware para contratación desde Hydra (conexionhydra.md §8)
 // financiera administra RRHH igual que recursosHumanos (asistencia.md §32).
@@ -129,6 +129,12 @@ const isRecursosHumanos = verifyRole(['recursosHumanos', 'financiera', 'admin'])
 
 // financiera: recibe y revisa los reportes de horas extras y ve la trazabilidad de todos (§32).
 const isFinanciera = verifyRole(['financiera', 'admin']);
+
+// SST (migración 089): recibe los candidatos de Hydra y lleva el control de exámenes
+// médicos antes del registro (conexionhydra.md §16). Ve Contratación Hydra junto con RRHH,
+// pero solo SST marca los exámenes (financiera y admin, como administradores, también).
+const isRecursosHumanosOSst = verifyRole(['recursosHumanos', 'financiera', 'admin', 'sst']);
+const isSst = verifyRole(['sst', 'financiera', 'admin']);
 
 module.exports = {
     verifyToken,
@@ -164,5 +170,7 @@ module.exports = {
     canRegistrarAsistencia,
     isFinanciera,
     // Middleware para contratación desde Hydra
-    isRecursosHumanos
+    isRecursosHumanos,
+    isRecursosHumanosOSst,
+    isSst
 };

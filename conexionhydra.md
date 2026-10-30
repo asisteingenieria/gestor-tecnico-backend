@@ -1388,3 +1388,77 @@ reemplazo, hash alterado y HTML disfrazado de PDF (400), PNG y PDF de 9 MB (201)
 candidato inexistente (404), y los endpoints de RRHH (detalle, descarga, 404 de otro candidato,
 401 sin token). **No se probó en local** el bloqueo del registro por firmados faltantes (el
 candidato de prueba tenía secciones pendientes, que se validan antes).
+
+## 16. Exámenes médicos y rol SST (Gestor 089 · Hydra 022, 2026-10-30)
+
+Control final antes del registro: **SST** marca si el candidato asistió a los exámenes médicos y si
+los aprobó. RRHH sigue completando y verificando las 7 secciones, pero **solo registra a los que SST
+aprobó**. Cada marca se le informa a selección (Hydra).
+
+### 16.1 Reglas
+
+- Columna `hydra_candidato.examen_estado`, aparte del estado del candidato:
+  `pendiente → asistio → aprobado | no_aprobado`, y `pendiente → no_asistio`. Desde `no_asistio`
+  (o `reagendado`) SST puede volver a marcar asistencia: la cita se reagendó. **Nada se borra**:
+  cada marca es una fila de `hydra_candidato_examen` (`evento`, `nota`, `origen` gestor/hydra,
+  quién y cuándo). Reglas en `domain/contratacionHydra/examenes.js`.
+- **No asistió**: nota opcional. Selección decide en Hydra (pantalla *Exámenes médicos*):
+  - "Dar continuidad" deja el examen `reagendado`;
+  - "No continuar" pasa el candidato a `cancelado_hydra`.
+  
+  La decisión llega a `POST /api/integraciones/hydra/v1/candidatos/:id/examenes/continuidad`. Si ya no hay una inasistencia pendiente (SST volvió a marcar), responde 409
+  `SIN_DECISION_PENDIENTE`.
+- **No aprobó**: nota **obligatoria**. El candidato pasa al estado terminal nuevo **`no_apto`** (fuera
+  del lote, como descartado). En Hydra queda `no_apto_examenes` con la nota en el historial.
+- **Aprobado es final.** El candidato solo queda `listo` con las 7 secciones verificadas **y** el
+  examen `aprobado`; `registrarLote` lo vuelve a exigir.
+- Cada marca de SST encola un envío `candidato_examen` al outbox (`POST {HYDRA_CALLBACK_URL}/examenes`).
+
+### 16.2 Rol `sst`
+
+- Hay que aplicar la migración 089, que agrega el valor al ENUM, igual que la 072. El rol está dado de alta en los 5 lugares, incluido
+  `ROLES_VINCULADOS_A_EMPLEADO`, y no lleva sede: hay que crearlo desde `/users` y elegir la ficha.
+- Permisos (`routes/contratacionHydra.js`):
+  - `isRecursosHumanosOSst`: listar lotes, el detalle del lote y del candidato, catálogos de mapeo y documentos del candidato;
+  - `isSst` (sst, financiera, admin): `POST /candidatos/:id/examenes`;
+  - todo lo demás sigue siendo de RRHH.
+  
+  SST también marca su propia asistencia (`canRegistrarAsistencia`).
+- Frontend:
+  - SST usa `RecursosHumanosLayout` con dos entradas: Contratación Hydra y Mi asistencia;
+  - entra directo a `/recursos-humanos/contratacion-hydra`;
+  - en el panel del candidato solo ve las pestañas *Exámenes médicos*, Documentos y Datos de Hydra, sin checklist ni descartar;
+  - RRHH ve la misma pestaña de exámenes, pero solo para consultar.
+
+### 16.3 Despliegue
+
+1. **Migraciones primero**:
+   - en Gestor, la **089**. No es idempotente. Pasa los candidatos `listo` a `pendiente` y los lotes `listo` a `abierto`, porque a los que están en curso ahora les falta la aprobación de SST;
+   - en Hydra, la **022**.
+2. **Después los códigos**:
+   - backend y frontend de Gestor;
+   - backend y frontend de Hydra.
+   
+   Si Hydra no tiene la 022, los avisos `/examenes` de Gestor fallan. Si Gestor no tiene la 089, la decisión de selección falla. En ambos casos el envío queda en el outbox para reintentarlo.
+3. Crear el usuario SST desde `/users`, con rol SST, y vincularle su ficha.
+
+### 16.4 Probado en local (2026-10-30)
+
+- `npm test` de Gestor: 267 pruebas. En Hydra: unidad, más integración de contratación con 7 casos de exámenes; 82 en total.
+- **De punta a punta, con los dos backends**:
+  - **Candidato 25**:
+    1. SST no pudo marcar "aprobó" antes de registrar la asistencia (422).
+    2. "No aprobó" sin nota dio 422.
+    3. Con nota, el candidato quedó `no_apto` en Gestor y `no_apto_examenes` en Hydra, con la nota en el historial.
+    4. No admite más marcas.
+  - **Candidato 24, en el navegador**:
+    1. SST marcó "no asistió" con nota.
+    2. Selección vio "Espera tu decisión" y dio continuidad con nota.
+    3. Gestor recibió el reagendado.
+    4. SST marcó "asistió" y luego "aprobó".
+    5. La traza muestra las 4 marcas en las dos apps.
+  - **Rol SST**:
+    - recibe 403 en registrar, envíos y catálogos de RRHH;
+    - en la pantalla, menú de dos entradas, sin "Registrar lote" ni checklist.
+  - **Hydra**: reenviar y cancelar un candidato cerrado por exámenes dan 409.
+- Usuario local de prueba: `prueba.sst`, con la clave del seed.

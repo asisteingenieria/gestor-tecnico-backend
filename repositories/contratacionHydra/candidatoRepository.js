@@ -14,7 +14,7 @@ async function findByExternoIdParaActualizar(hydraCandidatoExternoId, conn = db)
 // Resumen para que Hydra consulte el estado (sin datos personales en la respuesta).
 async function findEstadoByExternoId(hydraCandidatoExternoId, conn = db) {
     const [rows] = await conn.query(
-        `SELECT c.hydra_candidato_externo_id, c.estado, c.motivo_descarte, c.users_company_id,
+        `SELECT c.hydra_candidato_externo_id, c.estado, c.examen_estado, c.motivo_descarte, c.users_company_id,
                 c.version_hydra, c.updated_at, l.lote_externo_id, l.estado AS lote_estado
          FROM hydra_candidato c
          JOIN hydra_lote l ON l.idhydra_lote = c.hydra_lote_id
@@ -117,6 +117,11 @@ async function actualizarDesdeHydra(id, candidato, conn = db) {
     );
 }
 
+// Exámenes médicos de SST (migración 089).
+async function actualizarExamen(id, examenEstado, conn = db) {
+    await conn.query('UPDATE hydra_candidato SET examen_estado = ? WHERE idhydra_candidato = ?', [examenEstado, id]);
+}
+
 async function actualizarEstado(id, estado, motivoDescarte, conn = db) {
     await conn.query(
         'UPDATE hydra_candidato SET estado = ?, motivo_descarte = ? WHERE idhydra_candidato = ?',
@@ -137,5 +142,6 @@ module.exports = {
     insertar,
     actualizarDesdeHydra,
     actualizarBorrador,
+    actualizarExamen,
     actualizarEstado
 };

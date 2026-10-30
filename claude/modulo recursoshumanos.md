@@ -2403,3 +2403,32 @@ Excel no coincidía letra por letra con la ficha, o porque la persona no tiene f
 El HeadCount tiene datos personales reales: no se commitea; se borró del servidor después de usarlo (confirmado el 2026-10-27).
 Producción queda con 389 + 67 fichas de empleado (60 activas y 7 retiradas), más la ficha sin contrato de
 German.
+
+## 42. Sesión 2026-10-30 — Documentación del empleado y contrato y anexos (migración 088)
+
+Después de registrar un empleado (a mano, por Excel o desde Hydra) RRHH carga dos PDF unificados:
+**Documentación del empleado** y **Contrato y anexos**. No bloquean nada: quedan como pendiente visible.
+
+- **Tabla `empleado_documento`** (088, idempotente): un archivo por empleado y `tipo`
+  (`documentacion_empleado` | `contrato_anexos`, `UNIQUE(users_company_id, tipo)`), `ON DELETE CASCADE`.
+  Subir otro lo reemplaza y borra el archivo anterior después del commit.
+- **Archivos** en `storage/empleados/` (privado, `crearSoportesRrhh('empleados', { maximoMb: 50, tipos: PDF })`).
+  El servidor exige además la firma `%PDF-` del archivo: un `.pdf` que no lo es se rechaza (400).
+- **API** (`routes/usersCompany.js`, `verificarRecursosHumanos`):
+  `GET /:id/documentos`, `PUT /:id/documentos/:tipo` (multipart, campo `archivo`),
+  `GET /:id/documentos/:tipo/archivo`, `DELETE /:id/documentos/:tipo`. Borrar la ficha borra sus archivos.
+- **Listado**: `SELECT_EMPLEADO` trae `documentos_cargados` (subconsulta a `empleado_documento`), por eso
+  **la 088 tiene que estar aplicada antes de subir el código** o el listado de empleados falla.
+- **Frontend**: pestaña "Documentos" siempre visible en la ficha (`EmpleadoDrawer`, ahora de 520px) con
+  `DocumentosEmpleado` arriba y, si llegó de Hydra, los documentos de contratación (087) debajo; badge
+  "Faltan documentos (n)" en la cabecera; subida sin timeout con barra de avance y tope de 50 MB del lado del
+  cliente; "Ver" abre el modal `PrevisualizacionDocumento` (compartido con Hydra, hook `usePrevisualizacion`).
+  En el listado, filtro "Documentos: Completos/Pendientes". Al crear un empleado a mano se abre su ficha
+  directamente en Documentos.
+- **Despliegue**: nginx debe permitir cuerpos de 50 MB en `/api/users-company`
+  (`client_max_body_size 50m;`), o la subida falla con 413 antes de llegar a Express.
+
+Probado en local 2026-10-30: subida de 0,4 KB / 30 MB / 40 MB, reemplazo, rechazo de 51 MB (cliente y
+servidor), de un HTML con extensión `.pdf`, de una imagen y de un tipo inválido; 401 sin sesión;
+previsualización, eliminación y filtro en el navegador. No se probó en el navegador el alta completa
+(solo que `AgentForm` pasa el empleado creado a `onSuccess`).

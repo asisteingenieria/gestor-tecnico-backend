@@ -50,7 +50,7 @@ function evaluarCandidato({ candidato, lote, resolver, verificaciones = [] }) {
     return {
         completitud,
         sinMapear,
-        estado: estadoCandidato(candidato.estado, completitud)
+        estado: estadoCandidato(candidato.estado, completitud, candidato.examen_estado)
     };
 }
 

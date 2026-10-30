@@ -9,6 +9,7 @@ const documentoRepo = require('../../repositories/contratacionHydra/documentoRep
 const { documentosContratacion } = require('../../middleware/uploadSoportesRrhh');
 const { cargarResolver, evaluarCandidato, fechaDeNegocio, recalcularEstadoLote } = require('./evaluacionService');
 const { enTransaccion } = require('./transaccion');
+const { registrarEvento } = require('./examenesService');
 const {
     mapearPayloadHydra,
     fusionarReenvioHydra,
@@ -125,7 +126,7 @@ async function guardarCandidato(conn, lote, payload, resolver) {
     await candidatoRepo.actualizarDesdeHydra(actual.idhydra_candidato, filaParaGuardar({
         loteId: lote.idhydra_lote, payload, mapeo, datosEmpleado, estado,
         usersCompanyExistenteId: existenteId,
-        motivoDescarte: estado === 'descartado' ? actual.motivo_descarte : null
+        motivoDescarte: ['descartado', 'no_apto'].includes(estado) ? actual.motivo_descarte : null
     }), conn);
     return respuesta('actualizado', estado);
 }
@@ -197,7 +198,8 @@ async function cancelarCandidato(hydraCandidatoExternoId, motivo, contexto) {
         const actual = await candidatoRepo.findByExternoIdParaActualizar(hydraCandidatoExternoId, conn);
         assertHydraPuedeActualizar(actual.estado);
 
-        if (actual.estado !== 'cancelado_hydra') {
+        // Un "no apto" de SST (089) ya está fuera del proceso: se conserva su motivo.
+        if (actual.estado !== 'cancelado_hydra' && actual.estado !== 'no_apto') {
             await candidatoRepo.actualizarEstado(
                 actual.idhydra_candidato, 'cancelado_hydra', motivo || 'Cancelado desde Hydra', conn
             );
@@ -209,6 +211,39 @@ async function cancelarCandidato(hydraCandidatoExternoId, motivo, contexto) {
                 success: true,
                 lote_estado: estado,
                 candidato: { hydra_candidato_id: hydraCandidatoExternoId, estado: 'cancelado_hydra' }
+            }
+        };
+    });
+}
+
+// Selección (Hydra) decide si da continuidad a un candidato que no asistió a los exámenes
+// médicos (migración 089, conexionhydra.md §16). Continuar → el examen queda "reagendado"
+// y SST vuelve a marcar asistencia; no continuar → el candidato sale del proceso.
+// Si SST ya volvió a marcar asistencia, no hay decisión pendiente: 409.
+async function decidirContinuidad(hydraCandidatoExternoId, body, contexto) {
+    return conIdempotencia(contexto, async (conn) => {
+        const lote = await bloquearLoteDeCandidato(hydraCandidatoExternoId, conn);
+        const candidato = await candidatoRepo.findByExternoIdParaActualizar(hydraCandidatoExternoId, conn);
+        if (candidato.examen_estado !== 'no_asistio' || !['pendiente', 'listo'].includes(candidato.estado)) {
+            throw new AppError(
+                'El candidato no tiene una inasistencia a exámenes médicos pendiente de decisión',
+                409, 'SIN_DECISION_PENDIENTE'
+            );
+        }
+        const r = await registrarEvento(conn, {
+            lote,
+            candidato,
+            evento: body.continuar ? 'continuidad' : 'no_continuidad',
+            nota: body.nota,
+            origen: 'hydra',
+            usuarioHydra: body.decidido_por ?? null
+        });
+        return {
+            status: 200,
+            body: {
+                success: true,
+                lote_estado: r.loteEstado,
+                candidato: { hydra_candidato_id: hydraCandidatoExternoId, estado: r.estado, examen_estado: r.examenEstado }
             }
         };
     });
@@ -283,4 +318,4 @@ async function consultarCandidato(hydraCandidatoExternoId) {
     };
 }
 
-module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, recibirDocumento, consultarCandidato };
+module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, decidirContinuidad, recibirDocumento, consultarCandidato };

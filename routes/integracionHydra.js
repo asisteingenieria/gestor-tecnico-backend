@@ -11,6 +11,7 @@ const {
     validarLoteHydra,
     validarCandidatoHydra,
     validarCancelacionHydra,
+    validarContinuidadHydra,
     validarDocumentoHydra,
     hydraCandidatoIdParamSchema
 } = require('../validators/integracionHydraSchemas');
@@ -45,6 +46,7 @@ router.use((req, res, next) => {
 router.post('/lotes', validarCuerpo(validarLoteHydra), asyncHandler(integracionController.recibirLote));
 router.put('/candidatos/:hydraCandidatoId', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarCandidatoHydra), asyncHandler(integracionController.actualizarCandidato));
 router.post('/candidatos/:hydraCandidatoId/cancelar', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarCancelacionHydra), asyncHandler(integracionController.cancelarCandidato));
+router.post('/candidatos/:hydraCandidatoId/examenes/continuidad', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarContinuidadHydra), asyncHandler(integracionController.decidirContinuidad));
 router.get('/candidatos/:hydraCandidatoId', validar(hydraCandidatoIdParamSchema), asyncHandler(integracionController.consultarCandidato));
 router.put('/candidatos/:hydraCandidatoId/documentos/:tipo', validar(hydraCandidatoIdParamSchema), validarCuerpo(validarDocumentoHydra), asyncHandler(integracionController.recibirDocumento));
 

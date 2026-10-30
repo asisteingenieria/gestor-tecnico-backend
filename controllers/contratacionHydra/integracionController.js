@@ -27,6 +27,14 @@ async function cancelarCandidato(req, res) {
     res.status(status).json(body);
 }
 
+async function decidirContinuidad(req, res) {
+    const { status, body } = await recepcionService.decidirContinuidad(
+        Number(req.params.hydraCandidatoId), req.body,
+        contexto(req, `POST /candidatos/${req.params.hydraCandidatoId}/examenes/continuidad`)
+    );
+    res.status(status).json(body);
+}
+
 async function consultarCandidato(req, res) {
     res.json(await recepcionService.consultarCandidato(Number(req.params.hydraCandidatoId)));
 }
@@ -40,4 +48,4 @@ async function recibirDocumento(req, res) {
     res.status(status).json(body);
 }
 
-module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, recibirDocumento, consultarCandidato };
+module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, decidirContinuidad, recibirDocumento, consultarCandidato };

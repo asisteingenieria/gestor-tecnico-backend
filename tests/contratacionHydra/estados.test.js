@@ -13,15 +13,27 @@ const {
     assertLoteRegistrable
 } = require('../../domain/contratacionHydra/estados');
 
-test('estadoCandidato deriva pendiente/listo de la completitud', () => {
-    assert.equal(estadoCandidato('pendiente', { listo: true }), 'listo');
-    assert.equal(estadoCandidato('listo', { listo: false }), 'pendiente');
+test('estadoCandidato deriva pendiente/listo de la completitud y del examen médico', () => {
+    assert.equal(estadoCandidato('pendiente', { listo: true }, 'aprobado'), 'listo');
+    assert.equal(estadoCandidato('listo', { listo: false }, 'aprobado'), 'pendiente');
+});
+
+test('estadoCandidato: sin el examen aprobado por SST no queda listo', () => {
+    for (const examen of [undefined, null, 'pendiente', 'no_asistio', 'reagendado', 'asistio']) {
+        assert.equal(estadoCandidato('pendiente', { listo: true }, examen), 'pendiente');
+    }
+    assert.equal(estadoCandidato('listo', { listo: true }, 'asistio'), 'pendiente');
 });
 
 test('estadoCandidato no saca a un candidato de un estado terminal', () => {
-    for (const terminal of ['registrado', 'descartado', 'cancelado_hydra']) {
-        assert.equal(estadoCandidato(terminal, { listo: true }), terminal);
+    for (const terminal of ['registrado', 'descartado', 'cancelado_hydra', 'no_apto']) {
+        assert.equal(estadoCandidato(terminal, { listo: true }, 'aprobado'), terminal);
     }
+});
+
+test('estadoLote: un candidato no apto no bloquea ni cuenta', () => {
+    assert.equal(estadoLote('abierto', ['listo', 'no_apto']), 'listo');
+    assert.equal(estadoLote('abierto', ['no_apto']), 'abierto');
 });
 
 test('estadoLote: listo solo si todos los activos están listos', () => {
