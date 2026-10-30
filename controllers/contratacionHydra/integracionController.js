@@ -31,4 +31,13 @@ async function consultarCandidato(req, res) {
     res.json(await recepcionService.consultarCandidato(Number(req.params.hydraCandidatoId)));
 }
 
-module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, consultarCandidato };
+async function recibirDocumento(req, res) {
+    const { hydraCandidatoId, tipo } = req.params;
+    const { status, body } = await recepcionService.recibirDocumento(
+        Number(hydraCandidatoId), req.body,
+        contexto(req, `PUT /candidatos/${hydraCandidatoId}/documentos/${tipo}`)
+    );
+    res.status(status).json(body);
+}
+
+module.exports = { recibirLote, actualizarCandidato, cancelarCandidato, recibirDocumento, consultarCandidato };

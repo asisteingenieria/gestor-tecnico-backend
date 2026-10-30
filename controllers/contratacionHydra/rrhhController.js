@@ -1,6 +1,7 @@
 const rrhhService = require('../../services/contratacionHydra/rrhhService');
 const registroService = require('../../services/contratacionHydra/registroService');
 const despachoService = require('../../services/contratacionHydra/despachoService');
+const documentosService = require('../../services/contratacionHydra/documentosService');
 
 // Endpoints de RRHH sobre el staging de contratación (conexionhydra.md §8). Sin try/catch:
 // los envuelve asyncHandler y los errores los responde middleware/errorHandler.js.
@@ -71,7 +72,32 @@ async function reintentarEnvio(req, res) {
     res.json(await despachoService.reintentarEnvio(Number(req.params.id)));
 }
 
+// Inline (se abre en el navegador); el nombre original solo va en la cabecera.
+function enviarArchivo(res, { ruta, mime, nombre_original: nombreOriginal }) {
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(nombreOriginal)}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(ruta, (error) => {
+        if (error && !res.headersSent) res.status(404).json({ success: false, message: 'Documento no encontrado' });
+    });
+}
+
+async function archivoDocumentoCandidato(req, res) {
+    enviarArchivo(res, await documentosService.archivoDeCandidato(Number(req.params.id), Number(req.params.documentoId)));
+}
+
+async function documentosEmpleado(req, res) {
+    res.json(await documentosService.documentosDeEmpleado(Number(req.params.usersCompanyId)));
+}
+
+async function archivoDocumentoEmpleado(req, res) {
+    enviarArchivo(res, await documentosService.archivoDeEmpleado(Number(req.params.usersCompanyId), Number(req.params.documentoId)));
+}
+
 module.exports = {
+    archivoDocumentoCandidato,
+    documentosEmpleado,
+    archivoDocumentoEmpleado,
     registrarLote,
     listarEnvios,
     reintentarEnvio,

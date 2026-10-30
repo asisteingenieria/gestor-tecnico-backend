@@ -1316,3 +1316,75 @@ Las tablas nuevas no afectan al resto de RRHH. Si alguna vez hay que retirarlas,
   - Un `umask 077` dejó el `dist` de Hydra ilegible para nginx (403); se arregló con
     `chmod -R a+rX dist`.
 - **El tráfico va por HTTP a la IP pública de Gestor.** HTTPS sigue pendiente (§12).
+
+## 15. Documentos de contratación (Hydra 021 · Gestor 087, 2026-10-30)
+
+Al enviar a contratación, Hydra manda además de los datos del candidato:
+
+- **Hoja de vida firmada y tratamiento de datos firmado** (FirmaCloud). Son **obligatorios**: Hydra
+  no deja enviar a quien no los firmó. Basta la firma del candidato (`status === 'signed'`); la
+  segunda firma de Selección no se exige.
+- **Soportes de antecedentes** que tenga cargados (ADRES, Policía, Comparendos, Procuraduría),
+  cada uno por separado.
+- Si le falta algún antecedente, Contratación **tiene que escribir una nota para RRHH** al enviar
+  (solo a esos candidatos; si están todos, no se pide nada).
+
+### 15.1 Hydra (migración 021)
+
+- `motivoNoElegible` exige la firma. El estado se consulta a FirmaCloud al listar (de a 4 en
+  paralelo) solo para quien le falta únicamente eso, y `signed` se guarda en
+  `candidato_firmas.estado` para no volver a consultar. Si FirmaCloud no responde, el motivo es
+  "No se pudo confirmar la firma en FirmaCloud".
+- `POST /contratacion/lotes` acepta `notasAntecedentes: { "<candidatoId>": "nota" }` (máx. 500).
+  Sin nota para quien le falta un antecedente → 409 `CANDIDATOS_NO_ELEGIBLES`. La nota queda en
+  `contratacion_candidatos.nota_antecedentes`.
+- El payload del candidato (lote y reenvío) trae el bloque nuevo:
+  `documentos: { firmados: [...], antecedentes_faltantes: [nombres], nota_antecedentes }`.
+- Cada documento es **un envío del outbox** (`contratacion_envios.tipo = 'documento'`,
+  `PUT /candidatos/:id/documentos/:tipo`) que sale **solo cuando el envío del lote ya está
+  `enviado`** (si no, Gestor respondería 404). El cuerpo se arma al despachar (no se guarda el
+  base64 en el outbox).
+- Los firmados se descargan de FirmaCloud la primera vez y se guarda una copia en
+  `candidato_documentos` (tipos `hoja_vida_firmada`, `tratamiento_datos_firmado`,
+  `uploads/firmados/`): un reintento manda exactamente los mismos bytes y la misma
+  Idempotency-Key no choca.
+- "Reenviar datos" vuelve a encolar los documentos; Gestor responde `sin_cambios` si el hash es
+  el mismo. Un archivo que ya no existe en Hydra deja ese envío `fallido` sin tocar al candidato.
+
+### 15.2 Gestor (migración 087)
+
+- `PUT /api/integraciones/hydra/v1/candidatos/:hydraCandidatoId/documentos/:tipo`, firmado con
+  HMAC e idempotente como el resto. Cuerpo JSON:
+  `{ tipo, nombre, nombre_archivo, mime_type, sha256, contenido_base64 }`. Límite propio de
+  **15 MB** de cuerpo (10 MB de archivo; el resto sigue en 1 MB) → 413 `DOCUMENTO_DEMASIADO_GRANDE`.
+- Se comprueba el SHA-256 y que el contenido corresponda al mime (PDF/JPG/PNG por firma de
+  archivo). Responde 201 `creado`, 200 `reemplazado` o 200 `sin_cambios`; 404 si Gestor no tiene
+  el candidato. Se acepta en cualquier estado, también ya registrado.
+- Tabla `hydra_candidato_documento` (uno por candidato y tipo, cascada con el candidato);
+  archivos en `storage/contratacion-hydra/` (privado, no `uploads/`). El archivo reemplazado se
+  borra después del commit.
+- RRHH: pestaña **Documentos** en el panel del candidato (`GET /api/contratacion-hydra/candidatos/:id`
+  trae `documentos`; descarga en `.../candidatos/:id/documentos/:documentoId/archivo`), con aviso
+  de firmados que no han llegado y de antecedentes faltantes con la nota. En la ficha del empleado
+  (`EmpleadoDrawer`) aparece la pestaña **Documentos** si llegó de Hydra
+  (`GET /api/contratacion-hydra/empleados/:usersCompanyId/documentos` y su `/archivo`). Ambas
+  rutas son de `isRecursosHumanos`; para otros roles la pestaña no aparece.
+- **Registrar el lote exige los dos firmados** cuando el candidato trae el bloque `documentos`
+  (los enviados antes de esta integración no lo traen y no se les exige).
+
+### 15.3 Despliegue
+
+1. **Gestor primero**: migración 087 + código backend y frontend. Hasta entonces Gestor ignora el
+   bloque `documentos` (campos desconocidos) y respondería 404 a los PUT de documentos.
+2. **Después Hydra**: migración 021 + código. Sin Gestor actualizado, los envíos `documento`
+   quedan fallidos y habría que reintentarlos.
+3. Hydra necesita FirmaCloud alcanzable para que un candidato sea elegible.
+4. En el server de Gestor, `storage/` ya está en `.gitignore`; la carpeta se crea sola al arrancar.
+
+Probado en local (2026-10-30): pruebas de Hydra (unidad 39, integración de contratación 30) y
+`npm test` de Gestor (255), más un envío real Hydra → Gestor con el cliente HTTP de Hydra contra
+un Gestor local en otro puerto: lote, documento creado/reintento idempotente/`sin_cambios`/
+reemplazo, hash alterado y HTML disfrazado de PDF (400), PNG y PDF de 9 MB (201), 12 MB (413),
+candidato inexistente (404), y los endpoints de RRHH (detalle, descarga, 404 de otro candidato,
+401 sin token). **No se probó en local** el bloqueo del registro por firmados faltantes (el
+candidato de prueba tenía secciones pendientes, que se validan antes).

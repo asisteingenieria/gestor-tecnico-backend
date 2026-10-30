@@ -7,6 +7,9 @@ const asyncHandler = require('../middleware/asyncHandler');
 const rrhhController = require('../controllers/contratacionHydra/rrhhController');
 const {
     idParamSchema,
+    documentoCandidatoParamsSchema,
+    documentosEmpleadoParamsSchema,
+    documentoEmpleadoParamsSchema,
     listarLotesQuerySchema,
     seccionParamsSchema,
     verificacionSchema,
@@ -31,6 +34,12 @@ router.get('/candidatos/:id', validar(idParamSchema), asyncHandler(rrhhControlle
 router.put('/candidatos/:id/secciones/:seccion', validar(seccionParamsSchema), validarCuerpo(validarCuerpoSeccion), asyncHandler(rrhhController.guardarSeccion));
 router.put('/candidatos/:id/secciones/:seccion/verificacion', validar(verificacionSchema), asyncHandler(rrhhController.marcarVerificacion));
 router.post('/candidatos/:id/descartar', validar(descartarSchema), asyncHandler(rrhhController.descartarCandidato));
+
+// Documentos que envía Hydra (migración 087, §15): firmados y antecedentes. La lista del
+// candidato viaja en GET /candidatos/:id; la ficha del empleado los pide aparte.
+router.get('/candidatos/:id/documentos/:documentoId/archivo', validar(documentoCandidatoParamsSchema), asyncHandler(rrhhController.archivoDocumentoCandidato));
+router.get('/empleados/:usersCompanyId/documentos', validar(documentosEmpleadoParamsSchema), asyncHandler(rrhhController.documentosEmpleado));
+router.get('/empleados/:usersCompanyId/documentos/:documentoId/archivo', validar(documentoEmpleadoParamsSchema), asyncHandler(rrhhController.archivoDocumentoEmpleado));
 
 router.get('/catalogos', asyncHandler(rrhhController.opcionesCatalogos));
 router.get('/mapeos', asyncHandler(rrhhController.listarMapeos));

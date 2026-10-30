@@ -5,9 +5,10 @@ const candidatoRepo = require('../../repositories/contratacionHydra/candidatoRep
 const verificacionRepo = require('../../repositories/contratacionHydra/verificacionRepository');
 const empleadoRepo = require('../../repositories/contratacionHydra/empleadoRepository');
 const envioRepo = require('../../repositories/contratacionHydra/envioRepository');
+const documentoRepo = require('../../repositories/contratacionHydra/documentoRepository');
 const { cargarResolver, evaluarCandidato } = require('./evaluacionService');
 const { validarObligatorios } = require('../../utils/validarEmpleado');
-const { assertLoteRegistrable } = require('../../domain/contratacionHydra');
+const { assertLoteRegistrable, resumenDocumentos } = require('../../domain/contratacionHydra');
 
 // Registro de un lote como empleados (conexionhydra.md §7): todo o nada, en una sola
 // transacción, con simulación previa.
@@ -47,6 +48,7 @@ async function registrarLote({ loteId, simular, usuarioId }) {
 
         const resolver = await cargarResolver(conn);
         const verificaciones = await verificacionRepo.findByLote(loteId, conn);
+        const documentos = await documentoRepo.findTiposByLote(loteId, conn);
         const aRegistrar = candidatos.filter((c) => c.estado === 'listo');
 
         const errores = [];
@@ -59,6 +61,14 @@ async function registrarLote({ loteId, simular, usuarioId }) {
             const { completitud } = evaluarCandidato({ candidato, lote, resolver, verificaciones: propias });
             if (!completitud.listo) {
                 errores.push(`${etiqueta}: tiene secciones pendientes o desactualizadas`);
+                continue;
+            }
+            // Hoja de vida y tratamiento de datos firmados (migración 087): Hydra los manda
+            // después del lote; hasta que lleguen, no se registra.
+            const tipos = documentos.filter((d) => d.hydra_candidato_id === candidato.idhydra_candidato).map((d) => d.tipo);
+            const { firmados_pendientes: pendientes } = resumenDocumentos(candidato.datos_hydra, tipos);
+            if (pendientes.length > 0) {
+                errores.push(`${etiqueta}: todavía no llega de Hydra ${pendientes.map((p) => p.nombre.toLowerCase()).join(' ni ')}`);
                 continue;
             }
             const errorObligatorios = validarObligatorios(candidato.datos_empleado);

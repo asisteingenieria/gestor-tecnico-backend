@@ -30,10 +30,12 @@ function crearSoportesRrhh(carpeta) {
     const directorio = path.join(RAIZ_STORAGE, carpeta);
     fs.mkdirSync(directorio, { recursive: true });
 
+    // Nombre generado: el original solo se guarda en BD (nombre_original), nunca se usa como ruta.
+    const nombreGenerado = (extension) => `${Date.now()}_${crypto.randomBytes(8).toString('hex')}${extension}`;
+
     const storage = multer.diskStorage({
         destination: (req, file, cb) => cb(null, directorio),
-        // Nombre generado: el original solo se guarda en BD (nombre_original), nunca se usa como ruta.
-        filename: (req, file, cb) => cb(null, `${Date.now()}_${crypto.randomBytes(8).toString('hex')}${path.extname(file.originalname).toLowerCase()}`)
+        filename: (req, file, cb) => cb(null, nombreGenerado(path.extname(file.originalname).toLowerCase()))
     });
     const upload = multer({ storage, fileFilter, limits: { fileSize: TAMANO_MAXIMO_MB * 1024 * 1024, files: 1 } });
 
@@ -61,10 +63,20 @@ function crearSoportesRrhh(carpeta) {
         if (completa) fs.unlink(completa, (err) => { if (err && err.code !== 'ENOENT') console.error('No se pudo borrar el soporte', completa, err.message); });
     }
 
-    return { middleware, ruta, borrar };
+    // Archivo que no llega por multer (los documentos que envía Hydra en base64). La
+    // extensión la decide quien llama a partir del tipo validado, nunca del nombre original.
+    async function guardar(contenido, extension) {
+        const nombre = nombreGenerado(extension);
+        await fs.promises.writeFile(path.join(directorio, nombre), contenido, { flag: 'wx' });
+        return nombre;
+    }
+
+    return { middleware, ruta, borrar, guardar };
 }
 
 module.exports = {
     soportesNovedad: crearSoportesRrhh('novedades'),
-    soportesTraspaso: crearSoportesRrhh('traspasos')
+    soportesTraspaso: crearSoportesRrhh('traspasos'),
+    // Documentos de contratación que envía Hydra (migración 087).
+    documentosContratacion: crearSoportesRrhh('contratacion-hydra')
 };

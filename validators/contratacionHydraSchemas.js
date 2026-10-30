@@ -8,6 +8,19 @@ const idParamSchema = {
     params: { id: { requerido: true, tipo: 'entero' } }
 };
 
+// Documentos que envía Hydra (migración 087)
+const documentoCandidatoParamsSchema = {
+    params: { id: { requerido: true, tipo: 'entero' }, documentoId: { requerido: true, tipo: 'entero' } }
+};
+
+const documentosEmpleadoParamsSchema = {
+    params: { usersCompanyId: { requerido: true, tipo: 'entero' } }
+};
+
+const documentoEmpleadoParamsSchema = {
+    params: { usersCompanyId: { requerido: true, tipo: 'entero' }, documentoId: { requerido: true, tipo: 'entero' } }
+};
+
 const listarLotesQuerySchema = {
     query: { estado: { enum: ESTADOS_LOTE } }
 };
@@ -55,6 +68,9 @@ function validarCuerpoSeccion(body) {
 
 module.exports = {
     idParamSchema,
+    documentoCandidatoParamsSchema,
+    documentosEmpleadoParamsSchema,
+    documentoEmpleadoParamsSchema,
     listarLotesQuerySchema,
     seccionParamsSchema,
     verificacionSchema,
