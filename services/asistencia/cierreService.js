@@ -3,7 +3,8 @@ const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
 const horarioRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
-const { asislock } = require('../../domain/asistencia');
+const marcacionMolineteRepo = require('../../repositories/asistencia/molineteMarcacionRepository');
+const { asislock, molinete } = require('../../domain/asistencia');
 const { fechaLaboral, combinarFechaHora } = require('../../utils/fechaBogota');
 
 const ESTADOS_ABIERTOS = ['en_curso', 'en_pausa'];
@@ -21,6 +22,16 @@ const TOTALES_AUSENTE = {
     minutosSalidaAnticipada: 0,
     desviacionAlmuerzoMin: 0
 };
+
+// Última marcación del molinete del día posterior a la entrada, o null (no marca por molinete).
+async function ultimaMarcacionMolinete(usersCompanyId, fecha, eventos, conn) {
+    const entrada = eventos.filter((e) => e.tipo === 'entrada').sort((a, b) => a.ocurrido_en - b.ocurrido_en)[0];
+    if (!entrada) return null;
+    const desde = combinarFechaHora(fecha, '00:00:00');
+    const hasta = new Date(desde.getTime() + 24 * 60 * 60 * 1000);
+    const marcaciones = await marcacionMolineteRepo.findDelDia([usersCompanyId], desde, hasta, conn);
+    return molinete.salidaDeCierre(marcaciones, entrada.ocurrido_en);
+}
 
 // Cierra una jornada abierta con una salida de origen='sistema' en la hora programada, o
 // crea una jornada 'ausente' si el empleado tenía horario ese día y nunca marcó entrada.
@@ -55,20 +66,33 @@ async function normalizarJornada(usersCompanyId, fecha, ahora, conn = db) {
     // desconectado (no laborado), igual que lo muestra el monitor en vivo (asistencia.md §42).
     // Sin horario, se cierra en el logout. Origen asislock: hubo un logout real, así que no
     // levanta la alerta sin_marcar_salida.
-    const desconexionDesde = asislock.desconexionAbierta(await eventoRepo.findByJornada(jornada.idjornada, conn));
+    const eventosDelDia = await eventoRepo.findByJornada(jornada.idjornada, conn);
+    const desconexionDesde = asislock.desconexionAbierta(eventosDelDia);
     const horaSalida = horario && !horario.es_descanso ? combinarFechaHora(fecha, horario.hora_salida) : null;
+    // Staff que marca por molinete y no pasó por un lector de salida dentro de la ventana: la salida
+    // es su última marcación del día, no la hora programada (asistencia.md §54).
+    const salidaMolinete = desconexionDesde ? null : await ultimaMarcacionMolinete(usersCompanyId, fecha, eventosDelDia, conn);
     let corte;
-    if (desconexionDesde) corte = horaSalida && horaSalida > desconexionDesde ? horaSalida : desconexionDesde;
-    else corte = horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59');
+    let origen = 'sistema';
+    let nota = null;
+    if (desconexionDesde) {
+        corte = horaSalida && horaSalida > desconexionDesde ? horaSalida : desconexionDesde;
+        origen = 'asislock';
+        nota = corte > desconexionDesde
+            ? 'Cierre del día: desconectado de AsisLock sin reconexión hasta la hora de salida'
+            : 'Cierre del día: último logout de AsisLock sin reconexión';
+    } else if (salidaMolinete) {
+        corte = salidaMolinete;
+        origen = 'molinete';
+        nota = 'Cierre del día: última marcación del molinete';
+    } else {
+        corte = horario ? combinarFechaHora(fecha, horario.hora_salida) : combinarFechaHora(fecha, '23:59:59');
+    }
     await eventoRepo.insertar({
         jornadaId: jornada.idjornada,
         tipo: 'salida',
-        origen: desconexionDesde ? 'asislock' : 'sistema',
-        nota: desconexionDesde
-            ? (corte > desconexionDesde
-                ? 'Cierre del día: desconectado de AsisLock sin reconexión hasta la hora de salida'
-                : 'Cierre del día: último logout de AsisLock sin reconexión')
-            : null,
+        origen,
+        nota,
         ocurridoEn: corte
     }, conn);
 

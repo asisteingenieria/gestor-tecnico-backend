@@ -133,4 +133,13 @@ global.sendMessageToUser = (userId, event, data) => {
 
 const PORT = process.env.PORT || 5001;
 
-server.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
+server.listen(PORT, () => {
+    console.log(`Servidor corriendo en el puerto ${PORT}`);
+    // Asistencia del staff por molinete (asistencia.md §54): lectura continua de la base del
+    // molinete si MOLINETE_PG_HOST está en el .env. MOLINETE_SINCRONIZAR=0 la apaga en este proceso.
+    // Sin MOLINETE_PG_HOST ni siquiera se carga el servicio (que requiere el paquete `pg`).
+    if (process.env.MOLINETE_PG_HOST && process.env.MOLINETE_SINCRONIZAR !== '0'
+        && require('./services/asistencia/molineteService').iniciar()) {
+        console.log('[molinete] Lectura de marcaciones activa');
+    }
+});

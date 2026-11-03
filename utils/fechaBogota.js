@@ -46,4 +46,22 @@ function periodosHasta(periodo, cantidad) {
     return Array.from({ length: cantidad }, (_, i) => sumarMeses(periodo, i - cantidad + 1));
 }
 
-module.exports = { fechaLaboral, combinarFechaHora, sumarDias, rangoDelMes, normalizarFecha, sumarMeses, periodosHasta };
+// 'YYYY-MM-DD HH:MM:SS[.mmm]' en hora de Bogotá, sin zona (como guardan sus fechas otros sistemas,
+// p. ej. el molinete) → instante UTC. null si el texto no tiene esa forma.
+function textoBogotaAInstante(texto) {
+    const m = typeof texto === 'string' && texto.trim().match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)$/);
+    if (!m) return null;
+    const instante = combinarFechaHora(m[1], m[2]);
+    return Number.isNaN(instante.getTime()) ? null : instante;
+}
+
+// Instante UTC → 'YYYY-MM-DD HH:MM:SS.mmm' en hora de Bogotá, sin zona (el inverso del anterior).
+function instanteATextoBogota(instante) {
+    const desplazado = new Date(instante.getTime() - OFFSET_BOGOTA_MINUTOS * 60 * 1000);
+    return desplazado.toISOString().replace('T', ' ').replace('Z', '');
+}
+
+module.exports = {
+    fechaLaboral, combinarFechaHora, sumarDias, rangoDelMes, normalizarFecha, sumarMeses, periodosHasta,
+    textoBogotaAInstante, instanteATextoBogota
+};
