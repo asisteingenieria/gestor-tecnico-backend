@@ -3203,3 +3203,41 @@ respaldo.
 4. Que los jefes del staff les asignen horario.
 5. Con `pm2` en modo cluster la lectura correría una vez por proceso. No duplica nada, gracias a la llave
    única, pero hace el trabajo de más.
+
+### 54.1 Producción no alcanza el molinete: intermediario pendiente (2026-11-03)
+
+**Estado:**
+- El código de §54 está desplegado en producción: pull, `npm install` (`pg`) y `pm2 restart`, con una sola
+  instancia `fork`.
+- Desde srv845606, `nc -zv -w 5 10.255.255.18 5442` da `timed out`, y `ip route get` muestra que el tráfico
+  sale por `eth0` hacia internet. `10.255.255.18` es una IP privada de la red de la oficina: el servidor no
+  tiene camino hacia ella.
+- Por eso **no se agregaron las `MOLINETE_PG_*` al `.env` de producción** y la lectura queda apagada. Sin
+  ellas, `index.js` no carga el servicio. Si la 091 aún no corrió, la trazabilidad y el cierre responden vacío
+  para el molinete (`ER_NO_SUCH_TABLE`).
+
+**Opciones evaluadas:**
+1. **Intermediario que empuja (elegido, pendiente de validar con el administrador del servidor del
+   molinete).** Un programa en Node corre **en el mismo servidor del molinete** (Windows), lee el Postgres local
+   cada 2 s y envía lo nuevo al Gestor por HTTPS con API key, como AsisLock. Funciona porque la conexión sale
+   de la oficina hacia internet (permitido) y no entra desde internet (bloqueado).
+2. **Una API en el servidor del molinete que el Gestor consulta.** Se descartó: el Gestor tampoco llega a esa
+   IP, así que necesitaría abrir un puerto en la oficina o una VPN.
+3. **VPN, o abrir el 5442 en la IP pública de la oficina.** La VPN depende de redes. Abrir el puerto expone un
+   Postgres 9.2 sin parches: no se recomienda.
+
+**Diseño del intermediario, para cuando se apruebe:**
+- **Gestor:**
+  - `POST /api/integraciones/molinete/v1/marcaciones` con `x-api-key` (`MOLINETE_API_KEY` en el `.env`).
+    Recibe un lote con las columnas de `molineteOrigenRepository.findDesde` y llama a la misma
+    `procesar(fila)` de `molineteService`, así que es idempotente por `unique_key`.
+  - `GET …/ultima` devuelve `MAX(registrado_en_origen)`, para que el intermediario sepa dónde seguir sin
+    guardar estado.
+  - Marca del último reporte, con aviso a financiera si pasan unos minutos sin noticias.
+  - Script para recalcular un día con marcaciones que llegaron después del cierre de las 23:30.
+- **Intermediario** (carpeta en el repo):
+  - unas 150 líneas, con la misma consulta de hoy, reintentos y un `.env` propio (`MOLINETE_PG_*`, URL del
+    Gestor, API key);
+  - instalado como servicio de Windows (pm2 o NSSM).
+- **Requisitos del servidor del molinete:** permiso para instalar Node 20+ y el servicio, y salida HTTPS al
+  Gestor. Se comprueba con `curl https://<gestor>/api/integraciones/asislock/v1/salud`.
