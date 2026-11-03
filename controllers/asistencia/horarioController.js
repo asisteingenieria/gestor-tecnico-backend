@@ -95,7 +95,25 @@ async function eliminarAsignacion(req, res) {
     res.json(resultado);
 }
 
+// Malla de horarios en Excel (§55): la vista previa y la aplicación reciben el mismo archivo.
+async function previsualizarMalla(req, res) {
+    res.json(await horarioService.previsualizarMalla({
+        directorUsersCompanyId: req.user.users_company_id,
+        buffer: req.file?.buffer
+    }));
+}
+
+async function aplicarMalla(req, res) {
+    res.json(await horarioService.aplicarMalla({
+        directorUsersCompanyId: req.user.users_company_id,
+        buffer: req.file?.buffer,
+        creadoPor: autorDe(req)
+    }));
+}
+
 module.exports = {
+    previsualizarMalla,
+    aplicarMalla,
     listarPlantillas,
     crearPlantilla,
     actualizarPlantilla,

@@ -78,4 +78,14 @@ async function findActivo(usersCompanyId, conn = db) {
     return filas[0] ?? null;
 }
 
-module.exports = { findPorNumeroIdentificacion, findCampaniasConEmpleados, findActivosPorCampania, findActivo };
+// De una lista de cédulas, las que tienen ficha en RRHH (malla de horarios, §55).
+async function findNumerosExistentes(numeros, conn = db) {
+    if (numeros.length === 0) return [];
+    const [filas] = await conn.query(
+        'SELECT DISTINCT TRIM(numero_identificacion) AS numero FROM users_company WHERE TRIM(numero_identificacion) IN (?)',
+        [numeros]
+    );
+    return filas.map((f) => f.numero);
+}
+
+module.exports = { findPorNumeroIdentificacion, findNumerosExistentes, findCampaniasConEmpleados, findActivosPorCampania, findActivo };

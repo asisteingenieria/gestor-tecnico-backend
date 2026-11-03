@@ -3,6 +3,14 @@ const router = express.Router();
 const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, canSolicitarCambioTurno, isFinanciera } = require('../middleware/auth');
 const validar = require('../middleware/validar');
 const asyncHandler = require('../middleware/asyncHandler');
+const uploadExcel = require('../middleware/uploadEmpleados');
+const { ValidacionError } = require('../errors/AppError');
+
+// Archivo Excel en memoria (campo `archivo`). Un error de multer (tipo o tamaño) responde 400 con su
+// mensaje en vez de caer como 500 en el errorHandler.
+function subirMalla(req, res, next) {
+    uploadExcel.single('archivo')(req, res, (error) => next(error ? new ValidacionError(error.message) : undefined));
+}
 
 const marcajeController = require('../controllers/asistencia/marcajeController');
 const consultaController = require('../controllers/asistencia/consultaController');
@@ -92,6 +100,9 @@ router.post('/horarios/plantillas', canDirigirEquipo, validar(crearPlantillaSche
 router.put('/horarios/plantillas/:id', canDirigirEquipo, validar(actualizarPlantillaSchema), asyncHandler(horarioController.actualizarPlantilla));
 router.delete('/horarios/plantillas/:id', canDirigirEquipo, validar(idParamSchema), asyncHandler(horarioController.eliminarPlantilla));
 
+// Malla de horarios en Excel (§55). Van antes de /horarios/:id para no confundirse con un id.
+router.post('/horarios/malla/previsualizar', canDirigirEquipo, subirMalla, asyncHandler(horarioController.previsualizarMalla));
+router.post('/horarios/malla/aplicar', canDirigirEquipo, subirMalla, asyncHandler(horarioController.aplicarMalla));
 router.get('/horarios', canDirigirEquipo, validar(consultarHorariosQuerySchema), asyncHandler(horarioController.consultarHorarios));
 router.post('/horarios', canDirigirEquipo, validar(asignarHorarioSchema), asyncHandler(horarioController.asignarMasivo));
 router.put('/horarios/:id', canDirigirEquipo, validar(actualizarAsignacionSchema), asyncHandler(horarioController.actualizarAsignacion));

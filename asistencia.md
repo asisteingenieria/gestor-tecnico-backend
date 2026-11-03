@@ -3203,3 +3203,115 @@ respaldo.
 4. Que los jefes del staff les asignen horario.
 5. Con `pm2` en modo cluster la lectura correría una vez por proceso. No duplica nada, gracias a la llave
    única, pero hace el trabajo de más.
+
+### 54.1 Producción no alcanza el molinete: intermediario pendiente (2026-11-03)
+
+**Estado:**
+- El código de §54 está desplegado en producción: pull, `npm install` (`pg`) y `pm2 restart`, con una sola
+  instancia `fork`.
+- Desde srv845606, `nc -zv -w 5 10.255.255.18 5442` da `timed out`, y `ip route get` muestra que el tráfico
+  sale por `eth0` hacia internet. `10.255.255.18` es una IP privada de la red de la oficina: el servidor no
+  tiene camino hacia ella.
+- Por eso **no se agregaron las `MOLINETE_PG_*` al `.env` de producción** y la lectura queda apagada. Sin
+  ellas, `index.js` no carga el servicio. Si la 091 aún no corrió, la trazabilidad y el cierre responden vacío
+  para el molinete (`ER_NO_SUCH_TABLE`).
+
+**Opciones evaluadas:**
+1. **Intermediario que empuja (elegido, pendiente de validar con el administrador del servidor del
+   molinete).** Un programa en Node corre **en el mismo servidor del molinete** (Windows), lee el Postgres local
+   cada 2 s y envía lo nuevo al Gestor por HTTPS con API key, como AsisLock. Funciona porque la conexión sale
+   de la oficina hacia internet (permitido) y no entra desde internet (bloqueado).
+2. **Una API en el servidor del molinete que el Gestor consulta.** Se descartó: el Gestor tampoco llega a esa
+   IP, así que necesitaría abrir un puerto en la oficina o una VPN.
+3. **VPN, o abrir el 5442 en la IP pública de la oficina.** La VPN depende de redes. Abrir el puerto expone un
+   Postgres 9.2 sin parches: no se recomienda.
+
+**Diseño del intermediario, para cuando se apruebe:**
+- **Gestor:**
+  - `POST /api/integraciones/molinete/v1/marcaciones` con `x-api-key` (`MOLINETE_API_KEY` en el `.env`).
+    Recibe un lote con las columnas de `molineteOrigenRepository.findDesde` y llama a la misma
+    `procesar(fila)` de `molineteService`, así que es idempotente por `unique_key`.
+  - `GET …/ultima` devuelve `MAX(registrado_en_origen)`, para que el intermediario sepa dónde seguir sin
+    guardar estado.
+  - Marca del último reporte, con aviso a financiera si pasan unos minutos sin noticias.
+  - Script para recalcular un día con marcaciones que llegaron después del cierre de las 23:30.
+- **Intermediario** (carpeta en el repo):
+  - unas 150 líneas, con la misma consulta de hoy, reintentos y un `.env` propio (`MOLINETE_PG_*`, URL del
+    Gestor, API key);
+  - instalado como servicio de Windows (pm2 o NSSM).
+- **Requisitos del servidor del molinete:** permiso para instalar Node 20+ y el servicio, y salida HTTPS al
+  Gestor. Se comprueba con `curl https://<gestor>/api/integraciones/asislock/v1/salud`.
+
+## 55. Malla de horarios en Excel (2026-11-03)
+
+Los jefes (por ejemplo, Kevin Buitrago) suben la malla del mes **tal como la exportan**, desde la tabla
+`tab_mallas_turnos_mes` (ejemplo: `Mallas1.xlsx`). El archivo trae una fila por persona y día. El sistema le
+asigna el horario a cada persona de su equipo directo. No hay migración: el horario se escribe en
+`horario_asignado` con `insertarVarios`, igual que en "Asignar horario".
+
+- **Pantalla:** Horarios del equipo → **Cargar malla (Excel)** (`CargarMallaModal.jsx`). Primero muestra una
+  vista previa sin escribir nada:
+  - Tu equipo: nuevos, reemplaza (con el turno anterior) y sin cambio, día por día;
+  - Omitidos: personas que no están a cargo del jefe o que no tienen ficha en RRHH;
+  - Con errores: número de fila de Excel y el motivo.
+
+  Después, **Aplicar** escribe todo en una sola transacción.
+- **API:** `POST /api/asistencia/horarios/malla/previsualizar` y `/malla/aplicar`. Usa `canDirigirEquipo` y
+  recibe un multipart con el campo `archivo` (.xlsx o .xls, hasta 15 MB, en memoria; reutiliza
+  `middleware/uploadEmpleados`). Las dos rutas reciben el mismo archivo y el servidor lo vuelve a leer al
+  aplicar: no guarda estado entre la vista previa y la aplicación.
+- **Capas:**
+  - `domain/asistencia/mallaHorarios.js`: lectura pura (`leerMalla`, `planificar`) y 10 pruebas;
+  - `horarioService.previsualizarMalla/aplicarMalla`;
+  - `empleadoRepository.findNumerosExistentes`.
+- **Reglas** (decididas con el usuario):
+  - **solo de hoy en adelante**, según la fecha laboral de Bogotá; los días pasados se cuentan y se omiten;
+  - **solo al equipo directo** (`listaEmpleadosACargo`, GESTOR); el resto se lista como omitido. Financiera no
+    sube mallas;
+  - las columnas se buscan por nombre, sin importar mayúsculas, tildes ni el orden. Obligatorias: `Cedula`,
+    `Fecha`, `Entrada`/`Entrada_Final` y `Salida`/`Salida_Final`. Si existen, se prefieren las `*_Final`;
+  - `Almuerzo_Final` / `Tiempo_Almuerzo` es la **duración** del almuerzo y va a `minutos_almuerzo`;
+    `hora_almuerzo_inicio` queda NULL;
+  - entrada 00:00 o la novedad `Libre` = descanso. `INC`, `VACACIONES`, `RETIRO`, `SUSPENSION`, `LNR` y `LR` =
+    descanso con la novedad en `notas` ("Malla: INC"). La novedad puede venir en la columna `Novedad` (Mallas1) o
+    escrita en la celda de **Entrada** (la plantilla oficial no tiene columna Novedad). Una Entrada vacía es error;
+  - una salida igual o anterior a la entrada (turno que cruza la medianoche) **se rechaza** para que el jefe la
+    corrija: el sistema no maneja esos turnos;
+  - una persona con dos filas el mismo día se rechaza;
+  - tolerancia 0 (§52). Si el jefe tiene una plantilla con la misma entrada, salida y almuerzo, se enlaza:
+    primero la de su centro de costo y, si no hay, una general. **Si no tiene ninguna, al aplicar se crea una
+    plantilla suya, general**, llamada "Malla 08:00-18:00 · 20 min almuerzo", en la misma transacción. La vista
+    previa avisa cuáles va a crear. En la siguiente carga, ese turno ya se enlaza a la plantilla creada y no se
+    duplica (decidido con el usuario el 2026-11-03);
+  - reemplaza el turno que ya tuviera la persona ese día. Si se carga dos veces el mismo archivo, la segunda
+    vez todo queda como "sin cambio";
+  - si cambió el turno de hoy, se avisa por socket (`notificarCambioJornada`).
+- **Prueba local:** Mallas1 corrida 34 días hacia adelante, con Kevin (`users_company.id` 25):
+  - 1.969 horarios a aplicar para 74 personas, 458 de ellos descansos;
+  - 177 personas omitidas por no estar a cargo de Kevin y 1 sin ficha;
+  - 4 filas con turno que cruza la medianoche;
+  - la vista previa tarda menos de 1 s;
+  - la segunda carga queda en 1.969 "sin cambio".
+
+  Los horarios de la prueba se borraron después.
+- **Plantilla oficial `01_Mallas_Operacion.xlsx`** (la que entregan a los jefes): hoja `Hoja1` con las columnas
+  `Fecha, Nombre, Cédulaplataforma, Login, Cargo, Campaña, Coordinador, Modelo Trabajo, Ciudad, Entrada, Salida,
+  Tiempo de Almuerzo`. Se leen `Fecha`, `Cédulaplataforma` (como cédula), `Entrada`, `Salida` y
+  `Tiempo de Almuerzo`; las demás son informativas. `Coordinador` es la misma columna que en Mallas1 se llamaba
+  `pero`: el jefe inmediato (176 de 251 coinciden con `contrato.jefe_inmediato_id`).
+  - Ejemplo con 2 agentes de T&T de Kevin: `Descargas/Malla_Operacion_ejemplo_TyT.xlsx`. Da 54 horarios y crea
+    5 plantillas. Los 42 días de trabajo quedan enlazados y los 12 descansos incluyen 2 días de INC escritos en
+    Entrada. Se probó y se limpió.
+- **Despliegue:** solo código, backend y frontend juntos. No hay migración.
+- **Tecnología, quién sube la malla (decidido con el usuario el 2026-11-03):** David López (jefe de área de
+  Tecnología) gestiona a todo el área **excepto a los desarrolladores y al diseñador**, que gestiona Anderson
+  Zárate (coordinador de desarrollo). Es la única excepción: los demás siguen con su jefe de área. Se resuelve
+  con datos, sin código: `contrato.gestor_asistencia_id` (y `jefe_inmediato_id`) = Anderson. David los sigue
+  viendo en Equipo porque Anderson cuelga de él (árbol, §51); si los incluye en su malla salen "no a cargo".
+  - Local: aplicado (Jean Paul, Juan Sebastián, Manuel, Yhoiner → Anderson; David queda con 7 directos).
+  - Producción: **pendiente**, `Descargas/092_tecnologia_desarrollo_a_cargo_de_anderson.sql` (solo datos,
+    idempotente, busca a Anderson por nombre). Antes de correrla, revisar con el `SELECT` del archivo que los
+    cargos de desarrollador/diseñador solo existan en Tecnología.
+- **Prueba en navegador (2026-11-03):** malla de Tecnología aplicada a David (20 horarios del 3 al 6 de noviembre,
+  8 plantillas creadas); con el molinete activo en local, Johan (turno 13:00-21:30) entró por molinete a la
+  1:07 p. m., Equipo lo muestra "Tarde · 7 min" y su monitor cuenta contra la salida de 9:30 p. m.
