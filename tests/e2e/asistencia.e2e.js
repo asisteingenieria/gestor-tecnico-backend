@@ -31,7 +31,7 @@ async function levantarServidor() {
     BASE = `http://localhost:${PUERTO_PROPIO}`;
     servidor = spawn(process.execPath, ['index.js'], {
         cwd: path.join(__dirname, '..', '..'),
-        env: { ...process.env, PORT: String(PUERTO_PROPIO), ASISLOCK_API_KEY: API_KEY, NODE_ENV: 'development' },
+        env: { ...process.env, PORT: String(PUERTO_PROPIO), ASISLOCK_API_KEY: API_KEY, NODE_ENV: 'development', MOLINETE_SINCRONIZAR: '0' },
         stdio: ['ignore', 'ignore', 'pipe']
     });
     let errores = '';
@@ -237,7 +237,8 @@ async function main() {
     const entrada2 = await http('POST', '/api/asistencia/mi-jornada/entrada', { token: sesiones.e1 });
     check('segunda entrada es idempotente (200)', entrada2.status === 200, entrada2);
     hoy = await http('GET', '/api/asistencia/mi-jornada/hoy', { token: sesiones.e1 });
-    check('minutos_tarde ≈ 55 (60 − 5 de tolerancia)', Math.abs((hoy.body.minutos_tarde ?? -99) - 55) <= 1, hoy.body.minutos_tarde);
+    // Horario sin tolerancia explícita: desde la 086 es 0 (asistencia.md §52).
+    check('minutos_tarde ≈ 60 (sin tolerancia)', Math.abs((hoy.body.minutos_tarde ?? -99) - 60) <= 1, hoy.body.minutos_tarde);
     check('alerta llegada_tarde', (hoy.body.alertas ?? []).includes('llegada_tarde'), hoy.body.alertas);
     check('puede_marcar_salida = true (faltan 5 min)', hoy.body.puede_marcar_salida === true, hoy.body.puede_marcar_salida);
     check('servidor_ahora presente', Boolean(hoy.body.servidor_ahora), hoy.body);

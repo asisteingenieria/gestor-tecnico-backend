@@ -5,7 +5,8 @@ async function notificarDirector(usersCompanyId, evento, datos = {}) {
     try {
         const directorUserId = await equipoRepo.directorUserIdDe(usersCompanyId);
         if (!directorUserId) return;
-        global.sendMessageToUser(directorUserId, 'asistencia:evento', { tipo: evento, usersCompanyId, ...datos });
+        // Fuera del servidor (scripts) no hay Socket.IO: no hay a quién avisar.
+        global.sendMessageToUser?.(directorUserId, 'asistencia:evento', { tipo: evento, usersCompanyId, ...datos });
     } catch (error) {
         console.error('[asistencia] Error notificando al director:', error.message);
     }

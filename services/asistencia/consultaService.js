@@ -10,6 +10,7 @@ const { fechaLaboral } = require('../../utils/fechaBogota');
 const { NoEncontradoError } = require('../../errors/AppError');
 const cierreService = require('./cierreService');
 const asislockVista = require('./asislockVista');
+const molineteVista = require('./molineteVista');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -114,6 +115,7 @@ async function trazabilidad({ usersCompanyId, fecha }) {
         jornada: { ...jornada, ...estado },
         hora_extra: horaExtra,
         asislock: await asislockVista.delDia(usersCompanyId, fecha),
+        molinete: await molineteVista.delDia(usersCompanyId, fecha),
         eventos: eventos.map((e) => ({
             tipo: e.tipo,
             ocurrido_en: e.ocurrido_en.toISOString(),

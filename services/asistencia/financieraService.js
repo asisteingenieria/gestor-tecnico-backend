@@ -46,7 +46,7 @@ async function trazabilidadDe({ empleadoId, fecha }) {
         // Sin jornada ese día: se muestra el empleado y su horario igual.
         if (!(error instanceof NoEncontradoError)) throw error;
     }
-    return { empleado, horario: horario ?? null, ...(trazabilidad ?? { fecha, jornada: null, asislock: null, eventos: [] }) };
+    return { empleado, horario: horario ?? null, ...(trazabilidad ?? { fecha, jornada: null, asislock: null, molinete: null, eventos: [] }) };
 }
 
 // Resumen mensual para financiera (asistencia.md §35): comparativo por campaña de toda la

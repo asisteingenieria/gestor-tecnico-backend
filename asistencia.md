@@ -3094,3 +3094,112 @@ de 10:00 da 9 minutos.
 
 **Commits:** backend `9d2d713` y `470391e`, frontend `2572fba` y `35eae7b`, **desplegados en producción
 el 2026-10-29**. La corrección "Sin horario" va en frontend `f9ae2ec` (§52).
+
+## 54. Sesión 2026-11-03 — Staff por molinete (ZKBioSecurity, migración 091)
+
+**Pedido:** la asistencia de los administrativos y el staff sale del molinete de la sede, no de AsisLock.
+El Gestor se conecta directo a la base del molinete. Al poner la huella, el monitor del empleado debe
+arrancar al instante.
+
+**La fuente** (revisada con el usuario `consulta_biometrico`, solo lectura):
+- ZKBioSecurity sobre **PostgreSQL 9.2.9**, `10.255.255.18:5442`, base `biosecurity-boot`, zona `America/Bogota`.
+- Tabla `acc_transaction`, unas 650 mil filas desde agosto de 2025.
+- `event_no = 0` es un paso válido. El `27` es una huella no registrada, sin persona; el resto son eventos
+  de los equipos.
+- `event_time` está en hora de Bogotá sin zona.
+- El sentido sale de `reader_name`: `…-1-In` es entrada y `…-2-Out` es salida.
+- `unique_key` es único.
+- `create_time`, que tiene índice, es cuándo el servidor del molinete recibió la marcación. Llega unos
+  5-9 s después de la huella, o mucho más tarde si el equipo estuvo desconectado.
+- **La cédula está en `last_name`** (dato del usuario, verificado). El `pin` es un código interno de 2 a 5
+  dígitos.
+- Hay 34 cédulas con más de un `pin`, por reenrolamientos: la identidad se toma por cédula.
+- Cruce contra RRHH (activos en 30 días): STAFF 57/60, ADMINISTRATIVO 27/29 y TECNOLOGIA 12/14.
+- `dept_name` trae el área del molinete.
+
+**Reglas acordadas con el usuario:**
+- Marcan por molinete las áreas **STAFF, ADMINISTRATIVO y TECNOLOGIA** del molinete. Es el parámetro
+  `molinete_departamentos`. Los agentes siguen con AsisLock: sus marcaciones del molinete no se leen.
+- **Primera marcación del día, por cualquier lector = entrada.** Se compara con la hora de entrada del
+  horario para la llegada tarde, sin tolerancia (§52).
+- **Las marcaciones intermedias son cruces y NO cuentan como tiempo no laborado.** Se guardan y se cuentan
+  (`cruces_intermedios`), pero no generan eventos de jornada.
+- **Salida en vivo:** un paso por un lector de salida desde la ventana de salida del horario, es decir, la
+  hora de salida menos `minutos_habilitar_salida`.
+- **Si no pasa por esa ventana** (salió antes, entró detrás de otra persona o no tiene horario), el cierre
+  del día pone la salida en su **última marcación del molinete**, con origen `molinete` y sin la alerta
+  `sin_marcar_salida`. Si salió temprano, queda como salida anticipada.
+- Después de la salida se ignora, salvo en la franja de una hora extra aprobada, igual que con AsisLock: un
+  paso la abre (`inicio_extra`) y la siguiente salida la cierra (`fin_extra`).
+- **Sin horario no hay llegada tarde ni salida en vivo.** Al 2026-11-03, ninguno de los 68 del staff que
+  marcaron tenía horario en la BD local. Sus jefes tienen que asignárselos en Gestión de horarios.
+
+**Tiempo real:** no se le puede pedir al molinete que avise. La base es de un tercero, el usuario es de solo
+consulta y no se le pueden poner triggers ni `LISTEN/NOTIFY`. El backend la **lee cada 2 s**
+(`molinete_intervalo_seg`; el primer valor fue 5 y el usuario lo bajó el mismo día):
+- toma lo registrado desde la última marcación copiada (`create_time`), con 120 s de solape
+  (`molinete_solape_seg`);
+- las repetidas se descartan por `unique_key`;
+- cada marcación nueva entra a la jornada en su propia transacción y llama a `notificarCambioJornada`.
+
+Medido en local con lectura cada 5 s: de **8 a 9 s** de la huella al Gestor. Unos 5 s son del propio
+molinete (`create_time − event_time`) y no se pueden recortar desde el Gestor; el resto es la espera a la
+siguiente lectura. La primera vez arranca en el inicio del día de hoy: no importa el histórico.
+
+**Trigger con `LISTEN/NOTIFY`, descartado por ahora.** Un trigger `AFTER INSERT` en `acc_transaction` con
+`pg_notify`, creado por un administrador del molinete, quitaría solo la espera a la lectura (unos 2,5 s en
+promedio). A cambio, toca la base del fabricante: una actualización de ZKBio puede borrarlo y, si la función
+falla, falla la inserción de la marcación. Se prefirió bajar el intervalo a 2 s. Si se retoma, el lado del
+Gestor es una conexión `pg` fija con `LISTEN` que llama a `sincronizar()`, con la lectura periódica como
+respaldo.
+
+**Código** (cuatro capas):
+- `config/molinete.js`: pool `pg` de solo lectura, apagado si falta `MOLINETE_PG_HOST`; las fechas se piden
+  como texto.
+- `repositories/asistencia/molineteOrigenRepository.js`: el único SQL contra Postgres.
+- `repositories/asistencia/molineteMarcacionRepository.js`: la copia en MySQL.
+- `domain/asistencia/molinete.js`: `decidirMarcacion`, `salidaDeCierre` y `resumenDelDia`.
+- `services/asistencia/molineteService.js`: `sincronizar`, `iniciar` (setTimeout encadenado; se espacia
+  hasta 60 s si la base del molinete se cae) y `verificar`.
+- `services/asistencia/molineteVista.js`: el bloque `molinete` de las trazabilidades del empleado, del jefe
+  y de financiera.
+- `cierreService`: la salida en la última marcación.
+- `utils/fechaBogota`: `textoBogotaAInstante` e `instanteATextoBogota`.
+- `index.js` arranca la lectura al levantar el servidor. `MOLINETE_SINCRONIZAR=0` la apaga en un proceso; la
+  e2e lo hace.
+- `scripts/sincronizarMolinete.js` hace una pasada a mano; `npm run verificar-molinete` prueba la conexión.
+- Frontend: `MarcacionesMolinete.jsx` en `TrazabilidadView` (pasos, lector y cruces) y el origen "Molinete".
+
+**Migración 091** (`091_molinete_asistencia.sql`), idempotente:
+- `jornada_evento.origen` + `'molinete'`;
+- la tabla `molinete_marcacion`;
+- los parámetros `molinete_departamentos`, `molinete_intervalo_seg` y `molinete_solape_seg`.
+
+**Verificación (local, contra el molinete real):**
+- `npm test`: 290/290, 12 nuevas en `tests/asistencia/molinete.test.js`.
+- `npm run test:e2e`: 133/133. Se corrigió el check viejo de `minutos_tarde ≈ 55`, que desde la 086 es 60.
+- Primera pasada: 385 marcaciones del día, con 68 entradas, 308 cruces y 9 rechazadas por
+  `empleado_no_encontrado` (3 cédulas sin ficha). La segunda pasada no duplicó nada.
+- Con el backend arriba, las marcaciones nuevas entraron solas a los 8-9 s.
+
+**Para producción:**
+1. **Red:** `10.255.255.18` es una IP privada. Probar desde srv845606 con `nc -zv 10.255.255.18 5442`. Si no
+   llega, hay que darle al servidor un camino a esa red (VPN o túnel) o correr la lectura en un equipo de la
+   oficina. No abrir ese Postgres 9.2 a internet: no tiene parches de seguridad desde 2017.
+2. Variables en el `.env`: `MOLINETE_PG_HOST`, `MOLINETE_PG_PORT=5442`, `MOLINETE_PG_DATABASE=biosecurity-boot`,
+   `MOLINETE_PG_USER` y `MOLINETE_PG_PASSWORD`. La clave quedó en el chat del 2026-11-03: cambiarla cuando
+   funcione y limitar el usuario a la IP del Gestor.
+3. La 091 antes del backend (copia en `Descargas\091_molinete_asistencia.sql`), luego `npm install`
+   (dependencia nueva `pg`), `pm2 restart` y `npm run verificar-molinete`. Frontend: pull y build.
+   Salvaguardas de la revisión:
+   - sin `MOLINETE_PG_HOST`, `index.js` ni siquiera carga el servicio del molinete, así que un pull sin
+     `npm install` no tumba el backend;
+   - si el código llega antes que la 091, `molineteMarcacionRepository.findDelDia` responde vacío ante
+     `ER_NO_SUCH_TABLE`, y la trazabilidad y el cierre siguen funcionando.
+
+   **Limitación conocida:** la primera salida por un lector `-Out` dentro de la ventana (10 min antes de la
+   hora de salida) cierra la jornada. Si alguien sale un momento a las 16:52 con turno hasta las 17:00 y
+   vuelve, queda con salida 16:52 y la vuelta se ignora.
+4. Que los jefes del staff les asignen horario.
+5. Con `pm2` en modo cluster la lectura correría una vez por proceso. No duplica nada, gracias a la llave
+   única, pero hace el trabajo de más.
