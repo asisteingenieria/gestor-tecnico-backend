@@ -158,6 +158,7 @@ const userCompanyController = {
             }
 
             const empleado = await UserCompany.create(data);
+            global.emitirEmpleadosCambio?.();
             res.status(201).json({ success: true, message: 'Empleado creado exitosamente', empleado });
         } catch (error) {
             console.error('Error al crear empleado:', error);
@@ -190,6 +191,7 @@ const userCompanyController = {
             if (!actualizado) {
                 return res.status(404).json({ success: false, message: 'No se pudo actualizar el empleado' });
             }
+            global.emitirEmpleadosCambio?.();
             res.json({ success: true, message: 'Empleado actualizado exitosamente' });
         } catch (error) {
             console.error('Error al actualizar empleado:', error);
@@ -221,6 +223,7 @@ const userCompanyController = {
             archivosNovedades.forEach(borrarArchivoSoporte);
             archivosTraspasos.forEach(soportesTraspaso.borrar);
             archivosDocumentos.forEach(documentosEmpleado.borrar);
+            global.emitirEmpleadosCambio?.();
             res.json({ success: true, message: 'Empleado eliminado exitosamente. Los activos asignados quedaron sin empleado.' });
         } catch (error) {
             console.error('Error al eliminar empleado:', error);
@@ -257,6 +260,7 @@ const userCompanyController = {
                 return res.status(400).json({ success: false, message: ARCHIVO_SIN_EMPLEADOS });
             }
             const reporte = await importEmpleadosService.confirmar(filas);
+            global.emitirEmpleadosCambio?.();
             res.json({ success: true, message: 'Importación completada', errores_parseo, ...reporte });
         } catch (error) {
             if (error.codigo === 'NO_COINCIDE_CATALOGO') {
@@ -816,6 +820,7 @@ const userCompanyController = {
                 return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
             }
             await Retiro.registrar(id, req.body);
+            global.emitirEmpleadosCambio?.();
             res.status(201).json({ success: true, message: 'Retiro registrado exitosamente' });
         } catch (error) {
             console.error('Error al registrar retiro:', error);
@@ -837,6 +842,7 @@ const userCompanyController = {
                 return res.status(400).json({ success: false, message: 'La fecha de retiro y el tipo de retiro son obligatorios' });
             }
             await Retiro.actualizar(id, req.body);
+            global.emitirEmpleadosCambio?.();
             res.json({ success: true, message: 'Retiro actualizado exitosamente' });
         } catch (error) {
             console.error('Error al actualizar retiro:', error);
@@ -854,6 +860,7 @@ const userCompanyController = {
         try {
             const { id } = req.params;
             await Retiro.reactivar(id);
+            global.emitirEmpleadosCambio?.();
             res.json({ success: true, message: 'Empleado reactivado exitosamente' });
         } catch (error) {
             console.error('Error al reactivar empleado:', error);

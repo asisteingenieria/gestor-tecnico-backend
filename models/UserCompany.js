@@ -17,6 +17,7 @@ const SELECT_EMPLEADO = `
         (SELECT COUNT(*) FROM empleado_documento ed WHERE ed.users_company_id = uc.id) AS documentos_cargados,
         c.idcontrato,
         c.fecha_ingreso,
+        r.fecha_retiro,
         cam.nombre  AS campania_nombre,
         car.nombre  AS cargo_nombre,
         ar.nombre   AS area_nombre,
@@ -41,6 +42,7 @@ const SELECT_EMPLEADO = `
     LEFT JOIN estado_contrato esc ON c.estado_contrato_idestado_contrato = esc.idestado_contrato
     LEFT JOIN historial_salarial hs ON hs.contrato_idcontrato = c.idcontrato AND hs.fecha_vigencia_fin IS NULL
     LEFT JOIN users_company  ana ON c.analista_encargado_id = ana.id
+    LEFT JOIN retiro          r   ON r.contrato_idcontrato = c.idcontrato
 `;
 
 // Mapea las claves del payload de seguridad social a su tipo en BD
