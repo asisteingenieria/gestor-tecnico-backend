@@ -678,7 +678,9 @@ class UserCompany {
             ORDER BY cam.nombre
         `);
         const [areas] = await db.query('SELECT idarea AS id, nombre FROM area ORDER BY nombre');
-        const [centrosCosto] = await db.query('SELECT idcentro_costo AS id, codigo, nombre FROM centro_costo ORDER BY codigo');
+        // Todos, con `vigente`: los formularios solo ofrecen los 19 oficiales de Financiera (migración
+        // 093), pero un contrato que aún tenga uno viejo lo sigue mostrando en su ficha y al editarlo.
+        const [centrosCosto] = await db.query('SELECT idcentro_costo AS id, codigo, nombre, vigente FROM centro_costo ORDER BY nombre');
         const [cargos] = await db.query('SELECT idcargo AS id, nombre FROM cargo ORDER BY nombre');
         const [tiposContrato] = await db.query('SELECT idtipo_contrato AS id, nombre FROM tipo_contrato ORDER BY idtipo_contrato');
         const [modalidades] = await db.query('SELECT idmodalidad AS id, nombre FROM modalidad ORDER BY idmodalidad');

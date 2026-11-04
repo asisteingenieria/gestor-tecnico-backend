@@ -69,6 +69,15 @@ const CATALOGOS_HOMOLOGABLES = {
     area: 'Área', modalidad: 'Modalidad', estado_civil: 'Estado civil', tipo_cuenta: 'Tipo de cuenta',
     grupo_sanguineo: 'Grupo sanguíneo (Rh)'
 };
+// Centros de costo viejos → oficial de Financiera desde octubre de 2026 (los mismos alias que aplica la
+// migración 093 a los contratos activos). Un Excel con el nombre viejo queda en el oficial.
+const ALIAS_CENTRO_COSTO = [
+    ['ADMINISTRATIVO CB', 'ADMINISTRATIVO'], ['DIRECCION ADMINISTRATIVA', 'ADMINISTRATIVO'],
+    ['DIRECCION TI', 'ADMINISTRATIVO'], ['DIRECCION FINANCIERA', 'ADMINISTRATIVO'],
+    ['DIRECCION JURIDICA', 'ADMINISTRATIVO'], ['DIRECCION COMERCIAL', 'ADMINISTRATIVO'],
+    ['WORKFORCE', 'ADMINISTRATIVO'], ['WHATSAPP PYMES', 'CBAP WHATSAPP'],
+    ['TIENDA', 'CBAH TIENDA'], ['MOVIL DIGITALIZACION', 'CBAM DIGITACION']
+];
 // Id de marcador de un valor que no coincide, en la vista previa: evita que la fila salga además con
 // "falta el cargo" cuando lo que pasa es que el cargo no coincide.
 const MARCADOR_NO_COINCIDE = -1;
@@ -262,9 +271,18 @@ async function crearResolver({ dryRun }) {
             nombre, 'campaña', 'campania'
         ),
 
+        // Solo los centros vigentes de Financiera (migración 093). Los nombres viejos de los que se
+        // unieron a uno oficial se toman como ese; los demás no vigentes (BEEMO, EUAP...) no coinciden.
         centroCosto: (nombre, codigo) => buscarOCrear(
             'centro_costo',
-            () => db.query('SELECT idcentro_costo AS id, nombre FROM centro_costo').then(([r]) => mapaDesdeFilas(r)),
+            () => db.query('SELECT idcentro_costo AS id, nombre FROM centro_costo WHERE vigente = 1').then(([r]) => {
+                const mapa = mapaDesdeFilas(r);
+                for (const [viejo, nuevo] of ALIAS_CENTRO_COSTO) {
+                    const id = mapa.get(normalizar(nuevo));
+                    if (id && !mapa.has(normalizar(viejo))) mapa.set(normalizar(viejo), id);
+                }
+                return mapa;
+            }),
             async (valor) => {
                 const [r] = await db.query('INSERT INTO centro_costo (codigo, nombre) VALUES (?, ?)', [codigo || valor, valor]);
                 return r.insertId;
