@@ -84,8 +84,15 @@ cuenta por cédula.
 **`financiera` es la administradora de los módulos de RRHH y asistencia.** Cuando el usuario dice
 "el admin" o "admin o financiera" en esos módulos se refiere a `financiera`, no al `admin` del
 sistema, que administra los otros módulos. Por eso solo `financiera` recibe los avisos en vivo de
-todos los empleados (`asistencia.md` §43). Los middlewares `isFinanciera`/`isRecursosHumanos`
-todavía dejan pasar al `admin`; quitarlo está pendiente de decisión.
+todos los empleados (`asistencia.md` §43). Los middlewares globales `isFinanciera`/`isRecursosHumanos`
+(`middleware/auth.js`) todavía dejan pasar al `admin` en otros módulos (asistencia, reportes), y eso
+sigue pendiente de decisión. **En la ficha de empleados (`routes/usersCompany.js`) ya NO:** el `admin`
+tiene SOLO LECTURA (ve la lista, la ficha completa y los documentos —ver y descargar—, no crea, edita,
+elimina, importa, retira ni traspasa, y no entra a novedades/traspasos/vacaciones). La escritura y esos
+submódulos usan el middleware local `verificarGestionRRHH` (solo `recursosHumanos`/`financiera`); la
+lectura de la ficha usa `verificarRecursosHumanos` (incluye admin). En el frontend, el admin (Hanny Admin,
+`hannycita10`) entra por la opción de menú "Empleados RRHH" (`/empleados-consulta`, `<AgentManagement soloLectura />`);
+`claude/modulo recursoshumanos.md` §47.
 
 **Para asistencia no se crean roles:** quién gestiona un equipo sale de `contrato.jefe_area_id`
 (middleware `canDirigirEquipo`, §23; desde §51 horas extra y cambios de turno los solicita quien gestiona

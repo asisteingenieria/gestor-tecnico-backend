@@ -2595,3 +2595,34 @@ Desde octubre, Financiera administra la lista: crear o cambiar un centro se vali
 - **Códigos pendientes de Financiera:** CBAH VENTA CRUZADA y CBAM DIGITACION siguen con código `PENDIENTE`.
   ADMINISTRATIVO conserva el 2411287 de ADMINISTRATIVO CB.
 - **Producción: aplicada el 2026-11-04** en el orden 093 → 093b → backend y frontend (merge a main, `pm2 restart`, `npm run build`). Falta revisar las cédulas que la verificación de la 093b reporte como no encontradas.
+
+## 47. Sesión 2026-11-04 — El admin ve la ficha de empleados en SOLO LECTURA
+
+Hanny Admin (`users.username = hannycita10`, rol `admin`) necesitaba ver el módulo de empleados
+sin poder modificarlo. Antes el admin ni siquiera tenía la opción en el menú, pero en el backend
+sí pasaba por **todos** los endpoints de empleados, incluidos los de escritura (CLAUDE.md "Roles"
+decía que quitarle al admin la escritura en RRHH estaba pendiente de decisión). Aquí se decide:
+**en la ficha de empleados el admin es solo lectura.**
+
+- **Backend (`routes/usersCompany.js`):** middleware local nuevo `verificarGestionRRHH`
+  (`recursosHumanos`, `financiera` — SIN admin) en toda la escritura (crear, editar, eliminar,
+  import Excel, retiro, assign/unassign de activos, subir/eliminar documentos) y en los submódulos
+  completos de novedades, traspasos y vacaciones (lectura incluida: el admin no los ve). La lectura
+  de la ficha sigue con `verificarRecursosHumanos` (incluye admin): `GET /`, `GET /catalogos`,
+  `GET /:id`, `/:id/activos`, `/:id/retiro`, `GET /:id/documentos` y `GET /:id/documentos/:tipo/archivo`
+  (descarga). No es solo un ocultar en el frontend: el admin que llame a un endpoint de escritura
+  recibe 403.
+- **Frontend:** `AgentManagement`, `EmpleadoDrawer` y `DocumentosEmpleado` reciben una prop
+  `soloLectura`. En ese modo: no salen los botones Nuevo empleado, Cargar Excel, editar, eliminar,
+  Traspasar, Retiro ni Editar; los documentos quedan solo con "Ver" (ver/descargar), sin
+  subir/reemplazar/eliminar; el drawer solo muestra las pestañas Información, Activos y Documentos
+  (Novedades e Historial quedan fuera, acordes al 403 del backend). La opción de menú "Empleados RRHH"
+  (`/empleados-consulta`, en `Layout.jsx`, solo rol admin) abre `<AgentManagement soloLectura />` bajo
+  `AdminRoute`.
+- **Alcance elegido por el usuario:** solo empleados + documentos (no novedades/traspasos/vacaciones),
+  y bloqueo real en el backend (afecta al rol admin en general en la ficha de empleados; `financiera` y
+  `recursosHumanos` siguen igual). Los middlewares globales `isFinanciera`/`isRecursosHumanos` de
+  `middleware/auth.js` NO se tocaron: el admin sigue entrando en otros módulos (asistencia, reportes).
+- 292 tests OK, `vite build` OK. **Pendiente en producción:** desplegar backend y frontend (no hay
+  migración). Sin desplegar el backend, el frontend ocultaría los botones pero el admin seguiría
+  pudiendo escribir por API.
