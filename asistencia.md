@@ -3302,7 +3302,7 @@ asigna el horario a cada persona de su equipo directo. No hay migración: el hor
   - Ejemplo con 2 agentes de T&T de Kevin: `Descargas/Malla_Operacion_ejemplo_TyT.xlsx`. Da 54 horarios y crea
     5 plantillas. Los 42 días de trabajo quedan enlazados y los 12 descansos incluyen 2 días de INC escritos en
     Entrada. Se probó y se limpió.
-- **Despliegue:** solo código, backend y frontend juntos. No hay migración.
+- **Despliegue:** solo código, backend y frontend juntos. No hay migración. **Desplegado en producción el 2026-11-03** (backend `2377d7b`, frontend `9756a7a`).
 - **Tecnología, quién sube la malla (decidido con el usuario el 2026-11-03):** David López (jefe de área de
   Tecnología) gestiona a todo el área **excepto a los desarrolladores y al diseñador**, que gestiona Anderson
   Zárate (coordinador de desarrollo). Es la única excepción: los demás siguen con su jefe de área. Se resuelve

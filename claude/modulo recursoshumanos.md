@@ -2564,3 +2564,34 @@ Salario sugerido por cliente + cargo:
 - Pruebas en `tests/homologacionCatalogos.test.js`.
 
 **Hoja que se lee:** el cargue toma "TOTAL PERSONAL" (Excel viejo); si no está, la hoja "Empleados" de la plantilla, esté donde esté; si tampoco, la primera. El archivo se puede subir tal cual, con su hoja "Instrucciones", en cualquier orden.
+
+## 46. Sesión 2026-11-03 — Centros de costo de Financiera desde octubre (migración 093)
+
+Financiera definió 19 centros de costo oficiales y mandó la homologación por empleado
+(`Descargas/Centros de costo octubre.xlsx`: 431 empleados, columnas Nombres, Identificacion, Centro de Costos).
+Desde octubre, Financiera administra la lista: crear o cambiar un centro se valida con ella.
+
+- **Migración `093_centros_costo_octubre.sql`** (idempotente, por nombre y nunca por id, va ANTES del código):
+  - agrega `centro_costo.vigente`;
+  - renombra TIENDA → CBAH TIENDA, MOVIL DIGITALIZACION → CBAM DIGITACION y ADMINISTRATIVO CB → ADMINISTRATIVO;
+  - deja vigentes solo los 19 oficiales;
+  - pasa los contratos activos y las plantillas de horario de los centros unidos a su centro oficial (destino
+    por defecto): direcciones administrativa, TI, financiera, jurídica y comercial y Workforce → ADMINISTRATIVO;
+    WHATSAPP PYMES → CBAP WHATSAPP.
+- **`Descargas/093b_centros_costo_octubre_empleados.sql`** (con cédulas, **no se versiona**; se genera desde el
+  Excel): asigna a cada empleado el centro de Financiera. Va DESPUÉS de la 093 y manda sobre el destino por
+  defecto. No crea traspasos. Trae verificaciones: centros sin match (debe salir vacío), cédulas que no están en la
+  base y activos que quedaron en un centro no vigente.
+- **Código:**
+  - `getCatalogos()` devuelve `vigente`;
+  - AgentForm, Contratación Hydra y el centro nuevo de un traspaso ofrecen solo los vigentes, más el ya elegido
+    (`entidadesVigentes`);
+  - el cargue masivo en Excel homologa solo contra los vigentes; los nombres viejos de los centros unidos se toman
+    como su oficial (`ALIAS_CENTRO_COSTO`); BEEMO, EUAP CUSTOMER SERVICE, PYMES HUNTER y Operación Claro no
+    coinciden y la fila se rechaza.
+- **Local (2026-11-03):** 19 vigentes y 15 no vigentes; los 422 empleados del Excel que existen en la base quedaron
+  con el centro de Financiera. Las 9 cédulas restantes no están en la base local, hay que revisarlas en producción.
+  Solo los 7 empleados de prueba del seed siguen en Operación Claro. Repetir la 093 no cambia nada.
+- **Códigos pendientes de Financiera:** CBAH VENTA CRUZADA y CBAM DIGITACION siguen con código `PENDIENTE`.
+  ADMINISTRATIVO conserva el 2411287 de ADMINISTRATIVO CB.
+- **Producción: pendiente.** El orden es 093 → 093b → backend y frontend.
