@@ -121,6 +121,14 @@ global.emitirMonitoresAsistencia = (event, data) => {
     io.to('asistencia:monitores').emit(event, data);
 };
 
+// Aviso de que la lista de empleados cambió (alta, edición, retiro, eliminación o cargue en
+// Excel). Se emite a todos los clientes conectados: la vista de empleados del admin (solo
+// lectura) y la de RRHH lo escuchan y recargan la lista. No lleva datos: cada pantalla vuelve
+// a pedir la lista a la API.
+global.emitirEmpleadosCambio = () => {
+    io.emit('empleados:actualizados');
+};
+
 // Función helper para enviar mensajes a un usuario específico
 global.sendMessageToUser = (userId, event, data) => {
     const socketId = authenticatedUsers.get(userId.toString());
