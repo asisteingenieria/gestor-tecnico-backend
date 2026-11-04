@@ -6,13 +6,29 @@ const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
 const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 
-// Gestión completa del módulo de empleados: exclusiva de Recursos Humanos (y admin).
+// Lectura de la ficha de empleados: RRHH, financiera y admin.
+// El admin la usa en SOLO LECTURA (Hanny Admin): ve la lista, la ficha completa y los
+// documentos, pero NO crea, edita, elimina ni importa (eso lo bloquea verificarGestionRRHH).
 const verificarRecursosHumanos = (req, res, next) => {
     // financiera administra RRHH igual que recursosHumanos (asistencia.md §32).
     if (!['recursosHumanos', 'financiera', 'admin'].includes(req.user.role)) {
         return res.status(403).json({
             success: false,
             message: 'Acceso denegado. Solo Recursos Humanos puede acceder a esta funcionalidad.'
+        });
+    }
+    next();
+};
+
+// Gestión (escritura) del módulo de empleados y de sus submódulos (novedades, traspasos,
+// vacaciones): solo recursosHumanos y financiera. El admin NO entra aquí: su acceso al módulo
+// es de solo lectura sobre empleados y documentos. (Quitarle al admin la escritura en RRHH era
+// la decisión pendiente de CLAUDE.md "Roles"; se toma aquí: en RRHH el admin es solo lectura.)
+const verificarGestionRRHH = (req, res, next) => {
+    if (!['recursosHumanos', 'financiera'].includes(req.user.role)) {
+        return res.status(403).json({
+            success: false,
+            message: 'Acceso denegado. Esta acción es solo para Recursos Humanos.'
         });
     }
     next();
@@ -47,59 +63,64 @@ router.get('/',                          verificarLecturaEmpleados, userCompanyC
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
 router.get('/gasto-total',               verificarFinanciera, userCompanyController.getGastoTotal);
 
-// Import masivo de empleados desde Excel
-router.post('/import-excel/preview',     verificarRecursosHumanos, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.previewImportExcel));
-router.post('/import-excel/commit',      verificarRecursosHumanos, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.commitImportExcel));
+// Import masivo de empleados desde Excel (escritura: no admin)
+router.post('/import-excel/preview',     verificarGestionRRHH, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.previewImportExcel));
+router.post('/import-excel/commit',      verificarGestionRRHH, uploadEmpleados.single('archivo'), asyncHandler(userCompanyController.commitImportExcel));
 
-// Novedades RRHH (deben ir antes de '/:id' para no colisionar con ella)
-router.get('/novedades',                 verificarRecursosHumanos, userCompanyController.getNovedades);
-router.post('/novedades',                verificarRecursosHumanos, userCompanyController.createNovedad);
-router.get('/novedades/:novedadId',      verificarRecursosHumanos, userCompanyController.getNovedadById);
-router.put('/novedades/:novedadId',      verificarRecursosHumanos, userCompanyController.updateNovedad);
-router.delete('/novedades/:novedadId',   verificarRecursosHumanos, userCompanyController.deleteNovedad);
+// Novedades RRHH (deben ir antes de '/:id' para no colisionar con ella). Submódulo cerrado al
+// admin: su solo lectura es sobre empleados y documentos, no sobre novedades.
+router.get('/novedades',                 verificarGestionRRHH, userCompanyController.getNovedades);
+router.post('/novedades',                verificarGestionRRHH, userCompanyController.createNovedad);
+router.get('/novedades/:novedadId',      verificarGestionRRHH, userCompanyController.getNovedadById);
+router.put('/novedades/:novedadId',      verificarGestionRRHH, userCompanyController.updateNovedad);
+router.delete('/novedades/:novedadId',   verificarGestionRRHH, userCompanyController.deleteNovedad);
 // Soportes documentales (PDF o imagen) de una novedad, uno por tipo de soporte (migración 069)
-router.get('/novedades/:novedadId/soportes',                               verificarRecursosHumanos, userCompanyController.getSoportesNovedad);
-router.post('/novedades/:novedadId/soportes/:tipoSoporteId',               verificarRecursosHumanos, soportesNovedad.middleware, userCompanyController.subirSoporteNovedad);
-router.get('/novedades/:novedadId/soportes/:tipoSoporteId/archivo',        verificarRecursosHumanos, userCompanyController.descargarSoporteNovedad);
-router.delete('/novedades/:novedadId/soportes/:tipoSoporteId',             verificarRecursosHumanos, userCompanyController.eliminarSoporteNovedad);
+router.get('/novedades/:novedadId/soportes',                               verificarGestionRRHH, userCompanyController.getSoportesNovedad);
+router.post('/novedades/:novedadId/soportes/:tipoSoporteId',               verificarGestionRRHH, soportesNovedad.middleware, userCompanyController.subirSoporteNovedad);
+router.get('/novedades/:novedadId/soportes/:tipoSoporteId/archivo',        verificarGestionRRHH, userCompanyController.descargarSoporteNovedad);
+router.delete('/novedades/:novedadId/soportes/:tipoSoporteId',             verificarGestionRRHH, userCompanyController.eliminarSoporteNovedad);
 
-// Traspasos
-router.get('/traspasos',                 verificarRecursosHumanos, userCompanyController.getTraspasos);
+// Traspasos (submódulo cerrado al admin)
+router.get('/traspasos',                 verificarGestionRRHH, userCompanyController.getTraspasos);
 // Alertas de traspasos (evaluación del encargo, retorno del trabajo en casa — migración 070)
-router.get('/traspasos/alertas',         verificarRecursosHumanos, userCompanyController.getAlertasTraspasos);
-router.post('/traspasos',                verificarRecursosHumanos, userCompanyController.createTraspaso);
-router.get('/traspasos/:traspasoId',     verificarRecursosHumanos, userCompanyController.getTraspasoById);
-router.put('/traspasos/:traspasoId',     verificarRecursosHumanos, userCompanyController.updateTraspaso);
-router.delete('/traspasos/:traspasoId',  verificarRecursosHumanos, userCompanyController.deleteTraspaso);
-router.post('/traspasos/:traspasoId/alertas/evaluacion',                   verificarRecursosHumanos, userCompanyController.reenviarAlertaEvaluacion);
+router.get('/traspasos/alertas',         verificarGestionRRHH, userCompanyController.getAlertasTraspasos);
+router.post('/traspasos',                verificarGestionRRHH, userCompanyController.createTraspaso);
+router.get('/traspasos/:traspasoId',     verificarGestionRRHH, userCompanyController.getTraspasoById);
+router.put('/traspasos/:traspasoId',     verificarGestionRRHH, userCompanyController.updateTraspaso);
+router.delete('/traspasos/:traspasoId',  verificarGestionRRHH, userCompanyController.deleteTraspaso);
+router.post('/traspasos/:traspasoId/alertas/evaluacion',                   verificarGestionRRHH, userCompanyController.reenviarAlertaEvaluacion);
 // Documentos (PDF o imagen) de un traspaso, uno por tipo de documento (migración 070)
-router.get('/traspasos/:traspasoId/soportes',                              verificarRecursosHumanos, userCompanyController.getSoportesTraspaso);
-router.post('/traspasos/:traspasoId/soportes/:tipoSoporteId',              verificarRecursosHumanos, soportesTraspaso.middleware, userCompanyController.subirSoporteTraspaso);
-router.get('/traspasos/:traspasoId/soportes/:tipoSoporteId/archivo',       verificarRecursosHumanos, userCompanyController.descargarSoporteTraspaso);
-router.delete('/traspasos/:traspasoId/soportes/:tipoSoporteId',            verificarRecursosHumanos, userCompanyController.eliminarSoporteTraspaso);
+router.get('/traspasos/:traspasoId/soportes',                              verificarGestionRRHH, userCompanyController.getSoportesTraspaso);
+router.post('/traspasos/:traspasoId/soportes/:tipoSoporteId',              verificarGestionRRHH, soportesTraspaso.middleware, userCompanyController.subirSoporteTraspaso);
+router.get('/traspasos/:traspasoId/soportes/:tipoSoporteId/archivo',       verificarGestionRRHH, userCompanyController.descargarSoporteTraspaso);
+router.delete('/traspasos/:traspasoId/soportes/:tipoSoporteId',            verificarGestionRRHH, userCompanyController.eliminarSoporteTraspaso);
 
-// Pasivo vacacional
-router.get('/vacaciones',                verificarRecursosHumanos, userCompanyController.getVacaciones);
-router.post('/vacaciones',               verificarRecursosHumanos, userCompanyController.createVacaciones);
-router.get('/vacaciones/:vacacionesId',  verificarRecursosHumanos, userCompanyController.getVacacionesById);
-router.put('/vacaciones/:vacacionesId',  verificarRecursosHumanos, userCompanyController.updateVacaciones);
-router.delete('/vacaciones/:vacacionesId', verificarRecursosHumanos, userCompanyController.deleteVacaciones);
+// Pasivo vacacional (submódulo cerrado al admin)
+router.get('/vacaciones',                verificarGestionRRHH, userCompanyController.getVacaciones);
+router.post('/vacaciones',               verificarGestionRRHH, userCompanyController.createVacaciones);
+router.get('/vacaciones/:vacacionesId',  verificarGestionRRHH, userCompanyController.getVacacionesById);
+router.put('/vacaciones/:vacacionesId',  verificarGestionRRHH, userCompanyController.updateVacaciones);
+router.delete('/vacaciones/:vacacionesId', verificarGestionRRHH, userCompanyController.deleteVacaciones);
 
+// --- Lectura de la ficha del empleado (admin incluido) ---
 router.get('/:id',                       verificarRecursosHumanos, userCompanyController.getById);
 router.get('/:id/activos',               verificarRecursosHumanos, userCompanyController.getActivos);
 router.get('/:id/retiro',                verificarRecursosHumanos, userCompanyController.getRetiro);
 // Documentación del empleado y contrato y anexos (migración 088): PDF de hasta 50 MB.
+// Listar y descargar: lectura (admin incluido). Subir y eliminar: solo gestión (no admin).
 router.get('/:id/documentos',                    verificarRecursosHumanos, userCompanyController.getDocumentosEmpleado);
-router.put('/:id/documentos/:tipo',              verificarRecursosHumanos, documentosEmpleado.middleware, userCompanyController.subirDocumentoEmpleado);
 router.get('/:id/documentos/:tipo/archivo',      verificarRecursosHumanos, userCompanyController.descargarDocumentoEmpleado);
-router.delete('/:id/documentos/:tipo',           verificarRecursosHumanos, userCompanyController.eliminarDocumentoEmpleado);
-router.post('/',                         verificarRecursosHumanos, userCompanyController.create);
-router.post('/:id/retiro',               verificarRecursosHumanos, userCompanyController.registrarRetiro);
-router.put('/:id',                       verificarRecursosHumanos, userCompanyController.update);
-router.put('/:id/activos/:activoId',     verificarRecursosHumanos, userCompanyController.assignActivo);
-router.put('/:id/retiro',                verificarRecursosHumanos, userCompanyController.actualizarRetiro);
-router.delete('/:id',                    verificarRecursosHumanos, userCompanyController.delete);
-router.delete('/:id/activos/:activoId',  verificarRecursosHumanos, userCompanyController.unassignActivo);
-router.delete('/:id/retiro',             verificarRecursosHumanos, userCompanyController.reactivarEmpleado);
+router.put('/:id/documentos/:tipo',              verificarGestionRRHH, documentosEmpleado.middleware, userCompanyController.subirDocumentoEmpleado);
+router.delete('/:id/documentos/:tipo',           verificarGestionRRHH, userCompanyController.eliminarDocumentoEmpleado);
+
+// --- Escritura de la ficha del empleado (no admin) ---
+router.post('/',                         verificarGestionRRHH, userCompanyController.create);
+router.post('/:id/retiro',               verificarGestionRRHH, userCompanyController.registrarRetiro);
+router.put('/:id',                       verificarGestionRRHH, userCompanyController.update);
+router.put('/:id/activos/:activoId',     verificarGestionRRHH, userCompanyController.assignActivo);
+router.put('/:id/retiro',                verificarGestionRRHH, userCompanyController.actualizarRetiro);
+router.delete('/:id',                    verificarGestionRRHH, userCompanyController.delete);
+router.delete('/:id/activos/:activoId',  verificarGestionRRHH, userCompanyController.unassignActivo);
+router.delete('/:id/retiro',             verificarGestionRRHH, userCompanyController.reactivarEmpleado);
 
 module.exports = router;
