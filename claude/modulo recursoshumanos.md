@@ -2616,7 +2616,7 @@ decía que quitarle al admin la escritura en RRHH estaba pendiente de decisión)
   `soloLectura`. En ese modo: no salen los botones Nuevo empleado, Cargar Excel, editar, eliminar,
   Traspasar, Retiro ni Editar; los documentos quedan solo con "Ver" (ver/descargar), sin
   subir/reemplazar/eliminar; el drawer solo muestra las pestañas Información, Activos y Documentos
-  (Novedades e Historial quedan fuera, acordes al 403 del backend). La tabla de esta vista (ajustes 2026-11-04) muestra la fecha de registro (users_company.created_at) antes del nombre y la fecha de ingreso en vez del telefono, se ordena por fecha de registro descendente, tiene filtros de rango de fecha de ingreso y de registro (desde/hasta) y oculta la ficha placeholder de German (cedula 0123456789). La opción de menú "Empleados RRHH"
+  (Novedades e Historial quedan fuera, acordes al 403 del backend). La tabla de esta vista (ajustes 2026-11-04) muestra la fecha de registro (users_company.created_at) antes del nombre y la fecha de ingreso en vez del telefono, se ordena por fecha de registro descendente, tiene filtros de rango de fecha de ingreso, de registro y de retiro (desde/hasta) y una columna de fecha de retiro (requiere que getAll devuelva retiro.fecha_retiro, agregado al SELECT_EMPLEADO) y oculta la ficha placeholder de German (cedula 0123456789). La opción de menú "Empleados RRHH"
   (`/empleados-consulta`, en `Layout.jsx`, solo rol admin) abre `<AgentManagement soloLectura />` bajo
   `AdminRoute`.
 - **Alcance elegido por el usuario:** solo empleados + documentos (no novedades/traspasos/vacaciones),
