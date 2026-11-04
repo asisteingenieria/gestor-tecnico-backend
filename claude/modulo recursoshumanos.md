@@ -2594,4 +2594,4 @@ Desde octubre, Financiera administra la lista: crear o cambiar un centro se vali
   Solo los 7 empleados de prueba del seed siguen en Operación Claro. Repetir la 093 no cambia nada.
 - **Códigos pendientes de Financiera:** CBAH VENTA CRUZADA y CBAM DIGITACION siguen con código `PENDIENTE`.
   ADMINISTRATIVO conserva el 2411287 de ADMINISTRATIVO CB.
-- **Producción: pendiente.** El orden es 093 → 093b → backend y frontend.
+- **Producción: aplicada el 2026-11-04** en el orden 093 → 093b → backend y frontend (merge a main, `pm2 restart`, `npm run build`). Falta revisar las cédulas que la verificación de la 093b reporte como no encontradas.
