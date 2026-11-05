@@ -5,7 +5,7 @@ class User {
     static async getAll() {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, users_company_id, created_at FROM users WHERE role != ? ORDER BY full_name',
+                'SELECT id, username, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh, created_at FROM users WHERE role != ? ORDER BY full_name',
                 ['anonimo']
             );
             return rows;
@@ -17,7 +17,7 @@ class User {
     static async getById(id) {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, users_company_id, debe_cambiar_password, created_at FROM users WHERE id = ?',
+                'SELECT id, username, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh, debe_cambiar_password, created_at FROM users WHERE id = ?',
                 [id]
             );
             return rows[0];
@@ -113,7 +113,7 @@ class User {
 
     static async create(userData) {
         try {
-            const { username, password, full_name, role, sede, departamento, users_company_id } = userData;
+            const { username, password, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh } = userData;
 
             // Hash de la contraseña
             const salt = await bcrypt.genSalt(10);
@@ -142,6 +142,13 @@ class User {
                 placeholders.push('?');
             }
 
+            // Permiso de solo lectura de empleados de RRHH (independiente del rol, migración 095).
+            if (ver_empleados_rrhh) {
+                fields.push('ver_empleados_rrhh');
+                values.push(1);
+                placeholders.push('?');
+            }
+
             const query = `INSERT INTO users (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
             const [result] = await db.query(query, values);
 
@@ -153,7 +160,7 @@ class User {
 
     static async update(id, userData) {
         try {
-            const { username, full_name, role, sede, departamento, users_company_id } = userData;
+            const { username, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh } = userData;
 
             // Construir query dinámicamente según los campos presentes
             let updates = ['username = ?', 'full_name = ?', 'role = ?'];
@@ -172,6 +179,13 @@ class User {
             if (users_company_id !== undefined) { // Permitir desvincular (null)
                 updates.push('users_company_id = ?');
                 values.push(users_company_id);
+            }
+
+            // Permiso de solo lectura de empleados de RRHH (migración 095): se puede activar o
+            // desactivar, por eso se escribe siempre que venga definido.
+            if (ver_empleados_rrhh !== undefined) {
+                updates.push('ver_empleados_rrhh = ?');
+                values.push(ver_empleados_rrhh ? 1 : 0);
             }
 
             values.push(id); // ID va al final para la cláusula WHERE

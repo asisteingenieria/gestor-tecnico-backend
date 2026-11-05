@@ -81,7 +81,7 @@ exports.getUserById = async (req, res) => {
 // @route   POST /api/users
 // @access  Private (Admin)
 exports.createUser = async (req, res) => {
-    const { username, password, full_name, role, sede, departamento, users_company_id } = req.body;
+    const { username, password, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh } = req.body;
 
     // Validaciones
     if (!username || !password || !full_name || !role) {
@@ -155,7 +155,10 @@ exports.createUser = async (req, res) => {
             username,
             password,
             full_name,
-            role
+            role,
+            // Permiso de solo lectura del módulo de empleados de RRHH (migración 095). Es
+            // independiente del rol: cualquier usuario puede tenerlo.
+            ver_empleados_rrhh: ver_empleados_rrhh ? 1 : 0
         };
 
         // Para gestorActivos, tecnicoInventario, disenador, recursosHumanos, financiera y sst, no asignar sede ni departamento
@@ -210,7 +213,7 @@ exports.createUser = async (req, res) => {
 // @route   PUT /api/users/:id
 // @access  Private (Admin)
 exports.updateUser = async (req, res) => {
-    const { username, full_name, role, sede, departamento, password, users_company_id } = req.body;
+    const { username, full_name, role, sede, departamento, password, users_company_id, ver_empleados_rrhh } = req.body;
 
     if (!username || !full_name || !role) {
         return res.status(400).json({
@@ -279,7 +282,9 @@ exports.updateUser = async (req, res) => {
         const updateData = {
             username,
             full_name,
-            role
+            role,
+            // Permiso de solo lectura del módulo de empleados de RRHH (migración 095).
+            ver_empleados_rrhh: ver_empleados_rrhh ? 1 : 0
         };
         
         // Para gestorActivos, tecnicoInventario, disenador, recursosHumanos, financiera y sst, no asignar sede ni departamento
