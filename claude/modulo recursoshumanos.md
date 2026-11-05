@@ -2626,3 +2626,26 @@ decía que quitarle al admin la escritura en RRHH estaba pendiente de decisión)
 - 292 tests OK, `vite build` OK. **Pendiente en producción:** desplegar backend y frontend (no hay
   migración). Sin desplegar el backend, el frontend ocultaría los botones pero el admin seguiría
   pudiendo escribir por API.
+
+### 47.1 — La misma vista para un usuario de otro rol, por permiso (2026-11-05, migración 095)
+
+Un usuario con rol `technician` necesitaba esa misma vista de solo lectura. En vez de abrir el rol
+completo (todos los técnicos verían la PII de todos los empleados), se agregó un **permiso por
+usuario**: `users.ver_empleados_rrhh` (TINYINT 0/1, DEFAULT 0, migración 095), independiente del rol.
+
+- **Backend:** la bandera viaja en el JWT (`authController.firmarSesion`: `ver_empleados_rrhh` en el
+  token y `verEmpleadosRrhh` en la respuesta de login) y en `GET /auth/me` (`ver_empleados_rrhh`, vía
+  `User.getById`/`getAll`, que ya la seleccionan). Los middlewares de **lectura** de
+  `routes/usersCompany.js` (`verificarRecursosHumanos`, `verificarLecturaEmpleados`) pasan si el rol es
+  RRHH/financiera/admin **o** si `req.user.ver_empleados_rrhh`; `verificarGestionRRHH` (escritura y
+  submódulos) NO cambió → el usuario con la bandera es solo lectura de verdad, igual que el admin.
+  `User.create`/`update` y `userController.createUser`/`updateUser` persisten la bandera (`? 1 : 0`).
+- **Frontend:** `AuthContext` expone `canVerEmpleadosRrhh` (admin por rol, o la bandera
+  `verEmpleadosRrhh`/`ver_empleados_rrhh`). El ítem de menú "Empleados RRHH" (`Layout.jsx`) aparece si
+  `canVerEmpleadosRrhh` (marcado con `permisoVerEmpleados: true`), y la ruta `/empleados-consulta` pasó
+  de `AdminRoute` a `EmpleadosConsultaRoute` (admin o bandera). En el panel de usuarios
+  (`UserManagement.jsx`) el admin activa/desactiva un checkbox "Ver empleados de RRHH (solo lectura)",
+  visible para roles que no administran RRHH por sí mismos (no admin/recursosHumanos/financiera).
+- 303 tests OK, `vite build` OK. **Pendiente en producción:** correr la 095 (idempotente) y desplegar
+  back y front juntos (el token lleva la bandera y el checkbox la escribe). Activar el permiso en el
+  usuario técnico desde el panel, o con `UPDATE users SET ver_empleados_rrhh = 1 WHERE username = ?`.

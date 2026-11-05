@@ -6,18 +6,20 @@ const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
 const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 
-// Lectura de la ficha de empleados: RRHH, financiera y admin.
-// El admin la usa en SOLO LECTURA (Hanny Admin): ve la lista, la ficha completa y los
-// documentos, pero NO crea, edita, elimina ni importa (eso lo bloquea verificarGestionRRHH).
+// Lectura de la ficha de empleados: RRHH, financiera y admin, más cualquier usuario con el
+// permiso de solo lectura `ver_empleados_rrhh` (migración 095), p. ej. un técnico puntual.
+// El admin y los usuarios con el permiso la usan en SOLO LECTURA: ven la lista, la ficha
+// completa y los documentos, pero NO crean, editan, eliminan ni importan (eso lo bloquea
+// verificarGestionRRHH).
 const verificarRecursosHumanos = (req, res, next) => {
     // financiera administra RRHH igual que recursosHumanos (asistencia.md §32).
-    if (!['recursosHumanos', 'financiera', 'admin'].includes(req.user.role)) {
-        return res.status(403).json({
-            success: false,
-            message: 'Acceso denegado. Solo Recursos Humanos puede acceder a esta funcionalidad.'
-        });
+    if (['recursosHumanos', 'financiera', 'admin'].includes(req.user.role) || req.user.ver_empleados_rrhh) {
+        return next();
     }
-    next();
+    return res.status(403).json({
+        success: false,
+        message: 'Acceso denegado. Solo Recursos Humanos puede acceder a esta funcionalidad.'
+    });
 };
 
 // Gestión (escritura) del módulo de empleados y de sus submódulos (novedades, traspasos,
@@ -37,13 +39,13 @@ const verificarGestionRRHH = (req, res, next) => {
 // Lectura del listado de empleados: además de RRHH, gestorActivos la necesita
 // (solo lectura) para el selector de "agente asignado" al crear/editar un activo.
 const verificarLecturaEmpleados = (req, res, next) => {
-    if (!['gestorActivos', 'recursosHumanos', 'financiera', 'admin'].includes(req.user.role)) {
-        return res.status(403).json({
-            success: false,
-            message: 'Acceso denegado.'
-        });
+    if (['gestorActivos', 'recursosHumanos', 'financiera', 'admin'].includes(req.user.role) || req.user.ver_empleados_rrhh) {
+        return next();
     }
-    next();
+    return res.status(403).json({
+        success: false,
+        message: 'Acceso denegado.'
+    });
 };
 
 // Gasto total en salarios: solo financiera y admin. recursosHumanos ve contratación, no costos.

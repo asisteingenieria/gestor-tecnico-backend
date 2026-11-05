@@ -21,6 +21,9 @@ function firmarSesion(user, esJefeEquipo, cargo = null) {
             departamento: user.departamento,
             full_name: user.full_name,
             users_company_id: user.users_company_id,
+            // Permiso de solo lectura del módulo de empleados de RRHH (migración 095). Viaja en el
+            // token para que los middlewares de lectura de usersCompany lo dejen pasar sin volver a BD.
+            ver_empleados_rrhh: Boolean(user.ver_empleados_rrhh),
             debe_cambiar_password: Boolean(user.debe_cambiar_password)
         }
     };
@@ -34,6 +37,7 @@ function firmarSesion(user, esJefeEquipo, cargo = null) {
             sede: user.sede,
             departamento: user.departamento,
             debeCambiarPassword: Boolean(user.debe_cambiar_password),
+            verEmpleadosRrhh: Boolean(user.ver_empleados_rrhh),
             esJefeEquipo: Boolean(esJefeEquipo),
             cargo,
             ...(user.tipo_cuenta ? { tipoCuenta: user.tipo_cuenta } : {})
