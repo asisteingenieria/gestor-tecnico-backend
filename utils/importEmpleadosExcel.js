@@ -225,7 +225,10 @@ function detectarColumnas(headerRow) {
     return { formato: 'por_nombre', col };
 }
 
-const MAP_GENERO = { M: 'Masculino', F: 'Femenino' };
+const MAP_GENERO = {
+    M: 'Masculino', MASCULINO: 'Masculino', HOMBRE: 'Masculino',
+    F: 'Femenino', FEMENINO: 'Femenino', MUJER: 'Femenino'
+};
 const MAP_MODALIDAD = { PRESENCIAL: 'Presencial', 'TRABAJO EN CASA': 'Remoto' };
 // "Tipo De Dirección" del Excel (Urbano/Rural) — catálogo nuevo `zona_direccion`
 // (migración 047), distinto del catálogo `tipo_direccion` ya existente (que clasifica
