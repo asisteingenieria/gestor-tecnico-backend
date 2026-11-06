@@ -3026,12 +3026,14 @@ días 169/105, Vacaciones 50/37, Suspensiones 47/0, INC común 3+ 37/22, INC tr�
 suspensión tiene documento en la compartida. 319 tests OK, `vite build` OK; endpoints probados contra el
 backend local (PDF servido, 404 cruzado, 403 al admin).
 
-**Producción (pendiente):**
-1. migración 098;
-2. código de back y front (merge, `pm2 restart`, `npm run build`);
-3. subir el Excel a `/root/` y `node scripts/cargarNovedadesExcel.js --excel <xlsx> --reporte <csv>` (simula:
-   en producción las cédulas sin ficha y las ya cargadas a mano serán otras);
-4. con el OK, lo mismo con `--aplicar`.
+**Producción (HECHO 2026-11-06):** backend `d9edb5f` y frontend `bba5e34` (mergeados a main por el usuario),
+`pm2 restart` y `npm run build`; Excel en `/root/novedades_carga/novedades.xlsx` (con cédulas, no se versiona).
+- Simulación: 374 a crear (192 con documento, 364 con responsable), **13 ya cargadas a mano por RRHH** (se
+  saltaron; a esas no se les enlazó el documento del expediente), 26 cédulas sin ficha, 1 con error (fila 345).
+- `--aplicar`: **374 novedades creadas y 192 documentos enlazados**. Reporte fila por fila en
+  `/root/novedades_carga/reporte.csv`.
+- Para cargar las 26 sin ficha y la fila 345 cuando RRHH las corrija: volver a correr el mismo comando
+  (simular y luego `--aplicar`); solo agrega lo que falta.
 
 **Pendientes para RRHH:** fila 345 del Excel (fechas al revés) y las cédulas sin ficha del reporte.
 
@@ -3052,6 +3054,12 @@ backend local (PDF servido, 404 cruzado, 403 al admin).
   JEFE o TEAM LEADER) y su jefe y director de área, cada uno con su rol. Se elige solo el jefe inmediato si está
   activo. "Buscar entre todos los empleados" abre la lista completa. Para esto `GET /users-company` devuelve
   además `jefe_inmediato_id`, `jefe_area_id` y `director_area_id`.
+- **El documento del expediente cuenta como soporte (2026-11-06, visto en producción):** al editar una novedad
+  del cargue, los soportes del tipo salían todos "Pendiente" aunque tuviera su PDF del expediente (que trae los
+  soportes juntos). Ahora el formulario muestra el "Documento del expediente" (Ver en el visor en modal) y los
+  soportes sin archivo propio dicen "Incluido en el documento del expediente (puedes cargarlo aparte)"; la columna
+  Soportes muestra "Expediente" en verde en vez de 0/3; el detalle ya no lista los soportes pendientes si hay
+  documento del expediente. Los soportes del formulario también abren en el visor en modal. Solo frontend.
 - **Jefes retirados en las fichas (hallazgo 2026-11-06):** 42 empleados activos tienen como jefe inmediato a un
   coordinador ya retirado (Azael Alcalá 19, Danny Morales 14, Jessika Chávez 5, Jorge Patiño 4; datos de local).
   El Excel de novedades muestra quién los coordina ahora (p. ej. Laura Cubillos: ficha → Azael; Excel de
