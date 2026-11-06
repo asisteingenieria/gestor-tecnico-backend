@@ -2708,7 +2708,19 @@ Excel contra el catálogo `tipo_novedad` (INC 271 → variantes de Incapacidad s
 LR 14 → Licencia Remunerada; LPL 5 y LP 1 **sin confirmar**; LM 2 → Licencia de Maternidad), más
 evitar duplicar las ya cargadas a mano. Detalle en la memoria del proyecto.
 
-## 49. Sesión 2026-11-05 — Expediente documental del empleado: copia de la carpeta compartida al servidor (en curso)
+## 49. Sesiones 2026-11-05/06 — Expediente documental del empleado: copia de la carpeta compartida al servidor (DESPLEGADO 2026-11-06)
+
+> **Estado (2026-11-06): terminado en producción.**
+> - **Qué se ve:** los expedientes de Bogotá (ALTAS FORMATO) están en `storage/expedientes/` del servidor y
+>   aparecen en la ficha → pestaña **Documentos** → sección **Expediente**.
+> - **Registro:** 4.520 archivos en 396 fichas. 14 carpetas sin ficha (122 archivos) quedan en disco sin asociar.
+> - **Código:** backend `818ec35` y frontend `6be3729` (en `sebas-branch`, mergeados por el usuario), con la
+>   migración 097.
+> - **Archivos con cédulas** (manifiestos, `revisar.csv`, `.tar`): están en
+>   `Downloads/expedientes_bogota/` y no se versionan. En el servidor quedan `manifiesto_final.json` y el
+>   `.tar` de respaldo en `/root/expedientes_carga/`. El `.tar` se puede borrar cuando RRHH confirme.
+> - **Resumen de comandos y pendientes:** al final de esta sección (§49.1-§49.3).
+
 
 **Pedido.** Pasar las carpetas de los empleados de la carpeta compartida de Gestión Humana al servidor
 y mostrarlas en la ficha, con la misma estructura de carpetas. La carpeta compartida es
@@ -2737,7 +2749,8 @@ esa estructura.
    - carpetas en `storage/expedientes/`;
    - pestaña de Documentos de la ficha con las 6 categorías;
    - creación de la estructura al dar de alta a un empleado;
-   - los 2 PDF de la 088 pasan a 2.DOCUMENTOS y 3.CONTRATO.
+   - los 2 PDF de la 088 pasan a 2.DOCUMENTOS y 3.CONTRATO. **No se hizo**: los PDF de la 088 siguen aparte. En
+    cambio, el aviso de faltantes cuenta las dos cosas (ver "Aviso de documentos faltantes" abajo).
 
 **Paso 1 — qué se hizo:**
 - **Lógica pura** en `utils/expedientes.js`: categorías, nombres únicos de las subcarpetas de novedades y
@@ -2839,7 +2852,7 @@ tiene ficha se copia sin asociar.
     falso, de NOVEDADES sin tipo y de la carpeta `otros`, 404 con un id ajeno, 401 sin sesión, y
     eliminar;
   - `vite build` pasa.
-- **Falta antes de producción:** que el usuario lo revise en su frontend local. Después, en orden:
+- **Orden de producción** (ya ejecutado el 2026-11-06, ver abajo):
   1. subir el `.tar`;
   2. extraerlo en `storage/` y verificarlo con `verificarCopiaExpedientes.js`;
   3. aplicar la migración 097;
@@ -2875,3 +2888,174 @@ qué documentos faltan y, si no falta ninguno, que no haya avisos"):**
 - **Respaldo:** el `.tar` queda en `/root/expedientes_carga/`.
 - **Pendiente:** commit y push del código, migración 097, despliegue de back y front, y
   `registrarExpedientes.js` (primero simulado y después con `--aplicar`).
+
+**Producción terminada (2026-11-06):**
+- **Código:** merge de backend `818ec35` y frontend `6be3729`, y la 097 aplicada antes del código.
+- **Despliegue:** pull, `pm2 restart` y `npm run build`.
+- **Registro:** `registrarExpedientes.js --aplicar` registró **4.520 archivos en 396 fichas**: 374 por
+  cédula, 21 por nombre exacto y 1 por nombre parecido (PAEZ MARIN LAURA JULIETH → ficha "JULIEHT",
+  error de digitación en la ficha), con 0 faltantes en disco. Producción asoció más que local
+  (4.298) porque tiene 22 fichas más.
+- **14 carpetas sin ficha** (122 archivos) quedan en disco sin asociar. Para asociarlas cuando RRHH les
+  cree la ficha, se vuelve a correr el mismo comando con `--manifiesto
+  /root/expedientes_carga/manifiesto_final.json --aplicar`: es idempotente y solo agrega las nuevas.
+
+**Prueba en el navegador antes de producción (2026-11-06, local, cuenta `prueba.rrhh`):**
+- **Karen Barragán:** Expediente con la carpeta `2026/BARRAGAN SANCHEZ KAREN STEFANY`, 11 archivos repartidos en
+  las 6 carpetas, y NOVEDADES agrupada en `INC` y `LNR`. "Ver" abrió el PDF.
+- **Subir y borrar:** un PDF subido a NOVEDADES/INC quedó en su sitio, y el borrado con confirmación en la misma
+  pantalla funcionó.
+- **Pacanchique:** aparece la carpeta OTROS con su PDF suelto.
+- **Consola:** sin errores del expediente.
+- **Detalle de la herramienta:** la extensión del navegador solo sube archivos de carpetas compartidas con la
+  sesión, así que el PDF de prueba se puso temporalmente en `storage/` y se borró al terminar.
+
+### 49.1 Archivos sueltos y carpetas fuera de las seis (según `manifiesto_final.json`)
+
+Solo 2 empleados tenían archivos sueltos directamente en su carpeta, y los dos tienen ficha:
+
+| Empleado | Archivo | Dónde quedó |
+|---|---|---|
+| CUBILLOS IMBACHI LAURA JISETH (2026) | su PDF con el nombre | 1.SELECCION, porque estaba vacía |
+| PACANCHIQUE VILLAMIL CRISTIAN DAVID (2026) | su PDF con el nombre | **OTROS**: RRHH debe revisarlo y moverlo |
+
+Carpetas que no son ninguna de las seis, de empleados sin ficha:
+- GASCA GALINDO JORGE SEBASTIAN: `6.RETIRO`, 1 archivo;
+- VELASQUEZ PLATA FERNANDO: `5.RETIRO`, 1 archivo.
+
+Las dos van a OTROS. El resto de los 4.642 archivos estaban dentro de sus carpetas 1-6, aunque algunas tenían
+el nombre mal escrito ("DOCUEMENTOS", "CONTARTO"…).
+
+### 49.2 Carpetas sin ficha en producción (14 carpetas, 122 archivos, copiadas y sin asociar)
+
+OSORIO GRISALES JHONATAN (2023), BALLEN VEGA BRANDON SANTIAGO, BUITRAGO ESTRADA ALVARO JULIAN, CASTILLO MORENO
+BRIGGITE STELLA, CASTRO GARCIA ZHARIC, CUESTAS RODRIGUEZ YENNIFER ALEXANDRA, FERNANDEZ ALMANZA PAULA ALEJANDRA,
+GASCA GALINDO JORGE SEBASTIAN, NAGLES CAPERA MICHAEL, OSORIO PRIETO KAREN JOHANNA, RODRIGUEZ BERNAL MAIRA
+ALEJANDRA, SIERRA CASALLAS DANIEL ESTEBAN, TOVAR BUSTOS INGRID TATIANA, VELASQUEZ PLATA FERNANDO. Todas son de
+2026, salvo la primera.
+
+Cuando RRHH les cree la ficha, en el servidor:
+
+    cd /root/gestor-tecnico-backend
+    node scripts/registrarExpedientes.js --manifiesto /root/expedientes_carga/manifiesto_final.json            # simula
+    node scripts/registrarExpedientes.js --manifiesto /root/expedientes_carga/manifiesto_final.json --aplicar
+
+Es idempotente: lo ya registrado sale como "ya estaban registrados" y solo agrega lo nuevo.
+
+### 49.3 Cómo repetir la copia (documentos nuevos en la carpeta compartida) y pendientes
+
+**Flujo completo**, siempre desde un equipo de la oficina, porque producción no alcanza `10.255.255.x`:
+1. `node scripts/prepararExpedientes.js` lee la carpeta compartida sin modificarla y escribe `manifiesto.json`,
+   `revisar.csv` y `reporte.txt` en `Downloads/expedientes_bogota`.
+2. Copiar a local con robocopy, que retoma si se corta:
+   - comando: `robocopy <origen> <copia_local> /E /Z /MT:16`;
+   - el código de salida 1 significa éxito.
+   - Empaquetar directo desde la carpeta de red se cayó dos veces cuando el equipo se quedó sin memoria.
+3. `node scripts/empaquetarExpedientes.js --origen <copia_local>` escribe el `.tar`, `manifiesto_final.json`
+   con el sha256 de cada archivo y el `.tar.sha256`.
+4. `scp` del `.tar`, el `.sha256`, `manifiesto_final.json` y `verificarCopiaExpedientes.js` a
+   `/root/expedientes_carga/`. Fueron unos 50 min para 7,4 GB; si se corta, se retoma con `sftp` → `reput`.
+5. En el servidor:
+   - `sha256sum -c`;
+   - `tar -xf ... -C /root/gestor-tecnico-backend/storage`;
+   - `node verificarCopiaExpedientes.js --raiz .../storage/expedientes --manifiesto manifiesto_final.json`.
+6. `registrarExpedientes.js`, primero simulado y después con `--aplicar`.
+
+Hoy el paquete lleva todo, no solo los cambios. En una segunda corrida, `tar -xf` sobrescribiría con los mismos
+archivos, y si RRHH cambió algo en el servidor, se pisaría. Para cargas incrementales conviene filtrar el
+manifiesto contra lo que ya está en `empleado_archivo`.
+
+**Detalles técnicos aprendidos:**
+- GNU tar en Windows necesita `--force-local`, porque si no lee `C:` como un host remoto.
+- Las rutas UNC en los heredocs de bash van con `//10.255.255.10/...`.
+
+**Pendientes y posibles siguientes:**
+- RRHH:
+  - revisar el PDF suelto de Pacanchique, que está en OTROS;
+  - corregir el nombre de la ficha de PAEZ MARIN LAURA "JULIEHT" → "JULIETH".
+- Confirmar en producción la subida desde el navegador. Si da 413, falta `client_max_body_size 50m;` en nginx,
+  lo mismo que en §42.
+- Rol `juridica` para 5.RELACIONES LABORALES (hoy sube RRHH).
+- Que SST suba a 4.SST con su rol.
+- Expedientes de Barranquilla y Villavicencio.
+- Borrar `/root/expedientes_carga/expedientes_bogota.tar` cuando RRHH confirme. El manifiesto se queda.
+
+## 50. Sesión 2026-11-06 — Cargue masivo de novedades (ago → 4-nov-2026) con su documento del expediente (migración 098)
+
+**Pedido.** Cargar las 414 novedades de `Downloads/Novedades desde agosto al 041126.xlsx` (234 cédulas) y
+asociar cada una con su documento. Los documentos **ya están en el servidor**: llegaron con el expediente
+(§49), en `6.NOVEDADES/<tipo>/` y nombrados por fecha (`INC/01-10-2025 02-10-2025.pdf`,
+`VACACIONES/08-08-2025.pdf`). No se suben de nuevo: se **enlazan**.
+
+**Decisiones del usuario (2026-11-06):** LPL = Licencia por luto, LP = Licencia de paternidad; enlazar al
+expediente (no copiar como soporte, porque el PDF de la compartida trae todos los soportes juntos y no se
+sabe a cuál corresponde); carga por script en el servidor (no botón); primero en local.
+
+- **Migración `098_novedad_documento_expediente.sql`** (idempotente, va antes del código):
+  `empleado_archivo.novedad_rrhh_id` con FK a `novedad_rrhh` `ON DELETE SET NULL` (si se borra la novedad,
+  el archivo sigue en el expediente).
+- **Lógica pura** `utils/novedadesExcel.js` (tests `tests/rrhh/novedadesExcel.test.js`):
+  - abreviatura → `tipo_novedad`: VACACIONES, SUSPENSION → Suspensiones, LNR, LR, LM, LPL → luto, LP → paternidad;
+  - INC según "Origen de INC", "Accidente de transito" y días: COMUN/TRANSITO × 1-2 días / 3 o más, y
+    ACCIDENTE DE TRABAJO → Incapacidad Accidente Trabajo;
+  - sin "Total Dias", se calcula con las fechas;
+  - documento: archivos de 6.NOVEDADES del empleado cuya **primera fecha del nombre = fecha inicial**, en una
+    subcarpeta compatible con el tipo (INC también INCAPACACIDADES/NC; luto también LDL/LCDL/LR; LR también
+    PERMISOS), o suelto en 6.NOVEDADES si no hay en la del tipo. Un archivo no se da a dos novedades. Uno con
+    la misma fecha en la carpeta de **otro** tipo no se enlaza (se reporta).
+- **Script** `scripts/cargarNovedadesExcel.js --excel <xlsx> [--reporte <csv>] [--aplicar]`:
+  - simula por defecto; con `--aplicar` escribe en **una transacción**;
+  - empleado por cédula y su contrato más reciente; responsable = el Coordinador del Excel si su nombre es una
+    sola ficha;
+  - **idempotente**: salta si el empleado ya tiene una novedad del mismo tipo con la misma fecha inicial
+    (incluye las cargadas a mano);
+  - `observaciones` = "Cargue masivo desde el Excel de novedades de Gestión Humana (fila N).";
+  - `--reporte` deja un CSV fila por fila (con cédulas: fuera del repo).
+- **Consulta:** `GET /novedades/:id/soportes` devuelve además `expediente` (los archivos enlazados);
+  `GET /novedades/:id/expediente/:archivoId/archivo` lo abre (`verificarGestionRRHH`; 404 si el archivo no es
+  de esa novedad). El listado trae `documentos_expediente`.
+- **Frontend:** en Novedades, la columna Soportes muestra un distintivo azul con el número de documentos del
+  expediente, y el detalle de la fila los lista en "Documento del expediente (6. Novedades)" para abrirlos
+  (`SoportesResumen` con la prop `descargarExpediente`; `novedadRrhhService.descargarDocumentoExpediente`).
+
+**Local (2026-11-06):** 098 aplicada; **387 novedades creadas, 199 con documento** (199 archivos, todos en
+disco), 377 con responsable. No entran: 26 filas de cédulas sin ficha y la fila 345 (fecha final anterior a
+la inicial). Segunda corrida: 0 nuevas, 387 "ya cargadas". Por tipo (creadas / con documento): INC común 1-2
+días 169/105, Vacaciones 50/37, Suspensiones 47/0, INC común 3+ 37/22, INC tránsito 3+ 28/7, LNR 18/14, LR
+13/7, INC tránsito 1-2 13/4, luto 5/3, INC trabajo 4/0, maternidad 2/0, paternidad 1/0. Casi ninguna
+suspensión tiene documento en la compartida. 319 tests OK, `vite build` OK; endpoints probados contra el
+backend local (PDF servido, 404 cruzado, 403 al admin).
+
+**Producción (pendiente):**
+1. migración 098;
+2. código de back y front (merge, `pm2 restart`, `npm run build`);
+3. subir el Excel a `/root/` y `node scripts/cargarNovedadesExcel.js --excel <xlsx> --reporte <csv>` (simula:
+   en producción las cédulas sin ficha y las ya cargadas a mano serán otras);
+4. con el OK, lo mismo con `--aplicar`.
+
+**Pendientes para RRHH:** fila 345 del Excel (fechas al revés) y las cédulas sin ficha del reporte.
+
+**Ajustes de la vista (2026-11-06, a pedido del usuario tras revisarla):**
+- La tabla de Novedades ya no tiene filas desplegables. En Acciones hay un ojo (**Ver detalle**) que abre
+  `NovedadDetalleModal.jsx`. Los documentos (soportes y del expediente, los que sean) se ven ahí, y cada uno se
+  abre en el visor en modal (`PrevisualizacionDocumento` + `usePrevisualizacion`), no en otra pestaña. Se
+  probó y se descartó un botón "Ver documento" en la tabla: con varios documentos no tiene sentido. El cambio
+  está en `SoportesResumen`, así que el resumen de soportes de Traspasos también abre en modal.
+- El detalle muestra solo lo que aplica al tipo (`src/utils/camposNovedad.js`): fechas, empleado y
+  observaciones para todos; origen y diagnóstico solo en incapacidades; accidente de tránsito solo en las de
+  tránsito.
+- **Fecha de recibido:** el Excel no la trae; el cargue la toma de la fecha de reporte (cuando Gestión Humana
+  recibió la novedad). Las 387 de local se corrigieron con un `UPDATE` (solo las del cargue).
+- **Responsable en Nueva/Editar novedad** (`NovedadForm.jsx`): pasó de un `<select>` con ~400 nombres a
+  `ComboboxBuscable` (nombre o cédula). Al elegir el empleado se sugieren solo personas **activas** (sin retiro):
+  su jefe inmediato, los coordinadores/jefes/team leaders de **su campaña** (cargo que empieza por COORDINADOR,
+  JEFE o TEAM LEADER) y su jefe y director de área, cada uno con su rol. Se elige solo el jefe inmediato si está
+  activo. "Buscar entre todos los empleados" abre la lista completa. Para esto `GET /users-company` devuelve
+  además `jefe_inmediato_id`, `jefe_area_id` y `director_area_id`.
+- **Jefes retirados en las fichas (hallazgo 2026-11-06):** 42 empleados activos tienen como jefe inmediato a un
+  coordinador ya retirado (Azael Alcalá 19, Danny Morales 14, Jessika Chávez 5, Jorge Patiño 4; datos de local).
+  El Excel de novedades muestra quién los coordina ahora (p. ej. Laura Cubillos: ficha → Azael; Excel de
+  octubre → Laura Acero). Por eso el formulario no sugiere jefes retirados y avisa cuando el jefe inmediato lo
+  está. RRHH va a pasar el listado exacto de coordinadores para actualizar esas jefaturas (pendiente). No afecta
+  el cargue: las novedades guardan el coordinador del Excel, que lo era en la fecha de la novedad (verificado:
+  ninguna con responsable retirado es posterior a su retiro).
