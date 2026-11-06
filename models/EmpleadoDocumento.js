@@ -7,21 +7,37 @@ const TIPOS = Object.freeze({
     contrato_anexos: 'Contrato y anexos'
 });
 
+// Desde la 097 el documento también está si su carpeta del expediente tiene archivos (los copiados de la
+// carpeta compartida o subidos ahí): así el aviso "Faltan documentos" no sale cuando ya están.
+const CARPETA_EXPEDIENTE = Object.freeze({
+    documentacion_empleado: { categoria: 'documentos', carpeta: '2.DOCUMENTOS' },
+    contrato_anexos: { categoria: 'contrato', carpeta: '3.CONTRATO' }
+});
+
 class EmpleadoDocumento {
     static esTipoValido(tipo) {
         return Object.prototype.hasOwnProperty.call(TIPOS, tipo);
     }
 
-    // Los dos tipos, con su archivo si ya se cargó (sin el nombre en disco).
+    // Los dos tipos, con su archivo si ya se cargó (sin el nombre en disco). `cargado` = está el PDF;
+    // `en_expediente` = archivos en su carpeta del expediente; `completo` = cualquiera de los dos.
     static async getByEmpleado(usersCompanyId) {
         const [rows] = await db.query(
             `SELECT tipo, nombre_original, mime, tamano, updated_at AS cargado_en
              FROM empleado_documento WHERE users_company_id = ?`,
             [usersCompanyId]
         );
+        const [enExpediente] = await db.query(
+            `SELECT categoria, COUNT(*) AS total FROM empleado_archivo
+             WHERE users_company_id = ? AND categoria IN ('documentos', 'contrato') GROUP BY categoria`,
+            [usersCompanyId]
+        );
         return Object.entries(TIPOS).map(([tipo, nombre]) => {
             const cargado = rows.find((r) => r.tipo === tipo);
-            return cargado ? { tipo, nombre, cargado: true, ...cargado } : { tipo, nombre, cargado: false };
+            const { categoria, carpeta } = CARPETA_EXPEDIENTE[tipo];
+            const archivos = Number(enExpediente.find((r) => r.categoria === categoria)?.total || 0);
+            const base = { tipo, nombre, en_expediente: archivos, carpeta_expediente: carpeta, completo: !!cargado || archivos > 0 };
+            return cargado ? { ...base, cargado: true, ...cargado } : { ...base, cargado: false };
         });
     }
 
