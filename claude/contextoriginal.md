@@ -685,6 +685,7 @@ Detalle completo en `asistencia.md` §23-§27; pendientes vigentes en §28.
 | **Documentos de contratación desde Hydra** | Gestor 087, Hydra 021 | Hydra envía la hoja de vida y el tratamiento de datos firmados, más los soportes de antecedentes, al pasar el candidato a contratación | `conexionhydra.md` §15 |
 | **Documentos del empleado** | 088 | En la ficha, RRHH carga "Documentación del empleado" y "Contrato y anexos": dos PDF unificados de hasta 50 MB, en `storage/empleados/`. Hay un aviso de "Faltan documentos", un filtro en el listado y vista previa del PDF | `claude/modulo recursoshumanos.md` §42 |
 | **Rol `sst` y exámenes médicos** | Gestor 089, Hydra 022 | Ver abajo | `conexionhydra.md` §16 |
+| **Expediente documental** (2026-11-05/06) | 097 | Ver §16 | `claude/modulo recursoshumanos.md` §49 |
 
 **Rol SST y exámenes médicos:**
 - SST recibe los candidatos de Hydra y lleva el control final: marca si el candidato **asistió** a los exámenes médicos y si los **aprobó**.
@@ -719,3 +720,34 @@ Detalle en `conexionhydra.md` §16.6. Resumen:
 
 - **Workbench trae activo el modo de actualización segura.** Toda migración con `UPDATE` sin llave en el `WHERE` necesita `SET SQL_SAFE_UPDATES = 0` antes y `= 1` después. Ya pasó con la 086 y la 089.
 - **Antes de correr una migración en Workbench, verificar la base con `SELECT DATABASE()`.** Gestor y Hydra son bases y servidores distintos.
+
+## 16. Sesiones 2026-11-05/06 — Expediente documental del empleado (migración 097)
+
+Detalle completo en `claude/modulo recursoshumanos.md` §49.
+
+- **Qué es:** las carpetas de cada empleado de la carpeta compartida de Gestión Humana
+  (`\\10.255.255.10\compartida-asiste\GESTION HUMANA\...\BOGOTA\ALTAS FORMATO`).
+  - Estructura: `<año>/<APELLIDOS NOMBRES>/1.SELECCION … 6.NOVEDADES/<INC|LNR…>`.
+  - Se copiaron al servidor en `storage/expedientes/`, con la misma estructura.
+  - La carpeta compartida no se tocó. Por ahora solo Bogotá.
+- **Backend:**
+  - tabla `empleado_archivo` y `users_company.expediente_carpeta`;
+  - modelo `models/EmpleadoArchivo.js`, lógica pura en `utils/expedientes.js` y disco en `utils/expedienteDisco.js`;
+  - endpoints `/api/users-company/:id/expediente…`: leer con `verificarRecursosHumanos`, subir y borrar con
+    `verificarGestionRRHH`;
+  - los empleados nuevos reciben su estructura al crearse.
+- **Frontend:**
+  - `ExpedienteEmpleado.jsx` en la pestaña Documentos del drawer;
+  - el aviso de la ficha dice qué documento falta: "Falta: Contrato y anexos". Cuenta el PDF de la 088 o la
+    carpeta 2.DOCUMENTOS/3.CONTRATO del expediente, y si no falta nada no aparece.
+- **Copia:**
+  - manifiesto por cédula, con los manifiestos en Descargas porque llevan cédulas;
+  - `.tar` de 7,4 GB con sha256 por archivo, subido con `scp` por el usuario;
+  - verificado en el servidor: 4.642 de 4.642.
+- **Producción (2026-11-06):** 097 aplicada, back `818ec35` y front `6be3729`.
+  - `registrarExpedientes.js --aplicar` registró 4.520 archivos en 396 fichas.
+  - 14 carpetas sin ficha quedan en disco y se asocian volviendo a correr el script.
+- **Lección:** el servidor no alcanza la red de la oficina (`10.255.255.x`), así que toda copia desde la
+  carpeta compartida sale de un equipo local.
+  - Empaquetar directo desde la red se cayó dos veces cuando el equipo se quedó sin memoria.
+  - Por eso primero se copia a local con robocopy, que retoma si se corta, y luego se empaqueta.

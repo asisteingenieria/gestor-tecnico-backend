@@ -82,6 +82,8 @@ router.get('/novedades/:novedadId/soportes',                               verif
 router.post('/novedades/:novedadId/soportes/:tipoSoporteId',               verificarGestionRRHH, soportesNovedad.middleware, userCompanyController.subirSoporteNovedad);
 router.get('/novedades/:novedadId/soportes/:tipoSoporteId/archivo',        verificarGestionRRHH, userCompanyController.descargarSoporteNovedad);
 router.delete('/novedades/:novedadId/soportes/:tipoSoporteId',             verificarGestionRRHH, userCompanyController.eliminarSoporteNovedad);
+// Documento del expediente enlazado a la novedad (migración 098)
+router.get('/novedades/:novedadId/expediente/:archivoId/archivo',          verificarGestionRRHH, userCompanyController.descargarDocumentoExpedienteNovedad);
 
 // Traspasos (submódulo cerrado al admin)
 router.get('/traspasos',                 verificarGestionRRHH, userCompanyController.getTraspasos);

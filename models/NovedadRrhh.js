@@ -16,7 +16,8 @@ const SELECT_NOVEDAD = `
         (SELECT COUNT(*) FROM novedad_rrhh_soporte nrs
            JOIN tipo_novedad_soporte tns ON tns.tipo_soporte_novedad_id = nrs.tipo_soporte_novedad_id
                                         AND tns.tipo_novedad_id = nr.tipo_novedad_idtipo_novedad
-          WHERE nrs.novedad_rrhh_id = nr.idnovedad_rrhh) AS soportes_cargados
+          WHERE nrs.novedad_rrhh_id = nr.idnovedad_rrhh) AS soportes_cargados,
+        (SELECT COUNT(*) FROM empleado_archivo ea WHERE ea.novedad_rrhh_id = nr.idnovedad_rrhh) AS documentos_expediente
     FROM novedad_rrhh nr
     JOIN contrato c ON nr.contrato_idcontrato = c.idcontrato
     JOIN users_company uc ON c.users_company_id = uc.id
@@ -193,6 +194,26 @@ class NovedadRrhh {
         if (!actual) return null;
         await db.query('DELETE FROM novedad_rrhh_soporte WHERE idnovedad_rrhh_soporte = ?', [actual.idnovedad_rrhh_soporte]);
         return actual.archivo;
+    }
+
+    // ---- Documentos del expediente enlazados a la novedad (migración 098) ----
+    // Son archivos de 6.NOVEDADES del expediente del empleado; la novedad solo los referencia.
+
+    static async getDocumentosExpediente(novedadId) {
+        const [rows] = await db.query(
+            `SELECT idempleado_archivo AS id, subcarpeta, nombre, mime, tamano
+             FROM empleado_archivo WHERE novedad_rrhh_id = ? ORDER BY nombre`,
+            [novedadId]
+        );
+        return rows;
+    }
+
+    static async getDocumentoExpediente(novedadId, archivoId) {
+        const [rows] = await db.query(
+            'SELECT * FROM empleado_archivo WHERE idempleado_archivo = ? AND novedad_rrhh_id = ?',
+            [archivoId, novedadId]
+        );
+        return rows[0];
     }
 
     // Archivos de una novedad, para borrarlos del disco al eliminarla (las filas caen por CASCADE).

@@ -429,9 +429,32 @@ const userCompanyController = {
             if (!await NovedadRrhh.getById(req.params.novedadId)) {
                 return res.status(404).json({ success: false, message: 'Novedad no encontrada' });
             }
-            res.json({ soportes: await NovedadRrhh.getSoportes(req.params.novedadId) });
+            const [soportes, expediente] = await Promise.all([
+                NovedadRrhh.getSoportes(req.params.novedadId),
+                NovedadRrhh.getDocumentosExpediente(req.params.novedadId)
+            ]);
+            res.json({ soportes, expediente });
         } catch (error) {
             console.error('Error al obtener soportes de la novedad:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // Documento del expediente enlazado a la novedad (migración 098, cargue masivo §50).
+    async descargarDocumentoExpedienteNovedad(req, res) {
+        try {
+            const archivo = await NovedadRrhh.getDocumentoExpediente(req.params.novedadId, req.params.archivoId);
+            const ruta = archivo && expedienteDisco.rutaSegura(archivo.ruta);
+            if (!ruta || !fs.existsSync(ruta)) {
+                return res.status(404).json({ success: false, message: 'Archivo no encontrado' });
+            }
+            const disposicion = req.query.descargar ? 'attachment' : 'inline';
+            res.setHeader('Content-Type', archivo.mime);
+            res.setHeader('Content-Disposition', `${disposicion}; filename*=UTF-8''${encodeURIComponent(archivo.nombre)}`);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.sendFile(ruta);
+        } catch (error) {
+            console.error('Error al descargar documento del expediente de la novedad:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
