@@ -5,6 +5,7 @@ const { verifyToken } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
 const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
+const { archivoExpediente } = require('../middleware/uploadExpediente');
 
 // Lectura de la ficha de empleados: RRHH, financiera y admin, más cualquier usuario con el
 // permiso de solo lectura `ver_empleados_rrhh` (migración 095), p. ej. un técnico puntual.
@@ -114,6 +115,13 @@ router.get('/:id/documentos',                    verificarRecursosHumanos, userC
 router.get('/:id/documentos/:tipo/archivo',      verificarRecursosHumanos, userCompanyController.descargarDocumentoEmpleado);
 router.put('/:id/documentos/:tipo',              verificarGestionRRHH, documentosEmpleado.middleware, userCompanyController.subirDocumentoEmpleado);
 router.delete('/:id/documentos/:tipo',           verificarGestionRRHH, userCompanyController.eliminarDocumentoEmpleado);
+
+// Expediente documental (migración 097, §49): carpetas 1.SELECCION … 6.NOVEDADES. Lectura como los
+// documentos (incluye admin y ver_empleados_rrhh, solo lectura); subir y eliminar, solo RRHH/financiera.
+router.get('/:id/expediente',                         verificarRecursosHumanos, userCompanyController.getExpediente);
+router.get('/:id/expediente/:archivoId/archivo',      verificarRecursosHumanos, userCompanyController.descargarArchivoExpediente);
+router.post('/:id/expediente/:categoria',             verificarGestionRRHH, archivoExpediente, userCompanyController.subirArchivoExpediente);
+router.delete('/:id/expediente/:archivoId',           verificarGestionRRHH, userCompanyController.eliminarArchivoExpediente);
 
 // --- Escritura de la ficha del empleado (no admin) ---
 router.post('/',                         verificarGestionRRHH, userCompanyController.create);

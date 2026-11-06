@@ -2623,9 +2623,9 @@ decía que quitarle al admin la escritura en RRHH estaba pendiente de decisión)
   y bloqueo real en el backend (afecta al rol admin en general en la ficha de empleados; `financiera` y
   `recursosHumanos` siguen igual). Los middlewares globales `isFinanciera`/`isRecursosHumanos` de
   `middleware/auth.js` NO se tocaron: el admin sigue entrando en otros módulos (asistencia, reportes).
-- 292 tests OK, `vite build` OK. **Pendiente en producción:** desplegar backend y frontend (no hay
-  migración). Sin desplegar el backend, el frontend ocultaría los botones pero el admin seguiría
-  pudiendo escribir por API.
+- 292 tests OK, `vite build` OK. **Desplegado en producción el 2026-11-05** (backend y frontend,
+  junto con §47.1; no hay migración propia). Sin desplegar el backend, el frontend ocultaría los
+  botones pero el admin seguiría pudiendo escribir por API.
 
 ### 47.1 — La misma vista para un usuario de otro rol, por permiso (2026-11-05, migración 095)
 
@@ -2646,6 +2646,232 @@ usuario**: `users.ver_empleados_rrhh` (TINYINT 0/1, DEFAULT 0, migración 095), 
   de `AdminRoute` a `EmpleadosConsultaRoute` (admin o bandera). En el panel de usuarios
   (`UserManagement.jsx`) el admin activa/desactiva un checkbox "Ver empleados de RRHH (solo lectura)",
   visible para roles que no administran RRHH por sí mismos (no admin/recursosHumanos/financiera).
-- 303 tests OK, `vite build` OK. **Pendiente en producción:** correr la 095 (idempotente) y desplegar
-  back y front juntos (el token lleva la bandera y el checkbox la escribe). Activar el permiso en el
-  usuario técnico desde el panel, o con `UPDATE users SET ver_empleados_rrhh = 1 WHERE username = ?`.
+- 303 tests OK, `vite build` OK. **Aplicada en producción el 2026-11-05** (reportado por el usuario):
+  se corrió la 095 (idempotente) y se desplegaron back y front juntos (el token lleva la bandera y el
+  checkbox la escribe). Activar el permiso en el usuario técnico desde el panel, o con
+  `UPDATE users SET ver_empleados_rrhh = 1 WHERE username = ?`.
+
+### 47.2 — Faltaba el rol "Administrador" en el selector del panel (2026-11-05)
+
+Al editar un usuario `admin` desde `/users` (p. ej. para cambiarle la contraseña, que obliga a
+reelegir el rol), el `<select>` de rol de `UserManagement.jsx` no tenía la opción "Administrador":
+tenía "Administrativo" (rol `administrativo`, otro rol). El usuario, al no ver "Administrador",
+elegía "Administrativo" y el `admin` quedaba convertido en `administrativo`, perdiendo su menú
+(le pasó a Hanny, `hannycita10`, **en producción**). Corregido agregando `{ value: 'admin',
+label: 'Administrador', color: 'bg-red-100 text-red-800' }` como primera entrada del array `roles`
+y `<option value="admin">Administradores</option>` al filtro (frontend `3333b94`, en `sebas-branch`,
+desplegado el 2026-11-05). Para recuperar a un `admin` que ya quedó mal **antes** de desplegar este
+arreglo, en la BD: `UPDATE users SET role = 'admin' WHERE username = ?` y que el usuario reingrese
+(su token viejo todavía trae el rol cambiado).
+
+## 48. Sesión 2026-11-05 — Cargue masivo: ciudades que faltaban en producción y género en palabra completa
+
+Un usuario intentó un cargue masivo de 21 empleados y el archivo se rechazó.
+
+**Ciudades que "no coinciden" (bloqueaban el archivo):** FUNZA, LA BELLEZA y QUÍPAMA. No eran un
+error de dedo: desde §45 el cargue ya no crea ciudades y rechaza las que no estén en el catálogo.
+La causa real es que **la migración 049 (DIVIPOLA, ~1000 municipios de Colombia, §12.5) nunca se
+aplicó en producción** — está en la lista de pendientes del CLAUDE.md junto con 054/057 por tener
+IDs quemados contra la BD local. Confirmado en producción: `SELECT COUNT(*) FROM ciudad` = **129**
+(solo el seed + ciudades de Excels viejos) y las tres ciudades no estaban en ninguna forma.
+
+- **No se puede correr la 049 tal cual en producción:** su primera parte **fusiona y borra**
+  ciudades por **id fijo** (`WHERE ciudad_idciudad = 41/51/74`, `idciudad = 5`...) calculados contra
+  la base local; en producción esos ids son otras ciudades y reasignaría/borraría mal las FKs.
+- **Solución: migración aditiva y segura** `Descargas/096_ciudades_divipola_aditivo.sql` (con muchos
+  nombres de municipios pero sin cédulas; igual se dejó en Descargas, no versionada). Solo **inserta**
+  los 1002 municipios de DIVIPOLA que falten, comparando por nombre con `COLLATE utf8mb4_0900_ai_ci`
+  (sin tildes ni mayúsculas) para no duplicar los existentes; **no borra, no renombra, no toca ids ni
+  FKs**; idempotente. Es la parte de "altas" de la 049 sin su parte de fusiones/renombres. Tras
+  correrla, `ciudad` queda en ~1000+. **Corrida en producción el 2026-11-05** (reportado por el usuario).
+- Pendiente (anotado, no urgente): resembrar la **049 completa** contra los ids reales de producción
+  para hacer también la limpieza de duplicados/sucios (ej. "ESPINAL" vs "El Espinal", "RIOACHA" vs
+  "RIOHACHA", y quitar los que no son de Colombia: CARACAS, QUITO, VENEZUELA...). El aditivo no limpia
+  eso, solo garantiza que estén todas.
+
+**Género que quedaba vacío (21 advertencias, no bloqueaba):** el Excel traía la palabra completa
+("FEMENINO"/"MASCULINO") y el lector `utils/importEmpleadosExcel.js` solo mapeaba `M`/`F`
+(`MAP_GENERO`), así que dejaba el género vacío. Se amplió `MAP_GENERO` para aceptar también la
+palabra completa: `MASCULINO`/`HOMBRE` → Masculino y `FEMENINO`/`MUJER` → Femenino (además de M/F;
+la búsqueda ya era en mayúsculas). Ahora esas filas entran con su género. Backend `988a61f` en
+`sebas-branch`, **desplegado en producción el 2026-11-05**. (Actualiza el bullet de §45 "Género... los
+sigue normalizando el lector, como antes": sigue siendo el lector, pero ahora también entiende la
+palabra completa.)
+
+**Pendiente anotado — cargue masivo de novedades:** el usuario tiene
+`Descargas/Novedades desde agosto al 041126.xlsx` con **414 novedades** por subir y preguntó si hay
+cargue masivo como en empleados. **No lo hay:** las novedades solo se crean una por una
+(`POST /users-company/novedades`). Falta decidir el enfoque (script de una vez tipo `094_retiros`
+con dry-run, vs construir el cargue masivo reutilizable) y resolver el mapeo de tipos abreviados del
+Excel contra el catálogo `tipo_novedad` (INC 271 → variantes de Incapacidad según "Origen de INC" +
+"Accidente de tránsito" + días; VACACIONES 51; SUSPENSION 51; LNR 19 → Licencia No remunerada;
+LR 14 → Licencia Remunerada; LPL 5 y LP 1 **sin confirmar**; LM 2 → Licencia de Maternidad), más
+evitar duplicar las ya cargadas a mano. Detalle en la memoria del proyecto.
+
+## 49. Sesión 2026-11-05 — Expediente documental del empleado: copia de la carpeta compartida al servidor (en curso)
+
+**Pedido.** Pasar las carpetas de los empleados de la carpeta compartida de Gestión Humana al servidor
+y mostrarlas en la ficha, con la misma estructura de carpetas. La carpeta compartida es
+`\10.255.255.10\compartida-asiste\GESTION HUMANA\COMUN\ASISTE ING\01 .BOGOTA\GESTION DOCUMENTAL\CARPETAS ASISTE ING\BOGOTA\ALTAS FORMATO`.
+La estructura es `<año de ingreso>/<APELLIDOS NOMBRES>/` con 1.SELECCION, 2.DOCUMENTOS, 3.CONTRATO,
+4.SST, 5.RELACIONES LABORALES y 6.NOVEDADES/<INC|LNR|...>. Los empleados nuevos también deben recibir
+esa estructura.
+
+**Decisiones del usuario:**
+- **Alcance:** solo Bogotá.
+- **Carpeta compartida:** queda intacta y solo se copia. El proceso tiene que poder repetirse.
+- **Jurídica:** por ahora RRHH sube a 5.RELACIONES LABORALES. El rol `juridica` queda para después.
+
+**Lo que hay en la carpeta compartida (2026-11-05):**
+- 411 carpetas de empleado, 4.624 archivos y ≈7,4 GB. Casi todo es PDF y el más grande pesa 42,7 MB.
+- La numeración y la escritura de las subcarpetas varían ("4.NOVEDADES", "5.NOVEDAD", "2. DOCUMENTACIÓN",
+  "3.CONTARTO"), así que se reconocen por su nombre sin el número.
+- El servidor de producción no alcanza la red `10.255.255.x`: la copia sale desde un equipo de la oficina.
+
+**Plan en 3 pasos:**
+1. **Preparar el manifiesto, en local** (hecho, solo lectura).
+2. **Subir los archivos** en un solo paquete `tar` con `scp` a producción (pendiente).
+3. **Registrar los archivos en el servidor** (pendiente):
+   - script de importación con modo de prueba, que se puede repetir;
+   - tabla nueva `empleado_archivo`, con varios archivos por categoría;
+   - carpetas en `storage/expedientes/`;
+   - pestaña de Documentos de la ficha con las 6 categorías;
+   - creación de la estructura al dar de alta a un empleado;
+   - los 2 PDF de la 088 pasan a 2.DOCUMENTOS y 3.CONTRATO.
+
+**Paso 1 — qué se hizo:**
+- **Lógica pura** en `utils/expedientes.js`: categorías, nombres únicos de las subcarpetas de novedades y
+  tolerancia a los errores de escritura. Pruebas en `tests/expedientes.test.js`.
+- **Script** `scripts/prepararExpedientes.js`:
+  - no escribe en la carpeta compartida ni en la BD;
+  - escribe `manifiesto.json`, `revisar.csv` y `reporte.txt` en `Downloads/expedientes_bogota`. Llevan
+    cédulas, así que **no se versionan**;
+  - asocia cada carpeta a su ficha por cédula, no por id, porque los ids locales no son los de producción;
+  - las carpetas que solo se parecen a una ficha (aproximadas) no entran hasta confirmarlas con
+    `--equivalencias`.
+
+**Primera corrida, contra la BD local:**
+- **Asociación:** 362 carpetas exactas, 1 con las palabras en otro orden, 12 aproximadas (errores de dedo,
+  puntaje 0,89–0,98) y 36 sin coincidencia.
+- **Las 36 sin coincidencia son casi todas de 2026.** Lo más probable es que sean ingresos recientes que
+  no están en la BD local, así que **la asociación definitiva tiene que hacerse contra producción**.
+- **Manifiesto:** 4.142 archivos, 6,21 GB.
+- **Fuera de las seis carpetas:** quedan 4 archivos, entre ellos uno en "OTRO SI" y otro en
+  "5.COMPROMISO", sueltos en la carpeta del empleado.
+
+**Ajuste del mismo día — se copia TODO** (pedido del usuario: "que toda la información se copie completa").
+- **El manifiesto trae todos los archivos del origen.** El script falla si el conteo no cuadra.
+- **Lo que está fuera de las seis carpetas** va a `OTROS/<ruta original>` dentro de la carpeta del empleado.
+  Son archivos sueltos y carpetas como "OTRO SI", "5.COMPROMISO" y "6.RETIRO".
+- **Las carpetas sin ficha confirmada** también se copian, con `cedula: null`, más `cedula_sugerida` si son
+  aproximadas, a una carpeta con su propio nombre. Quedan pendientes de asociar.
+- **Corrida:** 4.634 de 4.634 archivos (7,37 GB). De ellos, 4.146 quedan asociados y 488 copiados pero
+  pendientes de asociar. Entre una corrida y otra entraron 10 archivos nuevos a la carpeta compartida, que
+  sigue en uso.
+
+**Regla definitiva (usuario, 2026-11-05):** todo se copia. Lo que tiene ficha se asocia a ella y lo que no
+tiene ficha se copia sin asociar.
+- Las 12 carpetas con el nombre mal escrito en un lado o en el otro ("VALENTINA" / "VALENTIA") sí tienen ficha,
+  así que ahora se asocian solas. Se usa el umbral y la ventaja de `homologar` y el reporte las lista para
+  revisarlas.
+- **Resultado:** 4.290 archivos asociados y 344 sin asociar, que son las 36 carpetas sin ficha en la BD local.
+- **En el paso 3, el servidor vuelve a buscar la ficha de esas 36 contra producción,** porque pueden ser
+  ingresos recientes que no están en local.
+
+**Ubicaciones acordadas (usuario, "sí a todo"):**
+- Carpetas sueltas en la raíz del empleado: "OTRO SI" va a 3.CONTRATO y "COMPROMISO" a 5.RELACIONES LABORALES.
+  Dentro de NOVEDADES, "OTRO SI" se queda como novedad.
+- Un PDF suelto en la carpeta del empleado, cuando su 1.SELECCION existe pero está vacía, va a 1.SELECCION.
+- **Quedan en OTROS solo 3 archivos:** un PDF suelto de un empleado con ficha, que RRHH tiene que revisar, y
+  dos carpetas RETIRO de empleados sin ficha.
+
+**Paso 2 — copia al servidor:**
+- **`scripts/empaquetarExpedientes.js`** arma `expedientes_bogota.tar` desde el manifiesto:
+  - la estructura ya va organizada, bajo `expedientes/<año>/<NOMBRE>/...`;
+  - los nombres van en UTF-8 con cabecera pax;
+  - escribe `manifiesto_final.json` con el sha256 de cada archivo, calculado sobre los mismos bytes que entran
+    al tar, y el `.sha256` del paquete.
+- **`scripts/verificarCopiaExpedientes.js`** corre en el servidor y no usa la base ni dependencias. Revisa que
+  cada archivo exista, con el mismo tamaño y el mismo sha256. Sale con código 1 si falta o cambió alguno.
+- **Prueba:** 26 archivos, 15 de ellos con tildes o Ñ en el nombre, se extrajeron con GNU tar y quedaron
+  verificados.
+- **Destino:** `/root/gestor-tecnico-backend/storage/expedientes/`. `storage/` está en `.gitignore` y no se
+  sirve por `/api/files`.
+- **Subida:** este equipo no tiene llave SSH de producción, así que el usuario sube el paquete con `scp` y su
+  contraseña.
+
+**Paso 3 — registro en la base y pestaña de Documentos (2026-11-06, probado en local):**
+- **Migración `097_expediente_empleado.sql`** (idempotente, va ANTES del código):
+  - agrega `users_company.expediente_carpeta`, con la forma `"<año>/<APELLIDOS NOMBRES>"`;
+  - crea la tabla `empleado_archivo`, con un registro por archivo, la `ruta` relativa a
+    `storage/expedientes/` y única, `categoria` (las 6 carpetas más `otros`), `subcarpeta`, `sha256` y
+    `origen` (`migracion` o `sistema`). Se borra en cascada con la ficha.
+- **`scripts/registrarExpedientes.js --manifiesto <manifiesto_final.json> [--aplicar]`:**
+  - por defecto solo simula;
+  - asocia por la cédula del manifiesto y, si no hay, por el nombre de la carpeta contra la base en la
+    que corre;
+  - sin ficha, el archivo se queda en disco y no se registra;
+  - se puede repetir sin duplicar nada: correrlo otra vez asocia a quien tenga ficha nueva;
+  - fija `expediente_carpeta` cuando falta.
+- **API** (`routes/usersCompany.js`):
+  - `GET /:id/expediente` y `GET /:id/expediente/:archivoId/archivo` usan `verificarRecursosHumanos`,
+    así que entran también el admin y quien tenga `ver_empleados_rrhh`, en solo lectura;
+  - `POST /:id/expediente/:categoria` (multipart con `archivo`, más `subcarpeta` en novedades, que se
+    normaliza con `subtipoNovedad`) y `DELETE /:id/expediente/:archivoId` usan `verificarGestionRRHH`;
+  - acepta PDF, que se valida por su firma `%PDF-`, o imagen, hasta 50 MB;
+  - el archivo conserva su nombre saneado y, si choca con otro, se renombra a "x (2).pdf".
+- **Disco:** `utils/expedienteDisco.js` toma la raíz `storage/expedientes/`, o `EXPEDIENTES_DIR` si
+  está definida, y `rutaSegura` impide salir de ella. Al borrar un empleado sus archivos NO se borran
+  del disco.
+- **Alta de un empleado:** `UserCompany.crearEnConexion` fija `expediente_carpeta` = año de ingreso +
+  nombre. `create` crea las 6 subcarpetas después del commit; a quien entre por Hydra se le crean en la
+  primera consulta del expediente.
+- **Frontend:** componente `ExpedienteEmpleado.jsx` arriba de la pestaña Documentos del drawer:
+  - carpetas plegables, y dentro de NOVEDADES subcarpetas por tipo;
+  - botón Ver, que abre el modal `PrevisualizacionDocumento`;
+  - con permiso de escritura, Subir y Eliminar; en novedades se elige el tipo con un datalist (INC,
+    LNR…);
+  - los dos PDF de la 088 y los documentos de Hydra siguen debajo, sin cambios.
+- **Local:**
+  - 097 aplicada; paquete extraído en `storage/expedientes/` y verificado (4.642 de 4.642 archivos);
+  - registro de 4.298 archivos de 374 fichas; la segunda corrida registró 0;
+  - API probada: ver, descargar, subir a NOVEDADES/INCAPACIDADES (quedó en `INC`), rechazo de un PDF
+    falso, de NOVEDADES sin tipo y de la carpeta `otros`, 404 con un id ajeno, 401 sin sesión, y
+    eliminar;
+  - `vite build` pasa.
+- **Falta antes de producción:** que el usuario lo revise en su frontend local. Después, en orden:
+  1. subir el `.tar`;
+  2. extraerlo en `storage/` y verificarlo con `verificarCopiaExpedientes.js`;
+  3. aplicar la migración 097;
+  4. desplegar back y front;
+  5. correr `registrarExpedientes.js`, primero simulado y después con `--aplicar`.
+
+**Aviso de documentos faltantes con el expediente (2026-11-06, pedido del usuario: "que los avisos digan
+qué documentos faltan y, si no falta ninguno, que no haya avisos"):**
+- **Cuándo un documento está completo:**
+  - "Documentación del empleado": si está su PDF (088) **o** si `2.DOCUMENTOS` del expediente tiene archivos;
+  - "Contrato y anexos": si está su PDF **o** si `3.CONTRATO` tiene archivos.
+- **Backend:**
+  - `EmpleadoDocumento.getByEmpleado` devuelve, además de `cargado`, los campos `en_expediente`,
+    `carpeta_expediente` y `completo`;
+  - `documentos_cargados` del listado cuenta con la misma regla. Lo usa el filtro "Documentos:
+    Completos/Pendientes".
+- **Frontend:**
+  - la cabecera de la ficha dice "Falta: Contrato y anexos" o "Faltan: Documentación del empleado y
+    Contrato y anexos", y no muestra nada si están los dos;
+  - la tarjeta "Documentos del empleado" muestra el visto verde y "En el expediente: 3.CONTRATO (n
+    archivos)" cuando el documento está en el expediente;
+  - al subir o borrar en el expediente, el aviso se recalcula solo (`onCambio`).
+- **Local:** 371 empleados completos, 2 con un documento y 93 sin ninguno.
+- **Probado en el navegador:** Karen Barragán sin aviso; Johan Mendoza con "Falta: Contrato y anexos",
+  que desaparece al subir a 3.CONTRATO y vuelve al borrar; Edwin Acevedo con los dos faltantes.
+
+**Producción, paso 1 hecho (2026-11-06):**
+- **Subida:** el usuario subió con `scp` el `.tar`, su `.sha256`, `manifiesto_final.json` y
+  `verificarCopiaExpedientes.js` a `/root/expedientes_carga/` (7.555 MB en unos 50 minutos, a 2,5 MB/s).
+- **Comprobación del paquete:** `sha256sum -c` dio OK.
+- **Extracción:** en `/root/gestor-tecnico-backend/storage/expedientes/`, que no existía antes.
+- **Verificación:** 4.642 de 4.642 archivos correctos, con 0 faltantes y 0 distintos.
+- **Respaldo:** el `.tar` queda en `/root/expedientes_carga/`.
+- **Pendiente:** commit y push del código, migración 097, despliegue de back y front, y
+  `registrarExpedientes.js` (primero simulado y después con `--aplicar`).

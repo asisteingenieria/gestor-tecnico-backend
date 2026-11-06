@@ -1,6 +1,8 @@
 const db = require('../config/db');
 const CuentaEmpleado = require('./CuentaEmpleado');
 const pantallaGrisService = require('../services/asistencia/pantallaGrisService');
+const { carpetaExpediente } = require('../utils/expedientes');
+const { crearEstructura } = require('../utils/expedienteDisco');
 
 const SELECT_EMPLEADO = `
     SELECT
@@ -14,7 +16,12 @@ const SELECT_EMPLEADO = `
         cex.nombre AS ciudad_expedicion_nombre,
         CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido) AS nombre_completo,
         (SELECT COUNT(*) FROM activos a WHERE a.agente_id = uc.id) AS total_activos,
-        (SELECT COUNT(*) FROM empleado_documento ed WHERE ed.users_company_id = uc.id) AS documentos_cargados,
+        -- Cuántos de los dos documentos obligatorios tiene (0-2): el PDF de la 088 o, desde la 097, archivos en
+        -- su carpeta del expediente (2.DOCUMENTOS / 3.CONTRATO). Lo usa el filtro "Documentos" del listado.
+        ((EXISTS(SELECT 1 FROM empleado_documento ed WHERE ed.users_company_id = uc.id AND ed.tipo = 'documentacion_empleado')
+            OR EXISTS(SELECT 1 FROM empleado_archivo ea WHERE ea.users_company_id = uc.id AND ea.categoria = 'documentos'))
+         + (EXISTS(SELECT 1 FROM empleado_documento ed WHERE ed.users_company_id = uc.id AND ed.tipo = 'contrato_anexos')
+            OR EXISTS(SELECT 1 FROM empleado_archivo ea WHERE ea.users_company_id = uc.id AND ea.categoria = 'contrato'))) AS documentos_cargados,
         c.idcontrato,
         c.fecha_ingreso,
         r.fecha_retiro,
@@ -464,6 +471,9 @@ class UserCompany {
             await conn.beginTransaction();
             const ucId = await this.crearEnConexion(conn, data);
             await conn.commit();
+            // La estructura de carpetas del expediente no bloquea el alta: si falla, se crea al consultarlo.
+            crearEstructura(carpetaExpediente(data, data.contrato?.fecha_ingreso))
+                .catch((e) => console.error('No se pudo crear la carpeta del expediente:', e.message));
             return { id: ucId, ...data };
         } catch (error) {
             await conn.rollback();
@@ -499,6 +509,11 @@ class UserCompany {
             camposPersonales(data)
         );
         const ucId = result.insertId;
+
+        // Carpeta del expediente documental (migración 097): "<año de ingreso>/<APELLIDOS NOMBRES>".
+        // Las subcarpetas en disco se crean después del commit (create) o en la primera consulta.
+        await conn.query('UPDATE users_company SET expediente_carpeta = ? WHERE id = ?',
+            [carpetaExpediente(data, data.contrato?.fecha_ingreso), ucId]);
 
         const contratoId = await insertarContrato(conn, ucId, data.contrato);
         await insertarSalario(conn, contratoId, data.salario, data.contrato.fecha_ingreso);

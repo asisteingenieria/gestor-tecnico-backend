@@ -4,6 +4,9 @@ const Traspaso = require('../models/Traspaso');
 const Vacaciones = require('../models/Vacaciones');
 const Retiro = require('../models/Retiro');
 const EmpleadoDocumento = require('../models/EmpleadoDocumento');
+const EmpleadoArchivo = require('../models/EmpleadoArchivo');
+const expedienteDisco = require('../utils/expedienteDisco');
+const { CATEGORIA_POR_CLAVE, carpetaExpediente, subtipoNovedad } = require('../utils/expedientes');
 const importEmpleadosExcel = require('../utils/importEmpleadosExcel');
 const importEmpleadosService = require('../services/importEmpleadosService');
 const { validarObligatorios } = require('../utils/validarEmpleado');
@@ -219,6 +222,9 @@ const userCompanyController = {
             const archivosNovedades = await NovedadRrhh.archivosDeEmpleado(id);
             const archivosTraspasos = await Traspaso.archivosDeEmpleado(id);
             const archivosDocumentos = await EmpleadoDocumento.archivosDeEmpleado(id);
+            // El expediente documental (097) NO se borra del disco: son los documentos de Gestión Humana
+            // (muchos copiados de la carpeta compartida). Sus registros caen por CASCADE; los archivos se
+            // quedan en storage/expedientes/ y se vuelven a asociar con registrarExpedientes.js si hace falta.
             await UserCompany.delete(id);
             archivosNovedades.forEach(borrarArchivoSoporte);
             archivosTraspasos.forEach(soportesTraspaso.borrar);
@@ -552,6 +558,114 @@ const userCompanyController = {
             res.json({ success: true, message: 'Documento eliminado', documentos: await EmpleadoDocumento.getByEmpleado(req.params.id) });
         } catch (error) {
             console.error('Error al eliminar documento del empleado:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // ==================== EXPEDIENTE DOCUMENTAL (migración 097, §49) ====================
+    // Carpetas 1.SELECCION … 6.NOVEDADES del empleado en storage/expedientes/<año>/<NOMBRE>/.
+
+    async getExpediente(req, res) {
+        try {
+            const empleado = await UserCompany.getById(req.params.id);
+            if (!empleado) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            // Empleados registrados antes de la 097 (o desde Hydra) reciben su carpeta en la primera consulta.
+            const carpeta = empleado.expediente_carpeta
+                || await EmpleadoArchivo.fijarCarpetaSiFalta(empleado.id, carpetaExpediente(empleado, empleado.fecha_ingreso));
+            expedienteDisco.crearEstructura(carpeta).catch((e) => console.error('No se pudo crear la carpeta del expediente:', e.message));
+            res.json({ success: true, expediente: await EmpleadoArchivo.getExpediente(empleado.id) });
+        } catch (error) {
+            console.error('Error al obtener el expediente:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async descargarArchivoExpediente(req, res) {
+        try {
+            const archivo = await EmpleadoArchivo.get(req.params.id, req.params.archivoId);
+            const ruta = archivo && expedienteDisco.rutaSegura(archivo.ruta);
+            if (!ruta || !fs.existsSync(ruta)) {
+                return res.status(404).json({ success: false, message: 'Archivo no encontrado' });
+            }
+            const disposicion = req.query.descargar ? 'attachment' : 'inline';
+            res.setHeader('Content-Type', archivo.mime);
+            res.setHeader('Content-Disposition', `${disposicion}; filename*=UTF-8''${encodeURIComponent(archivo.nombre)}`);
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.sendFile(ruta);
+        } catch (error) {
+            console.error('Error al descargar archivo del expediente:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async subirArchivoExpediente(req, res) {
+        const temporal = req.file?.path;
+        const descartar = () => temporal && fs.promises.unlink(temporal).catch(() => {});
+        try {
+            const { id, categoria } = req.params;
+            if (!EmpleadoArchivo.esCategoriaValida(categoria) || categoria === 'otros') {
+                descartar();
+                return res.status(400).json({ success: false, message: 'Carpeta del expediente no válida' });
+            }
+            if (!req.file) {
+                return res.status(400).json({ success: false, message: 'Falta el archivo' });
+            }
+            if (req.file.mimetype === 'application/pdf' && !await empiezaComoPdf(temporal)) {
+                descartar();
+                return res.status(400).json({ success: false, message: 'El archivo no es un PDF válido' });
+            }
+            const empleado = await UserCompany.getById(id);
+            if (!empleado) {
+                descartar();
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            // En NOVEDADES va en la subcarpeta del tipo (INC, LNR, VACACIONES…), con el mismo nombre que
+            // usa Gestión Humana; en las demás carpetas, directo.
+            const subcarpeta = categoria === 'novedades' && String(req.body.subcarpeta || '').trim()
+                ? subtipoNovedad(req.body.subcarpeta).slice(0, 100)
+                : null;
+            if (categoria === 'novedades' && !subcarpeta) {
+                descartar();
+                return res.status(400).json({ success: false, message: 'Indica el tipo de novedad (por ejemplo INC, LNR, VACACIONES)' });
+            }
+            const carpeta = empleado.expediente_carpeta
+                || await EmpleadoArchivo.fijarCarpetaSiFalta(empleado.id, carpetaExpediente(empleado, empleado.fecha_ingreso));
+            await expedienteDisco.crearEstructura(carpeta);
+            const relativaDir = [carpeta, CATEGORIA_POR_CLAVE[categoria].carpeta, subcarpeta].filter(Boolean).join('/');
+            const dir = expedienteDisco.rutaSegura(relativaDir);
+            await fs.promises.mkdir(dir, { recursive: true });
+            const nombre = expedienteDisco.nombreLibre(dir, expedienteDisco.nombreArchivoSeguro(req.file.originalname));
+            await fs.promises.rename(temporal, `${dir}/${nombre}`);
+            try {
+                await EmpleadoArchivo.registrar({
+                    usersCompanyId: empleado.id, categoria, subcarpeta, nombre, ruta: `${relativaDir}/${nombre}`,
+                    mime: req.file.mimetype, tamano: req.file.size, origen: 'sistema', subidoPor: req.user?.id
+                });
+            } catch (error) {
+                await fs.promises.unlink(`${dir}/${nombre}`).catch(() => {});
+                throw error;
+            }
+            res.status(201).json({ success: true, message: 'Archivo cargado', expediente: await EmpleadoArchivo.getExpediente(empleado.id) });
+        } catch (error) {
+            descartar();
+            console.error('Error al cargar archivo al expediente:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async eliminarArchivoExpediente(req, res) {
+        try {
+            const archivo = await EmpleadoArchivo.eliminar(req.params.id, req.params.archivoId);
+            if (!archivo) {
+                return res.status(404).json({ success: false, message: 'Archivo no encontrado' });
+            }
+            const ruta = expedienteDisco.rutaSegura(archivo.ruta);
+            if (ruta) fs.promises.unlink(ruta).catch((e) => { if (e.code !== 'ENOENT') console.error('No se pudo borrar', ruta, e.message); });
+            res.json({ success: true, message: 'Archivo eliminado', expediente: await EmpleadoArchivo.getExpediente(req.params.id) });
+        } catch (error) {
+            console.error('Error al eliminar archivo del expediente:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },
