@@ -2,6 +2,7 @@ const db = require('../../config/db');
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
+const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const { fechaLaboral, rangoDelMes } = require('../../utils/fechaBogota');
 const { NoAutorizadoError, NoEncontradoError, ValidacionError } = require('../../errors/AppError');
 const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/resumenMensual');
@@ -26,14 +27,16 @@ async function assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId) {
 }
 
 // La gente del árbol con la forma que esperan las pantallas de equipo. `jefe_area` = quién la gestiona,
-// solo para la que no es directa (en la directa es él mismo).
+// solo para la que no es directa (en la directa es él mismo). `jefe_inmediato` = su coordinador, salvo
+// cuando es quien consulta (§57).
 async function empleadosDelArbol(directorUsersCompanyId) {
     const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
     return empleados.map((e) => ({
         ...e,
         nombre: e.nombre_propio,
         cedula: e.numero_identificacion,
-        jefe_area: e.directo ? null : e.jefe
+        jefe_area: e.directo ? null : e.jefe,
+        jefe_inmediato: e.jefe_inmediato_id === directorUsersCompanyId ? null : e.jefe_inmediato
     }));
 }
 
@@ -42,6 +45,22 @@ async function empleadosDelArbol(directorUsersCompanyId) {
 async function esJefeDeEquipo(usersCompanyId) {
     if (!usersCompanyId) return false;
     return equipoRepo.tieneEmpleadosACargo(usersCompanyId);
+}
+
+// Quién ve la vista "Equipo" (§57): jefe inmediato (coordinador), jefe de área o gestor de alguien.
+// `puede_gestionar` = además gestiona la asistencia de alguien (horarios, horas extra, correcciones).
+async function puedeVerEquipo(usersCompanyId) {
+    if (!usersCompanyId) return false;
+    return equipoRepo.tienePersonalACargo(usersCompanyId);
+}
+
+async function permisosEquipo(usersCompanyId) {
+    if (!usersCompanyId) return { puede_ver: false, puede_gestionar: false };
+    const [puedeVer, puedeGestionar] = await Promise.all([
+        equipoRepo.tienePersonalACargo(usersCompanyId),
+        equipoRepo.tieneEmpleadosACargo(usersCompanyId)
+    ]);
+    return { puede_ver: puedeVer, puede_gestionar: puedeGestionar };
 }
 
 async function cargoDe(usersCompanyId) {
@@ -79,6 +98,7 @@ async function estadoEnVivo(empleados) {
             centro_costo_id: empleado.centro_costo_id,
             centro_costo: empleado.centro_costo,
             jefe_area: empleado.jefe_area ?? null,
+            jefe_inmediato: empleado.jefe_inmediato ?? null,
             directo: empleado.directo ?? null,
             turno: horario ? {
                 plantilla: horario.plantilla,
@@ -106,7 +126,13 @@ async function jornadasDe({ directorUsersCompanyId, empleadoId, desde, hasta }) 
 async function trazabilidadDe({ directorUsersCompanyId, empleadoId, fecha }) {
     requireUsersCompanyId(directorUsersCompanyId);
     await assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId);
-    return trazabilidadDeEmpleado(empleadoId, fecha);
+    // Con el horario del día: el coordinador y el director (con gente de sus jefes) no pueden pedir
+    // GET /horarios, que es de quien gestiona (§57).
+    const [trazabilidad, [horario]] = await Promise.all([
+        trazabilidadDeEmpleado(empleadoId, fecha),
+        horarioAsignadoRepo.findRango(empleadoId, fecha, fecha)
+    ]);
+    return { ...trazabilidad, horario: horario ?? null };
 }
 
 // Sin chequeo de permisos: quien llama ya validó que puede ver a este empleado (el jefe con
@@ -186,6 +212,7 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
             cargo: empleado.cargo,
             centro_costo: empleado.centro_costo,
             jefe_area: empleado.directo ? null : empleado.jefe,
+            jefe_inmediato: empleado.jefe_inmediato_id === directorUsersCompanyId ? null : empleado.jefe_inmediato,
             ...resumenDeJornadas(jornadas)
         };
     }));
@@ -229,6 +256,8 @@ module.exports = {
     assertEmpleadoACargo,
     assertEmpleadoEnArbol,
     esJefeDeEquipo,
+    puedeVerEquipo,
+    permisosEquipo,
     cargoDe,
     equipo,
     jornadasDe,

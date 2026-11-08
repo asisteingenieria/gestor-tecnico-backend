@@ -107,36 +107,67 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
 // El director ve la asistencia de toda la gente que cuelga de él: sus subordinados directos, los de
 // ellos y así hacia abajo, siguiendo quién gestiona a quién (GESTOR). Una CTE recursiva; con UNION
 // (sin ALL) termina aunque haya ciclos —Geraldin es su propia gestora—, y la ficha raíz se excluye.
-const ACTIVOS_CTE = `activos AS (
-        SELECT c.users_company_id AS empleado_id, ${GESTOR} AS gestor_id
-        FROM contrato c
-        JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-        WHERE ec.nombre IN (?, ?) AND ${GESTOR} IS NOT NULL
+//
+// Desde §57 el árbol de CONSULTA sigue las tres líneas de mando del contrato activo: jefe inmediato
+// (coordinador), jefe de área y GESTOR. Así el coordinador ve a los suyos en "Equipo", el jefe de área a
+// toda su área (incluidos los coordinadores que le reportan como jefe inmediato) y el director todo lo de
+// abajo. Para ESCRIBIR (horarios, horas extra, correcciones) sigue valiendo solo GESTOR: esSubordinado y
+// listaEmpleadosACargo.
+const LINEAS_CTE = `lineas AS (
+        SELECT c.users_company_id AS empleado_id, c.jefe_inmediato_id AS jefe_id
+          FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE ec.nombre IN (?, ?) AND c.jefe_inmediato_id IS NOT NULL
+        UNION
+        SELECT c.users_company_id, c.jefe_area_id
+          FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE ec.nombre IN (?, ?) AND c.jefe_area_id IS NOT NULL
+        UNION
+        SELECT c.users_company_id, c.gestor_asistencia_id
+          FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE ec.nombre IN (?, ?) AND c.gestor_asistencia_id IS NOT NULL
     )`;
+const PARAMS_LINEAS = [...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS];
+
+// ¿Es jefe inmediato, jefe de área o gestor de alguien con contrato activo? Abre las pantallas de
+// consulta del equipo (canVerEquipo), no las de gestión (canDirigirEquipo, que es solo GESTOR).
+async function tienePersonalACargo(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT 1
+           FROM contrato c
+           JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+          WHERE ec.nombre IN (?, ?) AND c.users_company_id <> ?
+            AND (c.jefe_inmediato_id = ? OR c.jefe_area_id = ? OR c.gestor_asistencia_id = ?)
+          LIMIT 1`,
+        [...ESTADOS_CONTRATO_ACTIVOS, usersCompanyId, usersCompanyId, usersCompanyId, usersCompanyId]
+    );
+    return filas.length > 0;
+}
 
 async function idsDelArbol(raizUsersCompanyId, conn = db) {
     const [filas] = await conn.query(
-        `WITH RECURSIVE ${ACTIVOS_CTE},
+        `WITH RECURSIVE ${LINEAS_CTE},
          arbol (id) AS (
-            SELECT empleado_id FROM activos WHERE gestor_id = ?
+            SELECT empleado_id FROM lineas WHERE jefe_id = ?
             UNION
-            SELECT a.empleado_id FROM activos a JOIN arbol t ON a.gestor_id = t.id
+            SELECT l.empleado_id FROM lineas l JOIN arbol t ON l.jefe_id = t.id
          )
          SELECT id FROM arbol WHERE id <> ?`,
-        [...ESTADOS_CONTRATO_ACTIVOS, raizUsersCompanyId, raizUsersCompanyId]
+        [...PARAMS_LINEAS, raizUsersCompanyId, raizUsersCompanyId]
     );
     return filas.map((f) => f.id);
 }
 
 // Toda la gente del árbol con lo que muestran las pantallas de equipo. `directo` = la gestiona esta
-// ficha (a esos sí les asigna horarios y les pide horas extra); `jefe` = quién la gestiona.
+// ficha (a esos sí les asigna horarios y les pide horas extra); `jefe` = quién la gestiona;
+// `jefe_inmediato` = su coordinador.
 async function listaEmpleadosDelArbol(raizUsersCompanyId, conn = db) {
     const ids = await idsDelArbol(raizUsersCompanyId, conn);
     if (ids.length === 0) return [];
     const [filas] = await conn.query(
         `SELECT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo,
                 cam.nombre AS campania, c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo,
-                ${GESTOR} AS gestor_id, g.nombre_propio AS jefe
+                ${GESTOR} AS gestor_id, g.nombre_propio AS jefe,
+                c.jefe_inmediato_id, ji.nombre_propio AS jefe_inmediato
          FROM contrato c
          JOIN users_company uc ON uc.id = c.users_company_id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
@@ -144,6 +175,7 @@ async function listaEmpleadosDelArbol(raizUsersCompanyId, conn = db) {
          LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
          LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
          LEFT JOIN users_company g ON g.id = ${GESTOR}
+         LEFT JOIN users_company ji ON ji.id = c.jefe_inmediato_id
          WHERE c.users_company_id IN (?) AND ec.nombre IN (?, ?)
            AND c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2
                                 JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
@@ -158,18 +190,18 @@ async function esDelArbol(raizUsersCompanyId, empleadoId, conn = db) {
     return (await idsDelArbol(raizUsersCompanyId, conn)).includes(Number(empleadoId));
 }
 
-// Hacia arriba: el gestor del empleado, el gestor de ese gestor, etc. Para avisar en vivo a todos los
-// "Equipo hoy" que ven a la persona.
+// Hacia arriba por las mismas tres líneas: coordinador, jefe de área, gestor y los de ellos. Para avisar
+// en vivo a todos los "Equipo hoy" que ven a la persona.
 async function ancestrosDe(usersCompanyId, conn = db) {
     const [filas] = await conn.query(
-        `WITH RECURSIVE ${ACTIVOS_CTE},
+        `WITH RECURSIVE ${LINEAS_CTE},
          arriba (id) AS (
-            SELECT gestor_id FROM activos WHERE empleado_id = ?
+            SELECT jefe_id FROM lineas WHERE empleado_id = ?
             UNION
-            SELECT a.gestor_id FROM activos a JOIN arriba t ON a.empleado_id = t.id
+            SELECT l.jefe_id FROM lineas l JOIN arriba t ON l.empleado_id = t.id
          )
          SELECT id FROM arriba WHERE id <> ?`,
-        [...ESTADOS_CONTRATO_ACTIVOS, usersCompanyId, usersCompanyId]
+        [...PARAMS_LINEAS, usersCompanyId, usersCompanyId]
     );
     return filas.map((f) => f.id);
 }
@@ -225,6 +257,7 @@ module.exports = {
     cargoDe,
     tieneJefesACargo,
     gestorConNombreDe,
+    tienePersonalACargo,
     idsDelArbol,
     listaEmpleadosDelArbol,
     esDelArbol,

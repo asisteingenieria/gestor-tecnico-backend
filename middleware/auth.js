@@ -102,6 +102,23 @@ const canDirigirEquipo = async (req, res, next) => {
         next(err);
     }
 };
+// Consulta del equipo (asistencia.md §57): equipo hoy, histórico, trazabilidad y novedades. Pasa quien sea
+// jefe inmediato (coordinador), jefe de área o gestor de alguien con contrato activo, consultado en cada
+// petición. Lo que escribe sigue con canDirigirEquipo.
+const canVerEquipo = async (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ msg: 'No autenticado' });
+    }
+    try {
+        const { puedeVerEquipo } = require('../services/asistencia/equipoService');
+        if (await puedeVerEquipo(req.user.users_company_id)) {
+            return next();
+        }
+        return res.status(403).json({ msg: 'Solo quien tiene personal a cargo puede ver su equipo' });
+    } catch (err) {
+        next(err);
+    }
+};
 // Cambios de turno (asistencia.md §50, flujo de §51): los pide el jefe de operaciones, quien gestiona
 // la asistencia de alguien. Como canDirigirEquipo, sale de RRHH en cada petición.
 const canSolicitarCambioTurno = async (req, res, next) => {
@@ -166,6 +183,7 @@ module.exports = {
     isDirectorOperaciones,
     isEmpleado,
     canDirigirEquipo,
+    canVerEquipo,
     canSolicitarCambioTurno,
     canRegistrarAsistencia,
     isFinanciera,

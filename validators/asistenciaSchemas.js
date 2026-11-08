@@ -144,6 +144,16 @@ const eventoManualSchema = {
 
 // Reporte mensual de horas extras (§32). El formato AAAA-MM del periodo y el contenido de cada
 // fila los valida el dominio, que da mensajes por empleado.
+// Historial de novedades del equipo (§56).
+const novedadesEquipoQuerySchema = {
+    query: {
+        desde: { tipo: 'fecha' },
+        hasta: { tipo: 'fecha' },
+        empleado_id: { tipo: 'entero' },
+        tipo_novedad_id: { tipo: 'entero' }
+    }
+};
+
 const periodoQuerySchema = {
     query: { periodo: { requerido: true, tipo: 'texto' } }
 };
@@ -222,6 +232,7 @@ module.exports = {
     aprobarCambioTurnoSchema,
     rechazarCambioTurnoSchema,
     periodoQuerySchema,
+    novedadesEquipoQuerySchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
     jornadasEmpleadoSchema,

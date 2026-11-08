@@ -3315,3 +3315,96 @@ asigna el horario a cada persona de su equipo directo. No hay migración: el hor
 - **Prueba en navegador (2026-11-03):** malla de Tecnología aplicada a David (20 horarios del 3 al 6 de noviembre,
   8 plantillas creadas); con el molinete activo en local, Johan (turno 13:00-21:30) entró por molinete a la
   1:07 p. m., Equipo lo muestra "Tarde · 7 min" y su monitor cuenta contra la salida de 9:30 p. m.
+
+## 56. Historial de novedades del equipo para los jefes (2026-11-08)
+
+**Pedido:** que los coordinadores (jefe inmediato), jefes de área y directores vean el historial de las
+novedades de RRHH de su gente (las de ago → 4 nov se cargaron en producción el 2026-11-06, `claude/modulo
+recursoshumanos.md` §50). Solo lectura. Sin migración.
+
+**Decisiones del usuario:**
+- **Sin diagnóstico ni documentos**: el jefe ve tipo, fechas, días, retorno, origen (común, tránsito,
+  trabajo), observaciones y el estado de los soportes (completos / incompletos / pendientes / no requiere,
+  contando el documento del expediente como en RRHH). `resumen_diagnostico` y los PDF quedan para
+  RRHH/financiera. El texto interno "Cargue masivo desde el Excel…" de observaciones se oculta.
+- **Todo lo que cuelga de él**, por las tres líneas del contrato activo: `jefe_inmediato_id`
+  (coordinador), `jefe_area_id` y `gestor_asistencia_id`. CTE recursiva con `UNION` (ciclos), distinta del
+  árbol de §51, que solo sigue a GESTOR: aquí entra el coordinador, que hoy no tiene acceso de equipo
+  (31 de 43 coordinadores en local).
+- **Incluye retirados**: se cruza por el contrato de la novedad, no por el contrato activo. Una novedad sale
+  si su contrato tenía como jefe inmediato, de área o gestor a alguien del árbol. Las del propio jefe no salen.
+
+**Backend** (cuatro capas): `domain/asistencia/novedadesEquipo.js` (estado en curso/próxima/finalizada con
+la fecha de Bogotá, soportes, limpieza de observaciones; 5 pruebas en `tests/asistencia/novedadesEquipo.test.js`),
+`repositories/asistencia/novedadEquipoRepository.js`, `services/asistencia/novedadEquipoService.js`,
+`controllers/asistencia/novedadEquipoController.js`.
+- Permisos: `GET /api/asistencia/equipo/permisos` → `{ puede_ver, puede_gestionar }` (§57; reemplazó a
+  `/novedades-equipo/permisos`, que no llegó a desplegarse).
+- `GET /api/asistencia/novedades-equipo?desde&hasta&empleado_id&tipo_novedad_id` (schema
+  `novedadesEquipoQuerySchema`). El rango se cruza con la novedad: sale si se solapa con el periodo.
+- Sin middleware de rol (solo `verifyToken`): quién tiene gente a cargo sale de RRHH y lo valida el servicio
+  (403 `NO_AUTORIZADO` si no). Sirve a cuentas de `users` y de `cuenta_empleado`.
+
+**Frontend:** `src/components/asistencia/NovedadesEquipo.jsx` (filtros de fechas, nombre/cédula, tipo,
+estado e "Incluir retirados"; resumen y exportar CSV); `asistenciaService.getNovedadesEquipo/getPermisosNovedadesEquipo`.
+- Jefe de equipo (`/operaciones`): tercera vista de "Equipo" (Hoy | Histórico | **Novedades**,
+  `SelectorVistaEquipo`), ruta `operaciones/equipo/novedades`. No va como pestaña propia: el menú del jefe ya
+  no cabía a 1568 px y quedaba cortada ("Nove").
+- Coordinador (`/asistencia`): desde §57 también es la tercera vista de su "Equipo", ruta
+  `asistencia/equipo/novedades`.
+- `AsistenciaLayout` trae a la vista la pestaña activa del menú superior, que se desplaza en horizontal con la
+  barra oculta.
+
+**Prueba local** (backend en otro puerto con el código nuevo): Kevin (ficha 25) 161 novedades del 1 ago al
+4 nov, 34 de retirados, 4 en curso; Jesús Romero (coordinador sin acceso de equipo) 34; el jefe de prueba
+`9000000001` `puede_ver: true` y lista vacía; `empleado1` 403; ninguna respuesta trae diagnóstico.
+Consulta en ~15 ms. **En el navegador** (servidores locales nuevos, 2026-11-08): David López 6 novedades y
+filtros de nombre y fechas; Kevin 162 (81 personas, 34 de retirados, 4 en curso hoy); Jesús Romero, como
+coordinador, la pestaña propia con 35 (22 sin retirados). A Kevin y a Jesús se les cambió la clave **en local**
+por la del seed para poder entrar (tenían el cambio obligatorio pendiente). **Despliegue:** solo código, backend y frontend juntos; sin migración.
+
+## 57. El coordinador (jefe inmediato) también ve su equipo (2026-11-08)
+
+**Pedido:** el coordinador o jefe inmediato debe tener la vista de Equipo con la información de su gente: hora
+de llegada, estado de conexión, pausas, tiempo trabajado, histórico y trazabilidad. Hasta ahora "Equipo" era
+solo de quien gestiona la asistencia (GESTOR = `COALESCE(gestor_asistencia_id, jefe_area_id)`, §23/§44), y
+31 de los 43 coordinadores no tenían ninguna vista de equipo.
+
+**Regla:** se separa **consultar** de **gestionar**.
+- **Consultar** (equipo hoy, histórico, trazabilidad, jornadas, estadísticas y novedades): toda la gente que
+  cuelga de la ficha por cualquiera de las tres líneas de mando del contrato activo, `jefe_inmediato_id`,
+  `jefe_area_id` y `gestor_asistencia_id`. Es el árbol de §51 ampliado: `equipoRepository.idsDelArbol` /
+  `listaEmpleadosDelArbol` / `esDelArbol` ahora recorren las tres líneas (CTE `LINEAS_CTE`). Middleware
+  nuevo `canVerEquipo` (`tienePersonalACargo`).
+- **Gestionar** (horarios, malla, horas extra, cambios de turno, corrección manual de jornada) no cambia:
+  `canDirigirEquipo` y `assertEmpleadoACargo`, solo GESTOR. El coordinador que no gestiona recibe 403.
+
+**Efecto en los jefes que ya usaban Equipo** (local): nadie pierde a nadie; ganan los coordinadores que les
+reportan como jefe inmediato aunque su jefe de área sea otro (el caso de §49: Kevin +7, Nelson +9, Mayra +15,
+David +1). German Arias pasa de 0 a 383 porque es jefe de área de casi todos, aunque Geraldin gestiona (§44).
+Los coordinadores ven a los suyos (Jesús Romero 15, Yanira Vásquez 13, Giovanny Ospina 33…).
+
+**Avisos en vivo:** `ancestrosDe` sube por las mismas tres líneas, así que el "Equipo hoy" del coordinador
+también recibe el aviso por socket de cada cambio de jornada (§43), no solo la resincronización de 15 s.
+
+**Trazabilidad:** `GET /equipo/:id/jornada/:fecha/trazabilidad` ahora trae el `horario` del día. La pantalla
+pedía además `GET /horarios?empleadoId`, que valida `assertEmpleadoACargo`: al coordinador, y al director
+cuando abría a alguien de uno de sus jefes, la trazabilidad completa le fallaba con 403. Ya no se pide.
+
+**API:** `GET /equipo/permisos` → `{ puede_ver, puede_gestionar }` (sin middleware, lo usa el menú);
+`GET /equipo`, `/equipo/:id/jornadas`, `/equipo/:id/jornada/:fecha/trazabilidad`, `/equipo/estadisticas`,
+`/equipo/resumen-mensual` y `/novedades-equipo` con `canVerEquipo`. Cada fila de equipo trae además
+`jefe_inmediato` (su coordinador, salvo que sea quien consulta).
+
+**Frontend:** el coordinador (layout `/asistencia`) tiene "Equipo" en el menú cuando `puede_ver`, con las mismas
+pantallas del jefe —`EquipoAsistencia`, `EquipoMensual`, `NovedadesEquipo`, `TrazabilidadEmpleado`— en
+`asistencia/equipo`, `/equipo/mes`, `/equipo/novedades` y `/equipo/:id/trazabilidad` (`EmpleadoRoute`). Sin
+Horarios, Horas extra del equipo ni Cambios de turno. `utils/rutaEquipo.js` (`useBaseEquipo`) arma los enlaces
+con `/operaciones` o `/asistencia` según la ruta. "Equipo hoy" muestra "Coord.: X" junto al jefe.
+
+**Prueba local** (2026-11-08, navegador): Jesús Romero entra con su cédula y ve "Equipo" con sus 15 agentes
+(llegada, estado, centro de costo, turno y jefe de área), el histórico de octubre, la trazabilidad de un día con
+su turno programado y la vista de novedades; `POST /horarios` le responde 403. Kevin sigue con 118 y
+`puede_gestionar: true`; `empleado1`, 403. En local no hay jornadas registradas del equipo de Jesús, así que la
+llegada en vivo se vio con datos solo en el equipo de Kevin. **Despliegue:** solo código, backend y frontend
+juntos, sin migración.
