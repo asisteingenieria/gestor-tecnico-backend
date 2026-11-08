@@ -80,6 +80,9 @@ nadie — ni `db`, ni `config`, ni otro servicio.
     (`equipoRepository.listaEmpleadosDelArbol`, `assertEmpleadoEnArbol`); las **escrituras** siguen siendo
     solo para su equipo directo. Horas extra y cambios de turno: solicita el gestor del empleado y aprueba
     el gestor de ese jefe (`assertAprobador`).
+    Desde §57 el árbol de **consulta** sigue las tres líneas de mando (jefe inmediato, jefe de área y
+    gestor): el coordinador ve a los suyos con `canVerEquipo`. Una ruta nueva de solo lectura del equipo usa
+    `canVerEquipo` + `assertEmpleadoEnArbol`; una que escribe, `canDirigirEquipo` + `assertEmpleadoACargo`.
 
 14. **Quién gestiona un equipo no lo dice un rol.** Las rutas de equipo, horarios y horas
     extra usan `canDirigirEquipo` (`middleware/auth.js`): pasa quien sea `jefe_area_id` de un

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, canSolicitarCambioTurno, isFinanciera } = require('../middleware/auth');
+const { verifyToken, canRegistrarAsistencia, canDirigirEquipo, canVerEquipo, canSolicitarCambioTurno, isFinanciera } = require('../middleware/auth');
 const validar = require('../middleware/validar');
 const asyncHandler = require('../middleware/asyncHandler');
 const uploadExcel = require('../middleware/uploadEmpleados');
@@ -21,6 +21,7 @@ const alertaController = require('../controllers/asistencia/alertaController');
 const reporteHorasExtraController = require('../controllers/asistencia/reporteHorasExtraController');
 const financieraController = require('../controllers/asistencia/financieraController');
 const cambioTurnoController = require('../controllers/asistencia/cambioTurnoController');
+const novedadEquipoController = require('../controllers/asistencia/novedadEquipoController');
 
 const {
     iniciarPausaSchema,
@@ -51,7 +52,8 @@ const {
     plantillasCambioTurnoQuerySchema,
     horariosCambioTurnoQuerySchema,
     aprobarCambioTurnoSchema,
-    rechazarCambioTurnoSchema
+    rechazarCambioTurnoSchema,
+    novedadesEquipoQuerySchema
 } = require('../validators/asistenciaSchemas');
 
 router.use(verifyToken);
@@ -88,11 +90,17 @@ router.put('/cambios-turno/:id/aprobar', canDirigirEquipo, validar(aprobarCambio
 router.put('/cambios-turno/:id/rechazar', canDirigirEquipo, validar(rechazarCambioTurnoSchema), asyncHandler(cambioTurnoController.rechazar));
 
 // --- Jefe de equipo (director_operaciones o ficha con empleados a cargo, §23) ---
-router.get('/equipo', canDirigirEquipo, asyncHandler(equipoController.equipo));
-router.get('/equipo/:empleadoId/jornadas', canDirigirEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
-router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canDirigirEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
-router.get('/equipo/estadisticas', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
-router.get('/equipo/resumen-mensual', canDirigirEquipo, validar(periodoQuerySchema), asyncHandler(equipoController.resumenMensual));
+// Consulta del equipo (§57): coordinadores (jefe inmediato), jefes de área y directores, con canVerEquipo.
+// Lo que escribe (corrección manual, horarios, horas extra) sigue con canDirigirEquipo.
+router.get('/equipo/permisos', asyncHandler(equipoController.permisos));
+// Historial de novedades de RRHH del equipo (§56).
+router.get('/novedades-equipo', canVerEquipo, validar(novedadesEquipoQuerySchema), asyncHandler(novedadEquipoController.historial));
+
+router.get('/equipo', canVerEquipo, asyncHandler(equipoController.equipo));
+router.get('/equipo/:empleadoId/jornadas', canVerEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
+router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canVerEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
+router.get('/equipo/estadisticas', canVerEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
+router.get('/equipo/resumen-mensual', canVerEquipo, validar(periodoQuerySchema), asyncHandler(equipoController.resumenMensual));
 router.post('/equipo/jornada/:id/evento', canDirigirEquipo, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
 
 router.get('/horarios/plantillas', canDirigirEquipo, asyncHandler(horarioController.listarPlantillas));

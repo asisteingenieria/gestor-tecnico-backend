@@ -3037,6 +3037,19 @@ backend local (PDF servido, 404 cruzado, 403 al admin).
 
 **Pendientes para RRHH:** fila 345 del Excel (fechas al revés) y las cédulas sin ficha del reporte.
 
+**Por qué 182 novedades quedaron sin documento (análisis en local, 188 allá, mismos datos):**
+- 69: el empleado no tiene expediente copiado (su carpeta no está en ALTAS FORMATO de Bogotá: otra sede o sin carpeta).
+- 16: tiene expediente pero 6.NOVEDADES está vacía (más de la mitad, suspensiones).
+- 103: tiene novedades en el expediente pero ninguna con esa fecha inicial. De esas, 66 no tienen ningún archivo
+  a menos de 10 días (el documento no está en la carpeta compartida) y 37 tienen uno cercano, casi siempre otro
+  documento (ya enlazado a otra novedad o de otro tipo). Unos pocos podrían ser el mismo PDF nombrado con otra
+  fecha (p. ej. `INC/1-08-2026 4-08-2026.pdf` para una incapacidad del 3 al 4-ago).
+- Las 45 suspensiones no tienen documento: no están en la carpeta compartida.
+- Opciones ofrecidas, sin decidir: un segundo pase que enlace un archivo libre de la carpeta del tipo cuyo rango
+  se cruce con el de la novedad (mostrando la lista para confirmar), o una lista para RRHH de las que no tienen
+  documento para que suban el soporte desde la novedad. El script hoy salta las novedades ya creadas, así que
+  para enlazar documentos nuevos a novedades existentes haría falta una opción adicional.
+
 **Ajustes de la vista (2026-11-06, a pedido del usuario tras revisarla):**
 - La tabla de Novedades ya no tiene filas desplegables. En Acciones hay un ojo (**Ver detalle**) que abre
   `NovedadDetalleModal.jsx`. Los documentos (soportes y del expediente, los que sean) se ven ahí, y cada uno se
@@ -3059,7 +3072,9 @@ backend local (PDF servido, 404 cruzado, 403 al admin).
   soportes juntos). Ahora el formulario muestra el "Documento del expediente" (Ver en el visor en modal) y los
   soportes sin archivo propio dicen "Incluido en el documento del expediente (puedes cargarlo aparte)"; la columna
   Soportes muestra "Expediente" en verde en vez de 0/3; el detalle ya no lista los soportes pendientes si hay
-  documento del expediente. Los soportes del formulario también abren en el visor en modal. Solo frontend.
+  documento del expediente. Los soportes del formulario también abren en el visor en modal. Solo frontend:
+  commit `36466c5` en `sebas-branch` (2026-11-06), probado en local; despliegue = merge + `git pull` y
+  `npm run build` en `/var/www/gestor-tecnico-frontend`, sin migración ni reinicio del backend.
 - **Jefes retirados en las fichas (hallazgo 2026-11-06):** 42 empleados activos tienen como jefe inmediato a un
   coordinador ya retirado (Azael Alcalá 19, Danny Morales 14, Jessika Chávez 5, Jorge Patiño 4; datos de local).
   El Excel de novedades muestra quién los coordina ahora (p. ej. Laura Cubillos: ficha → Azael; Excel de

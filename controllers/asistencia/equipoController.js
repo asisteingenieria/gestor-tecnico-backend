@@ -1,6 +1,10 @@
 const equipoService = require('../../services/asistencia/equipoService');
 const { autorDe } = require('./autor');
 
+async function permisos(req, res) {
+    res.json(await equipoService.permisosEquipo(req.user.users_company_id));
+}
+
 async function equipo(req, res) {
     const resultado = await equipoService.equipo(req.user.users_company_id);
     res.json(resultado);
@@ -53,4 +57,4 @@ async function registrarEventoManual(req, res) {
     res.json(resultado);
 }
 
-module.exports = { equipo, jornadasDe, trazabilidadDe, estadisticasEquipo, resumenMensual, registrarEventoManual };
+module.exports = { permisos, equipo, jornadasDe, trazabilidadDe, estadisticasEquipo, resumenMensual, registrarEventoManual };
