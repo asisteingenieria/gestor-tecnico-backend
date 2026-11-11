@@ -95,7 +95,8 @@ const asignarHorarioSchema = {
         dias_semana: { tipo: 'array', valores: [1, 2, 3, 4, 5, 6, 7] },
         plantilla_id: { tipo: 'entero' },
         hora_entrada: { tipo: 'texto' },
-        hora_salida: { tipo: 'texto' }
+        hora_salida: { tipo: 'texto' },
+        modalidad: { enum: ['presencial', 'virtual'] }
     }
 };
 
@@ -108,6 +109,8 @@ const actualizarAsignacionSchema = {
         hora_almuerzo_inicio: { tipo: 'texto' },
         tolerancia_entrada_min: { tipo: 'entero' },
         es_descanso: { tipo: 'booleano' },
+        // '' o null = sin modalidad del día: AsisLock recibe la del contrato (§58).
+        modalidad: { enum: ['presencial', 'virtual'] },
         notas: { tipo: 'texto' }
     }
 };
