@@ -3412,3 +3412,59 @@ juntos, sin migración. **Desplegado en producción el 2026-11-08**: backend `9a
 (`sebas-branch`; el frontend lleva también `36466c5`, el documento del expediente como soporte de §50 de RRHH).
 Pendiente: confirmar en producción que un coordinador entra con su cédula y ve "Equipo", y decidir si German
 Arias (jefe de área de casi todos, sin usar el sistema) debe seguir viendo a los 383.
+
+## 58. AsisLock consulta por cédula el horario (con modalidad) y los estados (2026-11-11, migración 100)
+
+**Pedido:** AsisLock debe saber qué horario tiene asignado cada empleado (por cédula), con un campo
+explícito que diga si ese día trabaja **presencial o virtual**. Además debe recibir de vuelta los
+estados (Conectado, Break, Baño, Almuerzo, Capacitación, Desconectado…): AsisLock nos los reporta,
+Gestor los guarda (§34) y se los devuelve.
+
+**Decisiones del usuario:**
+- **AsisLock consulta; Gestor no empuja.** Dos `GET` de solo lectura en la API máquina a máquina
+  (`/api/integraciones/asislock/v1`), con la misma `x-api-key` de `/registros`. Sin outbox nuevo.
+- **La modalidad va por día en el horario** (`horario_asignado.modalidad`, `presencial`/`virtual`).
+  Si el día no la dice, se usa la del contrato (`contrato.modalidad_idmodalidad`: Presencial →
+  presencial, Remoto → virtual). Contrato **Híbrido** sin dato del día = `null`: no se adivina.
+- **Estados = estado actual + línea del día**, leídos de `jornada_evento` (no de la bitácora
+  `asislock_registro`): así también incluyen lo marcado en el portal, por molinete o corregido por el jefe.
+
+**API** (contrato completo para el equipo de AsisLock en `docs/asislock/API_AsisLock.md` §9):
+
+| Ruta | Devuelve |
+|---|---|
+| `GET /empleados/:cedula/horario?desde&hasta` | Un registro por día del rango (por defecto hoy, máximo 31): turno, descanso o sin horario, y `modalidad` + `modalidad_origen` (`horario`/`contrato`) |
+| `GET /empleados/:cedula/estado?fecha` | `estado_actual` y `estados[]` (`conectado`, `break`, `bano`, `almuerzo`, `capacitacion`, `desconectado`, `finalizado`, `hora_extra`; `sin_entrada`/`ausente` solo como actual), con `hora` de Bogotá, `desde` UTC y `origen` |
+
+Errores: 404 `EMPLEADO_NO_ENCONTRADO` (sin ficha), 404 `NO_ENCONTRADO` (sin contrato activo),
+409 `CEDULA_AMBIGUA`, 400 `VALIDACION`.
+
+**Migración 100** (`100_horario_modalidad_asislock.sql`): `horario_asignado.modalidad ENUM('presencial','virtual') NULL`.
+Idempotente, sin dependencias. El 099 lo ocupa el SQL de datos `Descargas/099_gestor_asistencia_...`.
+
+**De dónde sale la modalidad del día:**
+- **Malla en Excel (§55):** columna `Modelo Trabajo` / `Modelo_Trabajo` (opcional). En las mallas reales viene
+  `Presencial` o `Teletrabajo`. Presencial → presencial; Teletrabajo, Remoto, Virtual, Trabajo en casa → virtual;
+  vacío, Híbrido o desconocido = sin dato. Un día con el mismo turno y otra modalidad sale como "reemplaza".
+- **Gestión de horarios:** selector "Modalidad" al asignar (vacío = no la cambia) y en la celda de un día
+  (vacío = la del contrato). La grilla y la vista previa de la malla muestran "· Virtual".
+- **Upsert con `COALESCE`:** reasignar un turno, aprobar un cambio de turno o una malla sin la columna **conservan**
+  la modalidad del día. Para volver a "la del contrato" se usa `PUT /horarios/:id` con `modalidad: null`.
+
+**Código** (cuatro capas): `domain/asistencia/consultaAsislock.js` (puro: `normalizarModalidad`,
+`modalidadDeContrato`, `modalidadDelDia`, `horarioParaAsislock`, `estadosDelDia`; 7 pruebas),
+`services/asistencia/asislockConsultaService.js`, `asislockController.horarioEmpleado/estadoEmpleado`,
+`validators/asislockSchemas.js` (`horarioEmpleadoSchema`, `estadoEmpleadoSchema`).
+`empleadoRepository.findActivo` trae `modalidad`; `horarioAsignadoRepository` escribe la columna.
+`mallaHorarios.js` lee la columna (1 prueba nueva). Frontend: `GestionHorarios.jsx` y `CargarMallaModal.jsx`.
+
+**Verificación (local):** `npm test` 340/340. La 100 se corrió dos veces sin error. Prueba de punta a punta con un
+backend en otro puerto (script de la sesión, fuera del repo; limpia lo que crea): 15/15. Con el seed `9000000003`
+(contrato Híbrido) da hoy virtual por horario, mañana `null`, y AsisLock Conectado → Break → Conectado → Baño
+devuelve esa línea con `estado_actual` = `bano`. También responde con la cédula escrita con puntos y da 404/400/401 donde
+corresponde. Frontend: lint y build sin errores. **No se probó en el navegador.**
+
+**Para producción:**
+1. La 100 antes del backend: sin la columna, asignar horarios falla (el `INSERT` la nombra).
+2. Backend y frontend juntos.
+3. Entregar al equipo de AsisLock la §9 de `docs/asislock/API_AsisLock.md`.

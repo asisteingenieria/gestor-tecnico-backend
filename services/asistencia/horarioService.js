@@ -76,7 +76,7 @@ function generarFechas(desde, hasta, diasSemana) {
     return fechas;
 }
 
-async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, diasSemana, plantillaId, valores, creadoPor }) {
+async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, diasSemana, plantillaId, valores, modalidad = null, creadoPor }) {
     requireUsersCompanyId(directorUsersCompanyId);
     // Todo el equipo en una consulta (con "Seleccionar todos" pueden ser 100+ personas).
     const idsPedidos = [...new Set(empleados.map(Number))];
@@ -109,6 +109,8 @@ async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, 
         horaAlmuerzoInicio: datosHorario.horaAlmuerzoInicio,
         toleranciaEntradaMin: datosHorario.toleranciaEntradaMin,
         esDescanso: false,
+        // null conserva la modalidad que ya tuviera el día (§58).
+        modalidad,
         creadoPor,
         notas: null
     })));
@@ -246,6 +248,7 @@ async function previsualizarMalla({ directorUsersCompanyId, buffer }) {
             hora_entrada: f.horaEntrada,
             hora_salida: f.horaSalida,
             minutos_almuerzo: f.minutosAlmuerzo,
+            modalidad: f.modalidad ?? null,
             notas: f.notas,
             plantilla: f.plantilla,
             plantilla_nueva: Boolean(f.plantillaNueva),
@@ -298,6 +301,7 @@ async function aplicarMalla({ directorUsersCompanyId, buffer, creadoPor }) {
             horaAlmuerzoInicio: null,
             toleranciaEntradaMin: 0,
             esDescanso: f.esDescanso,
+            modalidad: f.modalidad ?? null,
             creadoPor,
             notas: f.notas ? `Malla: ${f.notas}` : 'Malla'
         })), conn);

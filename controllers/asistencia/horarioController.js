@@ -65,6 +65,7 @@ async function asignarMasivo(req, res) {
             horaAlmuerzoInicio: req.body.hora_almuerzo_inicio,
             toleranciaEntradaMin: req.body.tolerancia_entrada_min
         },
+        modalidad: req.body.modalidad || null,
         creadoPor: autorDe(req)
     });
     res.status(201).json(resultado);
@@ -81,6 +82,7 @@ async function actualizarAsignacion(req, res) {
             horaAlmuerzoInicio: req.body.hora_almuerzo_inicio,
             toleranciaEntradaMin: req.body.tolerancia_entrada_min,
             esDescanso: req.body.es_descanso,
+            modalidad: req.body.modalidad === undefined ? undefined : (req.body.modalidad || null),
             notas: req.body.notas
         }
     });

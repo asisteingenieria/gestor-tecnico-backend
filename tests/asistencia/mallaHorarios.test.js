@@ -67,7 +67,7 @@ test('un turno normal: horas del *_Final y almuerzo como duración', () => {
     assert.deepEqual(
         { ...registros[0] },
         { fila: 2, cedula: '1000000001', nombre: 'Persona Uno', fecha: '2026-11-10', novedad: null,
-            esDescanso: false, horaEntrada: '09:00:00', horaSalida: '18:00:00', minutosAlmuerzo: 30, notas: null }
+            esDescanso: false, horaEntrada: '09:00:00', horaSalida: '18:00:00', minutosAlmuerzo: 30, modalidad: null, notas: null }
     );
 });
 
@@ -132,7 +132,7 @@ test('planificar: equipo directo de hoy en adelante; pasados, ajenos e inexisten
     // La plantilla del mismo centro de costo gana a la general.
     assert.equal(filas[0].plantilla, 'CBAT 8-17');
     assert.equal(filas[0].nombre_rrhh, 'Persona Uno RRHH');
-    assert.deepEqual(filas[1].anterior, { hora_entrada: '07:00:00', hora_salida: '16:00:00', es_descanso: false });
+    assert.deepEqual(filas[1].anterior, { hora_entrada: '07:00:00', hora_salida: '16:00:00', es_descanso: false, modalidad: null });
     assert.equal(resumen.a_aplicar, 2);
     assert.equal(resumen.personas, 1);
 });
@@ -194,4 +194,25 @@ test('planificar: los turnos sin plantilla igual generan una plantilla nueva por
     assert.equal(filas[2].plantilla, 'Mañana');
     assert.equal(filas[2].plantillaNueva, null);
     assert.equal(filas[4].plantillaNueva, null);
+});
+
+test('Modelo Trabajo da la modalidad del día; un cambio solo de modalidad reemplaza (§58)', () => {
+    const { registros } = leerMalla([
+        fila({ Modelo_Trabajo: 'Presencial' }),
+        fila({ Fecha: SERIE_10_NOV + 1, Modelo_Trabajo: 'Teletrabajo' }),
+        fila({ Fecha: SERIE_10_NOV + 2, Modelo_Trabajo: 'Híbrido' }),
+        fila({ Fecha: SERIE_10_NOV + 3, Modelo_Trabajo: 'Teletrabajo', Entrada_Final: 'LIBRE' })
+    ]);
+    assert.deepEqual(registros.map((r) => r.modalidad ?? null), ['presencial', 'virtual', null, null]);
+
+    const equipo = new Map([['1000000001', { users_company_id: 7, nombre_propio: 'Persona Uno', centro_costo_id: null }]]);
+    const mismoTurno = { hora_entrada: '08:00:00', hora_salida: '17:00:00', minutos_almuerzo: 30, es_descanso: 0 };
+    const existentes = new Map([
+        ['7|2026-11-10', { ...mismoTurno, modalidad: 'presencial' }],
+        ['7|2026-11-11', { ...mismoTurno, modalidad: 'presencial' }],
+        ['7|2026-11-12', { ...mismoTurno, modalidad: 'virtual' }]
+    ]);
+    const { filas } = planificar({ registros, hoy: '2026-11-03', equipo, cedulasRrhh: new Set(), existentes });
+    // Igual / cambia a virtual / sin dato en la malla conserva lo que tiene / descanso nuevo.
+    assert.deepEqual(filas.map((f) => f.estado), ['igual', 'reemplaza', 'igual', 'nuevo']);
 });

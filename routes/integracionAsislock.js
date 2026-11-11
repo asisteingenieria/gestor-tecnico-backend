@@ -4,9 +4,10 @@ const config = require('../config/integracionAsislock');
 const autenticarAsislock = require('../middleware/autenticarAsislock');
 const validarCuerpo = require('../middleware/validarCuerpo');
 const asyncHandler = require('../middleware/asyncHandler');
+const validar = require('../middleware/validar');
 const { AppError, ValidacionError } = require('../errors/AppError');
 const asislockController = require('../controllers/asistencia/asislockController');
-const { validarEnvioAsislock, validarCredencialPantallaGris, validarCambioClavePantallaGris } = require('../validators/asislockSchemas');
+const { validarEnvioAsislock, validarCredencialPantallaGris, validarCambioClavePantallaGris, horarioEmpleadoSchema, estadoEmpleadoSchema } = require('../validators/asislockSchemas');
 
 // API máquina-a-máquina para AsisLock (asistencia.md §18). Se autentica antes de parsear el
 // cuerpo, con su propio límite de tamaño (un reenvío de 500 registros supera el límite por
@@ -17,6 +18,11 @@ router.use(express.json({ limit: config.limiteCuerpo }));
 
 router.get('/salud', asyncHandler(asislockController.salud));
 router.post('/registros', validarCuerpo(validarEnvioAsislock), asyncHandler(asislockController.recibirRegistros));
+
+// Consultas por cédula (§58): el horario con su modalidad (presencial/virtual) y los estados que
+// Gestor guardó (Conectado, Break, Baño, Almuerzo, Capacitación, Desconectado…).
+router.get('/empleados/:cedula/horario', validar(horarioEmpleadoSchema), asyncHandler(asislockController.horarioEmpleado));
+router.get('/empleados/:cedula/estado', validar(estadoEmpleadoSchema), asyncHandler(asislockController.estadoEmpleado));
 
 // Usuarios de la pantalla gris: AsisLock valida cada inicio de sesión contra Gestor (§31).
 router.post('/pantalla-gris/validar', validarCuerpo(validarCredencialPantallaGris), asyncHandler(asislockController.validarPantallaGris));

@@ -19,7 +19,12 @@
  *   - Solo se aplica de HOY en adelante; los días pasados se informan y se omiten.
  *   - Solo se aplica al equipo directo de quien sube el archivo; el resto se informa y se omite.
  *   - Reemplaza el horario que ya tuviera la persona ese día.
+ *   - "Modelo Trabajo" (opcional) da la modalidad del día para AsisLock (§58): Presencial → presencial;
+ *     Teletrabajo, Remoto, Virtual o Trabajo en casa → virtual. Vacío, Híbrido o desconocido = sin dato
+ *     (se conserva lo que tuviera el día y, si nada, AsisLock recibe la del contrato).
  */
+
+const { normalizarModalidad } = require('./consultaAsislock');
 
 const NOVEDADES_DESCANSO = ['LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
 const MAX_FILAS = 20000;
@@ -35,7 +40,8 @@ const COLUMNAS = {
     entrada: ['entrada_final', 'entrada'],
     salida: ['salida_final', 'salida'],
     almuerzo: ['almuerzo_final', 'tiempo_almuerzo', 'tiempo_de_almuerzo', 'almuerzo'],
-    novedad: ['novedad']
+    novedad: ['novedad'],
+    modalidad: ['modelo_trabajo', 'modelo_de_trabajo', 'modalidad', 'modalidad_trabajo', 'modalidad_de_trabajo']
 };
 const OBLIGATORIAS = ['cedula', 'fecha', 'entrada', 'salida'];
 
@@ -153,6 +159,7 @@ function leerMalla(filas) {
         const salida = minutosDeCelda(f[mapa.salida]);
         const almuerzo = mapa.almuerzo ? minutosDeCelda(f[mapa.almuerzo]) : null;
 
+        const modalidad = mapa.modalidad ? normalizarModalidad(f[mapa.modalidad]) : null;
         const base = { fila, cedula, nombre, fecha, novedad };
         const esNovedadDescanso = novedad && NOVEDADES_DESCANSO.includes(novedad);
         if (esNovedadDescanso || entrada === 0) {
@@ -177,6 +184,7 @@ function leerMalla(filas) {
             horaEntrada: aHora(entrada),
             horaSalida: aHora(salida),
             minutosAlmuerzo: almuerzo ?? 0,
+            modalidad,
             notas: null
         });
     });
@@ -206,6 +214,7 @@ function mismoHorario(existente, r) {
     if (!existente) return false;
     if (Boolean(existente.es_descanso) !== r.esDescanso) return false;
     if (r.esDescanso) return true;
+    if (r.modalidad && r.modalidad !== (existente.modalidad ?? null)) return false;
     return igualHora(existente.hora_entrada, r.horaEntrada)
         && igualHora(existente.hora_salida, r.horaSalida)
         && Number(existente.minutos_almuerzo ?? 0) === r.minutosAlmuerzo;
@@ -265,7 +274,7 @@ function planificar({ registros, hoy, equipo, cedulasRrhh, existentes, plantilla
             plantilla: plantilla?.nombre ?? nueva?.nombre ?? null,
             plantillaNueva: nueva?.clave ?? null,
             anterior: existente
-                ? { hora_entrada: existente.hora_entrada, hora_salida: existente.hora_salida, es_descanso: Boolean(existente.es_descanso) }
+                ? { hora_entrada: existente.hora_entrada, hora_salida: existente.hora_salida, es_descanso: Boolean(existente.es_descanso), modalidad: existente.modalidad ?? null }
                 : null,
             estado: !existente ? 'nuevo' : mismoHorario(existente, r) ? 'igual' : 'reemplaza'
         };

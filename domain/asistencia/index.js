@@ -5,6 +5,7 @@ const asislock = require('./asislock');
 const molinete = require('./molinete');
 const pantallaGris = require('./pantallaGris');
 const reporteHorasExtra = require('./reporteHorasExtra');
+const consultaAsislock = require('./consultaAsislock');
 
 module.exports = {
     calcularJornada,
@@ -13,5 +14,6 @@ module.exports = {
     asislock,
     molinete,
     pantallaGris,
-    reporteHorasExtra
+    reporteHorasExtra,
+    consultaAsislock
 };

@@ -45,7 +45,7 @@ async function insertarVarios(filas, conn = db) {
         const lote = filas.slice(i, i + LOTE_INSERCION);
         await conn.query(
             `INSERT INTO horario_asignado
-                (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, creado_por_user_id, creado_por_cuenta_id, notas)
+                (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, modalidad, creado_por_user_id, creado_por_cuenta_id, notas)
              VALUES ?
              ON DUPLICATE KEY UPDATE
                 horario_plantilla_id = VALUES(horario_plantilla_id),
@@ -55,24 +55,26 @@ async function insertarVarios(filas, conn = db) {
                 hora_almuerzo_inicio = VALUES(hora_almuerzo_inicio),
                 tolerancia_entrada_min = VALUES(tolerancia_entrada_min),
                 es_descanso = VALUES(es_descanso),
+                modalidad = COALESCE(VALUES(modalidad), modalidad),
                 creado_por_user_id = VALUES(creado_por_user_id),
                 creado_por_cuenta_id = VALUES(creado_por_cuenta_id),
                 notas = VALUES(notas)`,
             [lote.map((f) => [
                 f.usersCompanyId, f.fecha, f.horarioPlantillaId ?? null, f.horaEntrada, f.horaSalida,
                 f.minutosAlmuerzo ?? 60, f.horaAlmuerzoInicio ?? null, f.toleranciaEntradaMin ?? 0,
-                f.esDescanso ? 1 : 0, f.creadoPor?.userId ?? null, f.creadoPor?.cuentaId ?? null, f.notas ?? null
+                f.esDescanso ? 1 : 0, f.modalidad ?? null, f.creadoPor?.userId ?? null, f.creadoPor?.cuentaId ?? null, f.notas ?? null
             ])]
         );
     }
 }
 
 // Upsert por (users_company_id, fecha): una reasignación sobre un día ya asignado lo reemplaza.
-async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, esDescanso, creadoPor, notas }, conn = db) {
+// La modalidad (§58) es la excepción: si la reasignación no la trae, se conserva la del día.
+async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada, horaSalida, minutosAlmuerzo, horaAlmuerzoInicio, toleranciaEntradaMin, esDescanso, modalidad, creadoPor, notas }, conn = db) {
     const [resultado] = await conn.query(
         `INSERT INTO horario_asignado
-            (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, creado_por_user_id, creado_por_cuenta_id, notas)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (users_company_id, fecha, horario_plantilla_id, hora_entrada, hora_salida, minutos_almuerzo, hora_almuerzo_inicio, tolerancia_entrada_min, es_descanso, modalidad, creado_por_user_id, creado_por_cuenta_id, notas)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
             horario_plantilla_id = VALUES(horario_plantilla_id),
             hora_entrada = VALUES(hora_entrada),
@@ -81,13 +83,14 @@ async function insertar({ usersCompanyId, fecha, horarioPlantillaId, horaEntrada
             hora_almuerzo_inicio = VALUES(hora_almuerzo_inicio),
             tolerancia_entrada_min = VALUES(tolerancia_entrada_min),
             es_descanso = VALUES(es_descanso),
+            modalidad = COALESCE(VALUES(modalidad), modalidad),
             creado_por_user_id = VALUES(creado_por_user_id),
             creado_por_cuenta_id = VALUES(creado_por_cuenta_id),
             notas = VALUES(notas)`,
         [
             usersCompanyId, fecha, horarioPlantillaId ?? null, horaEntrada, horaSalida,
             minutosAlmuerzo ?? 60, horaAlmuerzoInicio ?? null, toleranciaEntradaMin ?? 0,
-            esDescanso ? 1 : 0, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null, notas ?? null
+            esDescanso ? 1 : 0, modalidad ?? null, creadoPor?.userId ?? null, creadoPor?.cuentaId ?? null, notas ?? null
         ]
     );
     return resultado.insertId || null;
@@ -101,6 +104,8 @@ async function actualizar(id, campos, conn = db) {
         hora_almuerzo_inicio: campos.horaAlmuerzoInicio,
         tolerancia_entrada_min: campos.toleranciaEntradaMin,
         es_descanso: campos.esDescanso === undefined ? undefined : (campos.esDescanso ? 1 : 0),
+        // null = vuelve a la modalidad del contrato (§58).
+        modalidad: campos.modalidad,
         notas: campos.notas
     };
     const entradas = Object.entries(asignables).filter(([, valor]) => valor !== undefined);

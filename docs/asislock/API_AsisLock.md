@@ -4,7 +4,10 @@ Documento para el equipo de AsisLock. Cubre las dos partes de la integración:
 
 - **§1-§7**: cómo enviar a Gestor Técnico los registros de `login_biometrico` para que cada login
   y logout alimente el tiempo laborado del empleado. Ya funciona en producción.
-- **§8 (nuevo, 2026-10-21)**: los usuarios de la **pantalla gris**. Gestor los crea al contratar,
+- **§9 (nuevo, 2026-11-11)**: **consultar a Gestor por cédula** el horario del empleado (con su
+  modalidad, presencial o virtual) y sus estados del día (Conectado, Break, Baño, Almuerzo,
+  Capacitación, Desconectado…). Solo lectura, con la misma `x-api-key`.
+- **§8 (2026-10-21)**: los usuarios de la **pantalla gris**. Gestor los crea al contratar,
   se los avisa a AsisLock y valida cada inicio de sesión. **Requiere desarrollo del lado de
   AsisLock**: ver la lista de tareas en §8.1.
 
@@ -26,7 +29,9 @@ Gestor. Gestor lo convierte en eventos de la jornada del empleado:
 - La hora que vale es la que reporta AsisLock (`fecha` + `hora_login` / `hora_logout`), en **hora
   de Colombia**.
 - El empleado se identifica por su **cédula** (campo `usuario`).
-- Las pausas de baño y almuerzo se siguen marcando en Gestor; AsisLock no las envía.
+- Los cambios de estado (`Break`, `Baño`, `Almuerzo`, `Capacitación`, `Conectado`) se envían como
+  login con el estado en `estado_conexion` y abren o cierran la pausa en Gestor. Las pausas también
+  se pueden marcar en el portal de Gestor. Gestor guarda todos y AsisLock los consulta de vuelta (§9).
 - Los usuarios con los que el empleado entra a la pantalla gris los crea y los valida Gestor (§8).
 - Si el empleado no tiene horario asignado en Gestor ese día, todo logout cuenta como
   desconexión y la jornada se cierra a la hora del último logout.
@@ -597,7 +602,130 @@ Las claves se comparten por un canal privado, nunca en este documento ni en un c
 
 ---
 
-## 9. Soporte
+## 9. Consultar a Gestor por cédula: horario y estados
+
+AsisLock **consulta** a Gestor; Gestor no envía estos datos por su cuenta. Las dos consultas usan la
+misma URL base y la misma `x-api-key` de `/registros`, son de solo lectura y se pueden repetir las
+veces que haga falta (por ejemplo, al iniciar sesión el agente, o cada pocos minutos).
+
+La cédula va en la ruta. Se ignoran puntos, espacios y guiones (`9.000.000.003` = `9000000003`).
+Las fechas son `YYYY-MM-DD` y las horas, hora de Colombia.
+
+### 9.1 `GET /empleados/{cedula}/horario?desde=&hasta=` — horario con modalidad
+
+- Sin `desde` ni `hasta`: el día de hoy (fecha de Colombia). Con solo `desde`: ese día.
+- Máximo 31 días por consulta.
+- Devuelve **un elemento por día del rango**, tenga o no horario.
+
+```bash
+curl -s "http://31.97.138.23:5001/api/integraciones/asislock/v1/empleados/1023456789/horario?desde=2026-11-11&hasta=2026-11-12" -H "x-api-key: <clave>"
+```
+
+```json
+{
+  "success": true,
+  "cedula": "1023456789",
+  "empleado": {
+    "nombre": "Laura Gutiérrez Osorio",
+    "campania": "CLARO",
+    "centro_costo": "CBAT INBOUND",
+    "cargo": "Agente",
+    "modalidad_contrato": "presencial"
+  },
+  "desde": "2026-11-11",
+  "hasta": "2026-11-12",
+  "dias": [
+    {
+      "fecha": "2026-11-11",
+      "tiene_horario": true,
+      "es_descanso": false,
+      "hora_entrada": "08:00:00",
+      "hora_salida": "17:00:00",
+      "hora_almuerzo_inicio": null,
+      "minutos_almuerzo": 60,
+      "plantilla": "Turno 8-17",
+      "notas": "Malla",
+      "modalidad": "virtual",
+      "modalidad_origen": "horario"
+    },
+    {
+      "fecha": "2026-11-12",
+      "tiene_horario": false,
+      "es_descanso": false,
+      "hora_entrada": null,
+      "hora_salida": null,
+      "hora_almuerzo_inicio": null,
+      "minutos_almuerzo": null,
+      "plantilla": null,
+      "notas": null,
+      "modalidad": "presencial",
+      "modalidad_origen": "contrato"
+    }
+  ]
+}
+```
+
+| Campo | Significado |
+|---|---|
+| `tiene_horario` | `false` = el jefe no le ha asignado turno ese día. Las horas vienen en `null` |
+| `es_descanso` | Día libre, incapacidad, vacaciones, etc. (la novedad va en `notas`). Las horas vienen en `null` |
+| `hora_entrada`, `hora_salida` | `HH:MM:SS`. No hay turnos que crucen la medianoche |
+| `minutos_almuerzo`, `hora_almuerzo_inicio` | Duración del almuerzo y, si el turno la fija, su hora de inicio |
+| **`modalidad`** | **`presencial`** o **`virtual`** ese día. `null` = Gestor no lo sabe (contrato híbrido y el día no lo dice) |
+| `modalidad_origen` | `horario` = lo dice el turno de ese día (malla o jefe); `contrato` = el día no lo dice y se tomó del contrato; `null` si `modalidad` es `null` |
+| `empleado.modalidad_contrato` | `presencial`, `virtual`, `hibrido` o `null`, según el contrato en RRHH |
+
+### 9.2 `GET /empleados/{cedula}/estado?fecha=` — estado actual y estados del día
+
+- Sin `fecha`: hoy.
+- Los estados salen de la jornada que Gestor guardó. Incluyen lo que reportó AsisLock y también
+  lo que se marcó en el portal, en el molinete o lo que corrigió el jefe (ver `origen`).
+
+```json
+{
+  "success": true,
+  "cedula": "1023456789",
+  "fecha": "2026-11-11",
+  "servidor_ahora": "2026-11-11T19:50:12.118Z",
+  "jornada_estado": "en_pausa",
+  "estado_actual": { "estado": "bano", "desde": "2026-11-11T19:40:11.000Z", "hora": "14:40:11", "origen": "asislock" },
+  "estados": [
+    { "estado": "conectado", "evento": "entrada",      "desde": "2026-11-11T19:10:11.000Z", "hora": "14:10:11", "origen": "asislock" },
+    { "estado": "break",     "evento": "inicio_break", "desde": "2026-11-11T19:20:11.000Z", "hora": "14:20:11", "origen": "asislock" },
+    { "estado": "conectado", "evento": "fin_break",    "desde": "2026-11-11T19:30:11.000Z", "hora": "14:30:11", "origen": "asislock" },
+    { "estado": "bano",      "evento": "inicio_bano",  "desde": "2026-11-11T19:40:11.000Z", "hora": "14:40:11", "origen": "asislock" }
+  ]
+}
+```
+
+| `estado` | Significado |
+|---|---|
+| `sin_entrada` | Ese día todavía no hay entrada (solo en `estado_actual`) |
+| `ausente` | El día cerró sin entrada (solo en `estado_actual`) |
+| `conectado` | Trabajando (entrada, fin de una pausa o reconexión) |
+| `break`, `bano`, `almuerzo`, `capacitacion` | En esa pausa |
+| `desconectado` | Hizo logout antes de su hora de salida |
+| `finalizado` | Marcó la salida (o cerró la hora extra) |
+| `hora_extra` | Volvió después de la salida, dentro de una hora extra aprobada |
+
+- `desde` es el instante en UTC; `hora` es la misma hora en Colombia.
+- `evento` es el evento de Gestor que produjo el estado.
+- `origen`: `asislock`, `empleado` (portal), `molinete`, `director` (corrección del jefe) o `sistema` (cierre automático).
+- `jornada_estado` es el estado de la jornada en Gestor: `pendiente`, `en_curso`, `en_pausa`, `finalizada`, `ausente` o `null` si no hay jornada.
+
+### 9.3 Errores
+
+| HTTP | `codigo` | Cuándo |
+|---|---|---|
+| `404` | `EMPLEADO_NO_ENCONTRADO` | No hay ficha con esa cédula |
+| `404` | `NO_ENCONTRADO` | La ficha existe pero no tiene contrato activo (retirado) |
+| `409` | `CEDULA_AMBIGUA` | La cédula está en más de una ficha. Avisar a RRHH |
+| `400` | `VALIDACION` | Fecha con formato inválido, `hasta` anterior a `desde` o más de 31 días |
+| `401` / `503` | | Igual que en `/registros` |
+
+---
+
+## 10. Soporte
 
 Si un registro queda `rechazado` o la integración responde `401`/`503`, contactar al equipo de
 Gestor Técnico con el `id` del registro y la hora del envío. Gestor guarda cada aviso recibido

@@ -73,4 +73,21 @@ function validarCambioClavePantallaGris(body) {
     return errores;
 }
 
-module.exports = { validarEnvioAsislock, validarCredencialPantallaGris, validarCambioClavePantallaGris };
+// Consultas por cédula (§58), con el esquema plano de middleware/validar.js.
+const horarioEmpleadoSchema = {
+    params: { cedula: { requerido: true, tipo: 'texto' } },
+    query: { desde: { tipo: 'fecha' }, hasta: { tipo: 'fecha' } }
+};
+
+const estadoEmpleadoSchema = {
+    params: { cedula: { requerido: true, tipo: 'texto' } },
+    query: { fecha: { tipo: 'fecha' } }
+};
+
+module.exports = {
+    validarEnvioAsislock,
+    validarCredencialPantallaGris,
+    validarCambioClavePantallaGris,
+    horarioEmpleadoSchema,
+    estadoEmpleadoSchema
+};
