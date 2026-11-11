@@ -3082,3 +3082,26 @@ backend local (PDF servido, 404 cruzado, 403 al admin).
   está. RRHH va a pasar el listado exacto de coordinadores para actualizar esas jefaturas (pendiente). No afecta
   el cargue: las novedades guardan el coordinador del Excel, que lo era en la fecha de la novedad (verificado:
   ninguna con responsable retirado es posterior a su retiro).
+
+## 51. Sesión 2026-11-11 — Descarga en Excel de jefaturas y de quién sube el horario
+
+**Por qué:** al repartir el `Reporte Mallas.xlsx` (7 al 13-nov) por jefe, la columna `Jefe_Directo` del Excel
+(coordinadores) no coincidía con quien puede subir la malla, y en local Nelson Acero y Andrés Nuncira (directores
+de operaciones) quedaban como jefe de área de 70 personas. Regla del negocio dicha por el usuario: **los directores
+no suben mallas**; las de los directores y jefes las sube Geraldin Cruz (financiera). Para revisar las jefaturas con
+datos reales hacía falta sacarlas de producción.
+
+- **Botón "Descargar jefaturas"** en Personal de la empresa (`AgentManagement.jsx`, también en la vista de solo
+  lectura) → `GET /api/users-company/export/jefaturas` (`verificarRecursosHumanos`: RRHH, financiera, admin y
+  `ver_empleados_rrhh`; los demás 403). Sin migración.
+- `UserCompany.getJefaturas()`: empleados cuyo contrato más reciente está en `activo`/`periodo_prueba`, con jefe
+  inmediato, jefe de área, director de área y gestor de asistencia (nombre, cédula, cargo y estado de cada uno).
+- `utils/reporteJefaturas.js` (puro, tests `tests/rrhh/reporteJefaturas.test.js`). Hoja **Empleados**: una fila por
+  empleado con **SUBE EL HORARIO** = gestor de asistencia o, si no tiene, jefe de área (la regla GESTOR de
+  asistencia), y **Alertas**: le sube el horario un director, nadie puede subírselo, se lo sube a sí mismo, quien
+  sube / jefe inmediato / jefe de área no vigente, sin jefe inmediato. Hoja **Por quien sube**: cuántos empleados
+  tiene cada uno, sus campañas y si es director.
+- Local: 390 empleados; 111 con "le sube un director" (Nuncira 50, Nelson 22, Geraldin 16 —su cargo es DIRECTOR
+  FINANCIERO—, Giovanny 10, Yessyca 7, David López 6), 51 con jefe inmediato no vigente, 3 sin quien suba.
+- Siguiente paso: descargarlo en producción, decidir con el usuario quién sube a cada grupo y corregir
+  `jefe_area_id`/`gestor_asistencia_id` (RRHH en la ficha o un SQL de datos revisado).
