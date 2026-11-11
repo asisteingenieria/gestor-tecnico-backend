@@ -13,6 +13,7 @@ const { validarObligatorios } = require('../utils/validarEmpleado');
 const fs = require('fs');
 const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 const { fechaLaboral } = require('../utils/fechaBogota');
+const reporteJefaturas = require('../utils/reporteJefaturas');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
 
@@ -283,6 +284,20 @@ const userCompanyController = {
             res.json({ gasto });
         } catch (error) {
             console.error('Error al obtener gasto total:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // Descarga en Excel de la jefatura de cada empleado vigente y quién le sube el horario (§51).
+    async exportarJefaturas(req, res) {
+        try {
+            const filas = await UserCompany.getJefaturas();
+            const buffer = reporteJefaturas.generarLibro(reporteJefaturas.armarReporteJefaturas(filas));
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="jefaturas_${fechaLaboral(new Date())}.xlsx"`);
+            res.send(buffer);
+        } catch (error) {
+            console.error('Error al exportar jefaturas:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },

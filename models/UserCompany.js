@@ -349,6 +349,51 @@ class UserCompany {
         return rows;
     }
 
+    // Reporte de jefaturas (descarga en Excel): un registro por empleado con contrato vigente (su contrato
+    // más reciente en activo/periodo_prueba) y las cuatro personas de su jefatura —jefe inmediato, jefe de
+    // área, director de área y gestor de asistencia— con su cargo y si siguen vigentes. Quién sube el
+    // horario es COALESCE(gestor_asistencia_id, jefe_area_id), la misma regla de asistencia (GESTOR en
+    // repositories/asistencia/equipoRepository.js). Lo arma utils/reporteJefaturas.js.
+    static async getJefaturas() {
+        const persona = (alias) => `
+            ${alias}.id AS ${alias}_id,
+            ${alias}.numero_identificacion AS ${alias}_cedula,
+            CONCAT_WS(' ', ${alias}.primer_nombre, ${alias}.segundo_nombre, ${alias}.primer_apellido, ${alias}.segundo_apellido) AS ${alias}_nombre,
+            (SELECT car2.nombre FROM contrato c2 LEFT JOIN cargo car2 ON car2.idcargo = c2.cargo_idcargo
+              WHERE c2.users_company_id = ${alias}.id ORDER BY c2.idcontrato DESC LIMIT 1) AS ${alias}_cargo,
+            (SELECT ec2.nombre FROM contrato c2 JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
+              WHERE c2.users_company_id = ${alias}.id ORDER BY c2.idcontrato DESC LIMIT 1) AS ${alias}_estado`;
+        const [rows] = await db.query(
+            `SELECT
+                uc.id,
+                uc.numero_identificacion AS cedula,
+                CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido) AS nombre,
+                car.nombre AS cargo,
+                cam.nombre AS campania,
+                cc.nombre  AS centro_costo,
+                esc.nombre AS estado_contrato,
+                c.fecha_ingreso,
+                ${persona('ji')},
+                ${persona('ja')},
+                ${persona('da')},
+                ${persona('ga')}
+             FROM users_company uc
+             JOIN contrato c ON c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2 WHERE c2.users_company_id = uc.id)
+             JOIN estado_contrato esc ON esc.idestado_contrato = c.estado_contrato_idestado_contrato
+             LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+             LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+             LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
+             LEFT JOIN users_company ji ON ji.id = c.jefe_inmediato_id
+             LEFT JOIN users_company ja ON ja.id = c.jefe_area_id
+             LEFT JOIN users_company da ON da.id = c.director_area_id
+             LEFT JOIN users_company ga ON ga.id = c.gestor_asistencia_id
+             WHERE esc.nombre IN (?, ?)
+             ORDER BY uc.primer_apellido, uc.segundo_apellido, uc.primer_nombre`,
+            ['activo', 'periodo_prueba']
+        );
+        return rows;
+    }
+
     static async getById(id) {
         const [rows] = await db.query(`
             ${SELECT_EMPLEADO}

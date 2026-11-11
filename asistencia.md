@@ -3362,6 +3362,7 @@ Consulta en ~15 ms. **En el navegador** (servidores locales nuevos, 2026-11-08):
 filtros de nombre y fechas; Kevin 162 (81 personas, 34 de retirados, 4 en curso hoy); Jesús Romero, como
 coordinador, la pestaña propia con 35 (22 sin retirados). A Kevin y a Jesús se les cambió la clave **en local**
 por la del seed para poder entrar (tenían el cambio obligatorio pendiente). **Despliegue:** solo código, backend y frontend juntos; sin migración.
+**Desplegado en producción el 2026-11-08** junto con §57: backend `9a36624`, frontend `6163b86` (`sebas-branch`).
 
 ## 57. El coordinador (jefe inmediato) también ve su equipo (2026-11-08)
 
@@ -3407,4 +3408,7 @@ con `/operaciones` o `/asistencia` según la ruta. "Equipo hoy" muestra "Coord.:
 su turno programado y la vista de novedades; `POST /horarios` le responde 403. Kevin sigue con 118 y
 `puede_gestionar: true`; `empleado1`, 403. En local no hay jornadas registradas del equipo de Jesús, así que la
 llegada en vivo se vio con datos solo en el equipo de Kevin. **Despliegue:** solo código, backend y frontend
-juntos, sin migración.
+juntos, sin migración. **Desplegado en producción el 2026-11-08**: backend `9a36624`, frontend `6163b86`
+(`sebas-branch`; el frontend lleva también `36466c5`, el documento del expediente como soporte de §50 de RRHH).
+Pendiente: confirmar en producción que un coordinador entra con su cédula y ve "Equipo", y decidir si German
+Arias (jefe de área de casi todos, sin usar el sistema) debe seguir viendo a los 383.
