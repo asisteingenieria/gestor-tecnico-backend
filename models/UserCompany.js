@@ -28,6 +28,7 @@ const SELECT_EMPLEADO = `
         c.jefe_area_id,
         c.director_area_id,
         r.fecha_retiro,
+        r.created_at AS retiro_registrado_en, -- cuándo RRHH pasó la ficha a retirado ("Fecha de registro" de los retirados)
         cam.nombre  AS campania_nombre,
         car.nombre  AS cargo_nombre,
         ar.nombre   AS area_nombre,
