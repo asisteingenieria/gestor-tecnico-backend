@@ -3199,7 +3199,11 @@ positivo, así que **todo RH positivo se guardaba como negativo**. Estaba así d
 "ORH+", "0+", "AB NEGATIVO"…). El RH ya no se homologa por parecido: si no se reconoce, queda vacío con una
 advertencia en la vista previa. Pruebas: `tests/rrhh/grupoSanguineo.test.js`.
 
-**Datos.** Los 24 empleados de `plantilla_empleados (1) (1).xlsx` y `(2) (1).xlsx` (23 positivos, 1 O-) se corrigen
-con `Descargas/103_corregir_rh_cargue_masivo.sql` (por cédula, no se versiona). **Pendiente:** el resto de las
-fichas cargadas por Excel (incluidos los 389 de septiembre y el HeadCount) tienen el mismo problema; se corrigen
-igual con sus Excel de origen, que tienen el RH real. Sin el archivo no se puede saber quién es negativo de verdad.
+**Datos.** `Descargas/103_corregir_rh_cargues_masivos.sql` (lleva cédulas, no se versiona) pone el RH de los Excel
+originales de cada cargue: `DATOS (1) (1).xlsx` / `HeadCount.xlsx` hoja TOTAL PERSONAL (389), `HeadCount.xlsx` hoja
+Personal pend (67), `Retiros sept y octubre.xlsx` (97) y las plantillas `plantilla_empleados (1) (1)` y `(2) (1)` (24):
+502 cédulas, sin contradicciones entre archivos (la cédula está en la 4.ª columna del formato viejo). Solo toca las
+fichas con la marca del error (Excel positivo y la ficha con ese grupo en negativo), en una tabla temporal +
+`UPDATE ... JOIN` con `BINARY` (collation de producción); se puede repetir. **Local corregida el 2026-11-12:** 435
+fichas, 21 ya estaban bien, 0 por revisar; quedan fuera solo fichas de prueba o creadas a mano. **Producción:
+pendiente de correr el SQL y desplegar el backend `74cf513`.**
