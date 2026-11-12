@@ -10,9 +10,11 @@
  * Sin base de datos: lo usa models/RedMaestra.js y lo prueban tests/rrhh/redMaestra.test.js.
  */
 
-/** Listas desplegables (red_maestra_opcion.campo) con su etiqueta y la tabla donde viven. */
+/**
+ * Listas desplegables (red_maestra_opcion.campo) con su etiqueta y la tabla donde viven.
+ * "Estado agente" no es lista: sale del estado del contrato en RRHH (ver estadoAgente).
+ */
 const CAMPOS_OPCION = {
-    estado_agente: { etiqueta: 'Estado agente', nivel: 'ficha' },
     cargo_rm: { etiqueta: 'Cargo RM', nivel: 'ficha' },
     estado_rm: { etiqueta: 'Estado RM', nivel: 'ficha' },
     observacion: { etiqueta: 'Observación', nivel: 'requerimiento' },
@@ -26,7 +28,6 @@ const COLUMNAS = {
     nombre: ['nombre completo', 'nombre'],
     campania: ['campana'],
     novedades: ['novedades', 'novedad'],
-    estado_agente: ['estado agente'],
     cargo_rm: ['cargo rm'],
     estado_rm: ['estado rm'],
     requerimiento: ['requerimiento', 'numero requerimiento', 'req'],
@@ -115,7 +116,7 @@ function detectarColumnas(encabezados) {
 
 /**
  * Lee las filas crudas de la hoja (array de arrays, fila 0 = encabezados).
- * Devuelve { columnas, faltantes, filas: [{ fila, cedula, documento, nombre, novedades, estado_agente,
+ * Devuelve { columnas, faltantes, filas: [{ fila, cedula, documento, nombre, novedades,
  * cargo_rm, estado_rm, requerimiento, fecha_envio, fecha_envio_texto, observacion, estado_requerimiento }] }.
  */
 function leerFilas(filasCrudas) {
@@ -133,7 +134,6 @@ function leerFilas(filasCrudas) {
             documento: texto(celda(cruda, 'documento')),
             nombre: texto(celda(cruda, 'nombre')),
             novedades: texto(celda(cruda, 'novedades')),
-            estado_agente: texto(celda(cruda, 'estado_agente')),
             cargo_rm: texto(celda(cruda, 'cargo_rm')),
             estado_rm: texto(celda(cruda, 'estado_rm')),
             requerimiento: texto(celda(cruda, 'requerimiento'))?.toUpperCase() ?? null,
@@ -233,6 +233,15 @@ function resolverFilas(filas, empleados, opciones) {
  */
 const TIPOS_PERSONAL = { agente: 'Agentes', coordinador: 'Coordinadores', backoffice: 'Backoffice', otro: 'Otros (staff)' };
 
+/**
+ * "ESTADO AGENTE" de la RM = estado del empleado en RRHH (contrato más reciente): RETIRADO si está
+ * retirado o inactivo; ACTIVO si está activo, en periodo de prueba o suspendido (sigue vinculado).
+ */
+function estadoAgente(estadoContrato) {
+    if (!estadoContrato) return null;
+    return ['retirado', 'inactivo'].includes(String(estadoContrato).toLowerCase()) ? 'RETIRADO' : 'ACTIVO';
+}
+
 function tipoPersonal(cargo) {
     const c = sinTildes(cargo || '').toUpperCase();
     if (/COORDINADOR/.test(c)) return 'coordinador';
@@ -319,6 +328,7 @@ module.exports = {
     CAMPOS_OPCION,
     TIPOS_PERSONAL,
     tipoPersonal,
+    estadoAgente,
     normalizarCedula,
     claveOpcion,
     valorOpcion,

@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const { CAMPOS_OPCION, tipoPersonal } = require('../utils/redMaestra');
+const { CAMPOS_OPCION, tipoPersonal, estadoAgente } = require('../utils/redMaestra');
 
 /**
  * Red Maestra (RM) de Claro (claude/modulo recursoshumanos.md §52, migración 101).
@@ -51,7 +51,6 @@ class RedMaestra {
                 ${ES_CLARO_VIGENTE} AS es_claro_vigente,
                 rm.id AS rm_id,
                 rm.novedades,
-                rm.estado_agente_id, oea.valor AS estado_agente,
                 rm.cargo_rm_id, ocr.valor AS cargo_rm,
                 rm.estado_rm_id, oer.valor AS estado_rm,
                 rm.updated_at AS rm_actualizado,
@@ -66,7 +65,6 @@ class RedMaestra {
              ${FROM_EMPLEADO}
              LEFT JOIN retiro rt ON rt.contrato_idcontrato = c.idcontrato
              LEFT JOIN red_maestra rm ON rm.users_company_id = uc.id
-             LEFT JOIN red_maestra_opcion oea ON oea.id = rm.estado_agente_id
              LEFT JOIN red_maestra_opcion ocr ON ocr.id = rm.cargo_rm_id
              LEFT JOIN red_maestra_opcion oer ON oer.id = rm.estado_rm_id
              LEFT JOIN red_maestra_requerimiento req ON req.id = ${ULTIMO_REQ}
@@ -78,7 +76,12 @@ class RedMaestra {
              ORDER BY uc.primer_apellido, uc.segundo_apellido, uc.primer_nombre`,
             [...PARAMS_CLARO_VIGENTE, ...PARAMS_CLARO_VIGENTE]
         );
-        return rows.map((r) => ({ ...r, es_claro_vigente: Boolean(r.es_claro_vigente), tipo_personal: tipoPersonal(r.cargo) }));
+        return rows.map((r) => ({
+            ...r,
+            es_claro_vigente: Boolean(r.es_claro_vigente),
+            tipo_personal: tipoPersonal(r.cargo),
+            estado_agente: estadoAgente(r.estado_contrato)
+        }));
     }
 
     /** Ficha RM + datos del Gestor de un empleado, o null si no existe. */
@@ -89,7 +92,7 @@ class RedMaestra {
                 ${NOMBRE_RM} AS nombre, uc.usuario_ssff,
                 cam.nombre AS campania, cc.nombre AS centro_costo, car.nombre AS cargo, cl.nombre AS cliente,
                 esc.nombre AS estado_contrato, ${ES_CLARO_VIGENTE} AS es_claro_vigente,
-                rm.novedades, rm.estado_agente_id, rm.cargo_rm_id, rm.estado_rm_id, rm.updated_at AS rm_actualizado,
+                rm.novedades, rm.cargo_rm_id, rm.estado_rm_id, rm.updated_at AS rm_actualizado,
                 u.full_name AS rm_actualizado_por,
                 DATE_FORMAT(c.fecha_ingreso, '%Y-%m-%d') AS fecha_ingreso,
                 DATE_FORMAT(rt.fecha_retiro, '%Y-%m-%d') AS fecha_retiro, tr.nombre AS tipo_retiro,
@@ -109,6 +112,7 @@ class RedMaestra {
         return {
             ...rows[0],
             es_claro_vigente: Boolean(rows[0].es_claro_vigente),
+            estado_agente: estadoAgente(rows[0].estado_contrato),
             requerimientos: await this.getRequerimientos(usersCompanyId)
         };
     }
@@ -247,7 +251,7 @@ class RedMaestra {
     static async getOpciones({ soloActivas = false } = {}) {
         const [rows] = await db.query(
             `SELECT o.id, o.campo, o.valor, o.orden, o.activo,
-                    (SELECT COUNT(*) FROM red_maestra r WHERE r.estado_agente_id = o.id OR r.cargo_rm_id = o.id OR r.estado_rm_id = o.id)
+                    (SELECT COUNT(*) FROM red_maestra r WHERE r.cargo_rm_id = o.id OR r.estado_rm_id = o.id)
                   + (SELECT COUNT(*) FROM red_maestra_requerimiento q WHERE q.observacion_id = o.id OR q.estado_requerimiento_id = o.id) AS usos
              FROM red_maestra_opcion o
              ${soloActivas ? 'WHERE o.activo = 1' : ''}
@@ -312,11 +316,11 @@ class RedMaestra {
     /** Guarda la ficha RM tal cual (un campo vacío se borra). */
     static async guardarFicha(usersCompanyId, data, userId) {
         await db.query(
-            `INSERT INTO red_maestra (users_company_id, novedades, estado_agente_id, cargo_rm_id, estado_rm_id, actualizado_por)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE novedades = VALUES(novedades), estado_agente_id = VALUES(estado_agente_id),
+            `INSERT INTO red_maestra (users_company_id, novedades, cargo_rm_id, estado_rm_id, actualizado_por)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE novedades = VALUES(novedades),
                 cargo_rm_id = VALUES(cargo_rm_id), estado_rm_id = VALUES(estado_rm_id), actualizado_por = VALUES(actualizado_por)`,
-            [usersCompanyId, data.novedades, data.estado_agente_id, data.cargo_rm_id, data.estado_rm_id, userId]
+            [usersCompanyId, data.novedades, data.cargo_rm_id, data.estado_rm_id, userId]
         );
     }
 
@@ -385,14 +389,13 @@ class RedMaestra {
             let fichas = 0;
             let requerimientos = 0;
             for (const f of filas) {
-                const ficha = [f.novedades, idDe('estado_agente', f.ids.estado_agente), idDe('cargo_rm', f.ids.cargo_rm), idDe('estado_rm', f.ids.estado_rm)];
+                const ficha = [f.novedades, idDe('cargo_rm', f.ids.cargo_rm), idDe('estado_rm', f.ids.estado_rm)];
                 if (ficha.some((v) => v !== null)) {
                     await conn.query(
-                        `INSERT INTO red_maestra (users_company_id, novedades, estado_agente_id, cargo_rm_id, estado_rm_id, actualizado_por)
-                         VALUES (?, ?, ?, ?, ?, ?)
+                        `INSERT INTO red_maestra (users_company_id, novedades, cargo_rm_id, estado_rm_id, actualizado_por)
+                         VALUES (?, ?, ?, ?, ?)
                          ON DUPLICATE KEY UPDATE
                             novedades = COALESCE(VALUES(novedades), novedades),
-                            estado_agente_id = COALESCE(VALUES(estado_agente_id), estado_agente_id),
                             cargo_rm_id = COALESCE(VALUES(cargo_rm_id), cargo_rm_id),
                             estado_rm_id = COALESCE(VALUES(estado_rm_id), estado_rm_id),
                             actualizado_por = VALUES(actualizado_por)`,

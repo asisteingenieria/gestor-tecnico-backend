@@ -11,7 +11,6 @@ const FILA_CC = ['CEDULA', 53042178, 'PEÑUELA DIANA PAOLA', 'WCB MOVIL', null, 
     'ACTIVO RM', 'REQ000005133510', 45492, 'CAMBIO CAMPAÑA', 'FINALIZADA'];
 
 const OPCIONES = [
-    { id: 1, campo: 'estado_agente', valor: 'ACTIVO' },
     { id: 3, campo: 'cargo_rm', valor: 'NO TRAMITADO' },
     { id: 5, campo: 'cargo_rm', valor: 'WEB CALL BACK (IN)' },
     { id: 6, campo: 'estado_rm', valor: 'ACTIVO RM' },
@@ -61,7 +60,7 @@ test('homologa "CAMBIO CAMPAÑA" con "CAMBIO DE CAMPAÑA" y "web call back (in)"
 });
 
 test('resuelve cédulas y listas, y marca los valores nuevos una sola vez', () => {
-    const { filas } = rm.leerFilas([ENCABEZADOS, FILA_PPT, FILA_CC, ['CEDULA', '999', 'X', '', '', 'VACACIONES']]);
+    const { filas } = rm.leerFilas([ENCABEZADOS, FILA_PPT, FILA_CC, ['CEDULA', '999', 'X', '', '', 'ACTIVO', 'VACACIONES']]);
     const empleados = [
         { id: 10, cedula: '1402568', nombre: 'Adriannys', es_claro_vigente: 1 },
         { id: 11, cedula: '53.042.178', nombre: 'Diana', es_claro_vigente: 0 }
@@ -81,8 +80,9 @@ test('resuelve cédulas y listas, y marca los valores nuevos una sola vez', () =
 
     assert.equal(desconocido.users_company_id, null);
     assert.ok(desconocido.errores[0].includes('no está registrada'));
-    assert.deepEqual(desconocido.ids.estado_agente, { nuevo: 'VACACIONES' });
-    assert.deepEqual(r.opciones_nuevas, [{ campo: 'estado_agente', valor: 'VACACIONES' }]);
+    assert.deepEqual(desconocido.ids.cargo_rm, { nuevo: 'VACACIONES' });
+    assert.deepEqual(r.opciones_nuevas, [{ campo: 'cargo_rm', valor: 'VACACIONES' }]);
+    assert.equal(desconocido.ids.estado_agente, undefined, 'la columna ESTADO AGENTE del Excel se ignora');
 });
 
 test('sin número de requerimiento no se cargan sus datos y se avisa', () => {
@@ -128,4 +128,13 @@ test('tipo de personal por cargo: agentes, coordinadores, backoffice y otros', (
     assert.equal(rm.tipoPersonal('JEFE DE BACKOFFICE'), 'otro');
     assert.equal(rm.tipoPersonal('ANALISTA DE CALIDAD'), 'otro');
     assert.equal(rm.tipoPersonal(null), 'otro');
+});
+
+test('el estado agente sale del estado del contrato en RRHH', () => {
+    assert.equal(rm.estadoAgente('activo'), 'ACTIVO');
+    assert.equal(rm.estadoAgente('periodo_prueba'), 'ACTIVO');
+    assert.equal(rm.estadoAgente('suspendido'), 'ACTIVO');
+    assert.equal(rm.estadoAgente('retirado'), 'RETIRADO');
+    assert.equal(rm.estadoAgente('inactivo'), 'RETIRADO');
+    assert.equal(rm.estadoAgente(null), null);
 });

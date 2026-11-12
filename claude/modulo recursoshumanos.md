@@ -3178,3 +3178,10 @@ Ampliación del módulo de §52, a pedido del usuario:
 
 Migración **102** (`red_maestra.fecha_retiro_rm`, `retiro_rm_por_users_company_id`, `retiro_rm_por_user_id`,
 `retiro_rm_registrado_en`), idempotente, requiere la 101; **pendiente en producción, va antes del código**.
+
+**Ajuste (2026-11-12): "Estado agente" viene de RRHH.** Ya no es una lista que llena el admin: es el estado
+del empleado en el contrato más reciente (`utils/redMaestra.estadoAgente`): **RETIRADO** si está retirado o
+inactivo, **ACTIVO** si está activo, en periodo de prueba o suspendido. Se muestra en la tabla, en el panel
+(con el estado del contrato al lado) y en la descarga; la columna ESTADO AGENTE del Excel se ignora al cargar.
+Como la 101 aún no estaba en producción, se corrigió la misma migración: sin `red_maestra.estado_agente_id`
+ni la lista `estado_agente` (en local se ajustó con `ALTER TABLE`).
