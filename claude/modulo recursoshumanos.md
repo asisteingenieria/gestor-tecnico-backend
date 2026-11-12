@@ -3205,5 +3205,7 @@ Personal pend (67), `Retiros sept y octubre.xlsx` (97) y las plantillas `plantil
 502 cédulas, sin contradicciones entre archivos (la cédula está en la 4.ª columna del formato viejo). Solo toca las
 fichas con la marca del error (Excel positivo y la ficha con ese grupo en negativo), en una tabla temporal +
 `UPDATE ... JOIN` con `BINARY` (collation de producción); se puede repetir. **Local corregida el 2026-11-12:** 435
-fichas, 21 ya estaban bien, 0 por revisar; quedan fuera solo fichas de prueba o creadas a mano. **Producción:
-pendiente de correr el SQL y desplegar el backend `74cf513`.**
+fichas, 21 ya estaban bien, 0 por revisar; quedan fuera solo fichas de prueba o creadas a mano. **Producción: SQL
+corrido el 2026-11-12** — 458 fichas corregidas, verificación en "ya correcto", 0 por revisar a mano (las 6
+advertencias 1287 son solo el aviso de que `BINARY expr` está obsoleto). **Falta desplegar el backend `74cf513`**
+para que los próximos cargues no vuelvan a guardar negativos.
