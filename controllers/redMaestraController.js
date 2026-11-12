@@ -11,7 +11,8 @@ const DIAS_INGRESOS = 30; // rango por defecto del historial de nuevos ingresos
  * DOCUMENTO, CÉDULA, NOMBRE, CAMPAÑA y USUARIO SSFF se leen de la ficha de RRHH y aquí no se editan.
  */
 
-const CAMPOS_FICHA = ['estado_agente', 'cargo_rm', 'estado_rm'];
+// "Estado agente" no se edita: sale del estado del contrato en RRHH (utils/redMaestra.estadoAgente).
+const CAMPOS_FICHA = ['cargo_rm', 'estado_rm'];
 const CAMPOS_REQ = ['observacion', 'estado_requerimiento'];
 const MAX_NOVEDADES = 2000;
 
@@ -102,7 +103,6 @@ const redMaestraController = {
             if (mensaje) return error(res, 400, mensaje);
             await RedMaestra.guardarFicha(id, {
                 novedades,
-                estado_agente_id: valores.estado_agente,
                 cargo_rm_id: valores.cargo_rm,
                 estado_rm_id: valores.estado_rm
             }, req.user.id);

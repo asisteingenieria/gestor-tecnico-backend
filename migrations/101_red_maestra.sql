@@ -17,7 +17,7 @@
 
 CREATE TABLE IF NOT EXISTS red_maestra_opcion (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    campo ENUM('estado_agente', 'cargo_rm', 'estado_rm', 'observacion', 'estado_requerimiento') NOT NULL,
+    campo ENUM('cargo_rm', 'estado_rm', 'observacion', 'estado_requerimiento') NOT NULL,
     valor VARCHAR(120) NOT NULL,
     orden INT NOT NULL DEFAULT 0,
     activo TINYINT(1) NOT NULL DEFAULT 1,
@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS red_maestra (
     id INT AUTO_INCREMENT PRIMARY KEY,
     users_company_id INT NOT NULL,
     novedades TEXT NULL,
-    estado_agente_id INT NULL,
     cargo_rm_id INT NULL,
     estado_rm_id INT NULL,
     actualizado_por INT NULL,
@@ -38,7 +37,6 @@ CREATE TABLE IF NOT EXISTS red_maestra (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_red_maestra_empleado (users_company_id),
     CONSTRAINT fk_rm_empleado FOREIGN KEY (users_company_id) REFERENCES users_company (id) ON DELETE CASCADE,
-    CONSTRAINT fk_rm_estado_agente FOREIGN KEY (estado_agente_id) REFERENCES red_maestra_opcion (id),
     CONSTRAINT fk_rm_cargo_rm FOREIGN KEY (cargo_rm_id) REFERENCES red_maestra_opcion (id),
     CONSTRAINT fk_rm_estado_rm FOREIGN KEY (estado_rm_id) REFERENCES red_maestra_opcion (id),
     CONSTRAINT fk_rm_actualizado_por FOREIGN KEY (actualizado_por) REFERENCES users (id) ON DELETE SET NULL
@@ -66,8 +64,6 @@ CREATE TABLE IF NOT EXISTS red_maestra_requerimiento (
 -- El admin los edita, desactiva o agrega desde la pantalla ("Listas"); el cargue de Excel agrega
 -- los que no existan.
 INSERT IGNORE INTO red_maestra_opcion (campo, valor, orden) VALUES
-    ('estado_agente', 'ACTIVO', 1),
-    ('estado_agente', 'RETIRADO', 2),
     ('cargo_rm', 'NO TRAMITADO', 1),
     ('cargo_rm', 'WHATSAPP', 2),
     ('cargo_rm', 'WEB CALL BACK (IN)', 3),

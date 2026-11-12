@@ -3178,3 +3178,34 @@ Ampliación del módulo de §52, a pedido del usuario:
 
 Migración **102** (`red_maestra.fecha_retiro_rm`, `retiro_rm_por_users_company_id`, `retiro_rm_por_user_id`,
 `retiro_rm_registrado_en`), idempotente, requiere la 101; **pendiente en producción, va antes del código**.
+
+**Ajuste (2026-11-12): "Estado agente" viene de RRHH.** Ya no es una lista que llena el admin: es el estado
+del empleado en el contrato más reciente (`utils/redMaestra.estadoAgente`): **RETIRADO** si está retirado o
+inactivo, **ACTIVO** si está activo, en periodo de prueba o suspendido. Se muestra en la tabla, en el panel
+(con el estado del contrato al lado) y en la descarga; la columna ESTADO AGENTE del Excel se ignora al cargar.
+Como la 101 aún no estaba en producción, se corrigió la misma migración: sin `red_maestra.estado_agente_id`
+ni la lista `estado_agente` (en local se ajustó con `ALTER TABLE`).
+
+## 54. Sesión 2026-11-12 — El cargue masivo guardaba el RH positivo como negativo
+
+**Síntoma.** En los cargues por Excel ("Cargar Excel" de RRHH) un empleado O+ quedaba O-, A+ quedaba A-, etc.
+
+**Causa.** `services/importEmpleadosService.js` compara los catálogos con `normalizar()`, que deja solo letras y
+números: "O+" y "O-" quedaban los dos como "o". En el mapa del catálogo el negativo (que va después) pisaba al
+positivo, así que **todo RH positivo se guardaba como negativo**. Estaba así desde que existe el cargue
+(2026-09-30); en la BD local hay 457 fichas negativas contra 7 positivas.
+
+**Arreglo.** `utils/grupoSanguineo.claveGrupoSanguineo` compara conservando el signo (acepta "O+", "O POSITIVO",
+"ORH+", "0+", "AB NEGATIVO"…). El RH ya no se homologa por parecido: si no se reconoce, queda vacío con una
+advertencia en la vista previa. Pruebas: `tests/rrhh/grupoSanguineo.test.js`.
+
+**Datos.** `Descargas/103_corregir_rh_cargues_masivos.sql` (lleva cédulas, no se versiona) pone el RH de los Excel
+originales de cada cargue: `DATOS (1) (1).xlsx` / `HeadCount.xlsx` hoja TOTAL PERSONAL (389), `HeadCount.xlsx` hoja
+Personal pend (67), `Retiros sept y octubre.xlsx` (97) y las plantillas `plantilla_empleados (1) (1)` y `(2) (1)` (24):
+502 cédulas, sin contradicciones entre archivos (la cédula está en la 4.ª columna del formato viejo). Solo toca las
+fichas con la marca del error (Excel positivo y la ficha con ese grupo en negativo), en una tabla temporal +
+`UPDATE ... JOIN` con `BINARY` (collation de producción); se puede repetir. **Local corregida el 2026-11-12:** 435
+fichas, 21 ya estaban bien, 0 por revisar; quedan fuera solo fichas de prueba o creadas a mano. **Producción: SQL
+corrido el 2026-11-12** — 458 fichas corregidas, verificación en "ya correcto", 0 por revisar a mano (las 6
+advertencias 1287 son solo el aviso de que `BINARY expr` está obsoleto). **Falta desplegar el backend `74cf513`**
+para que los próximos cargues no vuelvan a guardar negativos.

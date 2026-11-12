@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const UserCompany = require('../models/UserCompany');
 const { sugerencias, homologar } = require('../utils/homologacionCatalogos');
+const { claveGrupoSanguineo } = require('../utils/grupoSanguineo');
 
 const CAMPOS_CONTRATO_OBLIGATORIOS = {
     campania_id: 'campaña', area_id: 'área', centro_costo_id: 'centro de costo',
@@ -148,7 +149,8 @@ async function cargarCatalogosFijos() {
 
     return {
         genero: mapaDesdeFilas(genero),
-        grupoSanguineo: mapaDesdeFilas(grupoSanguineo),
+        // Por su propia clave, que conserva el signo: con normalizar() "O+" y "O-" chocaban (§54).
+        grupoSanguineo: new Map(grupoSanguineo.map((r) => [claveGrupoSanguineo(r.nombre), r.id])),
         estadoCivil: mapaDesdeFilas(estadoCivil),
         modalidad: mapaDesdeFilas(modalidad),
         tipoCuenta: mapaDesdeFilas(tipoCuenta),
@@ -346,7 +348,8 @@ async function crearResolver({ dryRun }) {
 
         // ---- catálogos cerrados (solo lectura, no crean filas) ----
         genero: (nombre) => fijos.genero.get(normalizar(nombre)) ?? null,
-        grupoSanguineo: (nombre) => cerrado('grupo_sanguineo', fijos.grupoSanguineo, nombre),
+        // Sin homologar por parecido: entre O+ y O- no hay "más parecido" que valga. Si no se reconoce, queda vacío.
+        grupoSanguineo: (nombre) => fijos.grupoSanguineo.get(claveGrupoSanguineo(nombre)) ?? null,
         estadoCivil: (nombre) => cerrado('estado_civil', fijos.estadoCivil, nombre),
         modalidad: (nombre) => cerrado('modalidad', fijos.modalidad, nombre),
         tipoCuenta: (nombre) => cerrado('tipo_cuenta', fijos.tipoCuenta, nombre),
@@ -381,8 +384,11 @@ async function construirDataEmpleado(fila, resolver, advertencias) {
 
     const generoId = fila.genero_nombre ? resolver.genero(fila.genero_nombre) : null;
     const grupoSanguineoId = fila.grupo_sanguineo_nombre ? resolver.grupoSanguineo(fila.grupo_sanguineo_nombre) : null;
+    if (fila.grupo_sanguineo_nombre && !grupoSanguineoId) {
+        advertencias.push(`Fila ${fila.numero_fila}: RH "${fila.grupo_sanguineo_nombre}" no se reconoce (ej. O+, A-, AB+), se dejó vacío.`);
+    }
 
-    // Sin coincidencia, estado civil / área / modalidad / tipo de cuenta / Rh se homologan (§45).
+    // Sin coincidencia, estado civil / área / modalidad / tipo de cuenta se homologan (§45); el Rh no (§54).
     const estadoCivilId = fila.estado_civil_raw ? resolver.estadoCivil(fila.estado_civil_raw) : null;
 
     const clienteId = await resolver.cliente(fila.cliente_nombre);
