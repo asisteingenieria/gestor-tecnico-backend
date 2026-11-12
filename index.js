@@ -65,6 +65,7 @@ app.use('/api/users-company', require('./routes/usersCompany'));
 app.use('/api/disenos', require('./routes/disenos'));
 app.use('/api/asistencia', require('./routes/asistencia'));
 app.use('/api/contratacion-hydra', require('./routes/contratacionHydra'));
+app.use('/api/red-maestra', require('./routes/redMaestra'));
 
 app.get('/', (req, res) => {
   res.send('API del Call Center Support está funcionando!');

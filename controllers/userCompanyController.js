@@ -13,6 +13,7 @@ const { validarObligatorios } = require('../utils/validarEmpleado');
 const fs = require('fs');
 const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../middleware/uploadSoportesRrhh');
 const { fechaLaboral } = require('../utils/fechaBogota');
+const retiroEquipoService = require('../services/asistencia/retiroEquipoService');
 const reporteJefaturas = require('../utils/reporteJefaturas');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
@@ -973,6 +974,9 @@ const userCompanyController = {
             }
             await Retiro.registrar(id, req.body);
             global.emitirEmpleadosCambio?.();
+            // Retiro de Claro: avisa a sus jefes para que registren el retiro en la Red Maestra (asistencia.md §59).
+            // Best-effort: el retiro ya quedó guardado; si el aviso falla, igual lo ven como pendiente en Equipo → Retiros.
+            retiroEquipoService.avisarRetiro(Number(id)).catch((e) => console.error('Error al avisar el retiro a los jefes:', e.message));
             res.status(201).json({ success: true, message: 'Retiro registrado exitosamente' });
         } catch (error) {
             console.error('Error al registrar retiro:', error);

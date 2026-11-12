@@ -3105,3 +3105,76 @@ datos reales hacía falta sacarlas de producción.
   FINANCIERO—, Giovanny 10, Yessyca 7, David López 6), 51 con jefe inmediato no vigente, 3 sin quien suba.
 - Siguiente paso: descargarlo en producción, decidir con el usuario quién sube a cada grupo y corregir
   `jefe_area_id`/`gestor_asistencia_id` (RRHH en la ficha o un SQL de datos revisado).
+
+## 52. Sesión 2026-11-12 — Módulo Red Maestra (RM) de Claro para el admin (migración 101)
+
+**Pedido:** al admin del Gestor (el mismo que tiene la vista "Empleados RRHH" de solo lectura, §47) se le crea un
+módulo **Red Maestra** con los campos de `Descargas/PLANTILLA RM EJEMPLO.xlsx`: DOCUMENTO, CEDULA, NOMBRE COMPLETO,
+CAMPAÑA (más el USUARIO SSFF si está registrado) salen del personal registrado; NOVEDADES, ESTADO AGENTE, CARGO RM,
+ESTADO RM, REQUERIMIENTO, FECHA DE ENVIO, OBSERVACIÓN y ESTADO REQUERIMIENTO los ingresa el admin. Solo Claro, en todas
+sus campañas.
+
+**Decisiones del usuario:**
+- **Ficha + historial**: una ficha RM por empleado (novedades, estado agente, cargo RM, estado RM) y un historial de
+  requerimientos (número, fecha de envío, observación, estado). La tabla muestra el último requerimiento (por fecha).
+- **Campaña + centro de costo**: la plantilla dice "T&T INBOUND", "WCB MOVIL"…, más cercano al centro de costo; se
+  muestran ambos, de la ficha.
+- **Alcance**: los vigentes de Claro (contrato más reciente activo/periodo_prueba, cliente de la campaña = 'CLARO' por
+  nombre, no por id) **más** cualquiera que ya tenga datos de RM, para poder marcar INACTIVO RM al retirado o trasladado.
+  En local Claro incluye también OPERACIÓN, BACK, WORKFORCE, FORMACIÓN y LEGALIZACIÓN Y CALIDAD (328 vigentes, 262 con SSFF).
+- **Listas editables + cargue y descarga en Excel**: estado agente, cargo RM, estado RM, observación y estado del
+  requerimiento son listas (`red_maestra_opcion`) que el admin edita (renombrar, desactivar, agregar; no se borran);
+  novedades y número de requerimiento son texto libre.
+
+**Migración 101** (`101_red_maestra.sql`): `red_maestra_opcion` (UNIQUE campo+valor, con los valores de la plantilla y los
+obvios), `red_maestra` (UNIQUE `users_company_id`) y `red_maestra_requerimiento` (UNIQUE `users_company_id`+`numero`). Une
+solo por ids enteros, sin comparar texto entre tablas (sin riesgo del error 1267). Idempotente; corrida dos veces en local.
+
+**Backend** (patrón de dos capas): `routes/redMaestra.js` montado en `/api/red-maestra` con `verifyToken` + `isAdmin`
+(solo el rol `admin`; ni financiera ni `ver_empleados_rrhh`). `models/RedMaestra.js`, `controllers/redMaestraController.js`,
+`utils/redMaestra.js` (puro, 9 pruebas en `tests/rrhh/redMaestra.test.js`).
+- `GET /` lista; `GET /:id` ficha + requerimientos; `PUT /:id` guarda la ficha (vacío borra);
+  `POST /:id/requerimientos`, `PUT|DELETE /requerimientos/:reqId` (número en mayúsculas, duplicado por empleado = 409);
+  `GET|POST /opciones`, `PUT /opciones/:id` (valor/activo; valida que cada id sea de su lista);
+  `GET /export` (hojas "Red Maestra" —columnas de la plantilla + CENTRO DE COSTO, USUARIO SSFF y ESTADO EN GESTOR— y
+  "Requerimientos"); `POST /cargue/preview` y `/cargue/confirmar` (multipart `archivo`).
+- **Cargue**: columnas por nombre (CEDULA obligatoria; "OBSERVACIÓN " con espacio sirve), llave = cédula normalizada (sin
+  puntos ni decimal), fecha como serial de Excel o dd/mm/aaaa. DOCUMENTO/NOMBRE/CAMPAÑA del archivo se ignoran. **Una celda
+  vacía no borra** lo guardado; un requerimiento que ya existe se actualiza (recargar no duplica). Los valores de lista se
+  homologan sin tildes, signos ni palabras vacías ("CAMBIO CAMPAÑA" = "CAMBIO DE CAMPAÑA") y los que no existen se crean.
+  Cédula inexistente o repetida en el Gestor = fila omitida. Sin número de requerimiento, sus datos no se cargan (aviso).
+  Todo en una transacción.
+
+**Frontend**: `src/components/redMaestra/` (`RedMaestra.jsx` tabla con KPIs —activo/inactivo/sin estado RM, requerimientos
+sin finalizar— y filtros; `RedMaestraDrawer.jsx` panel con los datos del personal en solo lectura, la ficha y el historial;
+`CargueRedMaestraModal.jsx` vista previa → confirmar; `ListasRedMaestraModal.jsx`), `redMaestraService` en `api.js`, ítem
+"Red Maestra" del menú del admin (`Layout.jsx`) y ruta `/red-maestra` con `AdminRoute` (`App.jsx`).
+
+**Verificación (local):** `npm test` 349/349. Prueba de punta a punta con backend en otro puerto: 24/24 (403 a technician,
+401 sin token, ficha, requerimientos, 409, fechas inválidas, cargue con retirado/cédula inexistente/fila vacía, recarga sin
+duplicar, descarga). En el navegador (admin local): lista de 328, guardar ficha, agregar requerimiento, modal de listas.
+Con la plantilla real: las dos cédulas CC cuadran; las dos PPT (1402568, 6776237) no existen en la BD local — revisar en
+producción si esos agentes están registrados y con qué número. Datos de prueba borrados (quedan solo las 13 opciones).
+
+**Para producción:** migración 101 antes del backend (las rutas consultan las tablas); backend y frontend juntos.
+
+## 53. Sesión 2026-11-12 — Red Maestra: totales por tipo, nuevos ingresos y retiros (migración 102)
+
+Ampliación del módulo de §52, a pedido del usuario:
+
+1. **Totales de Claro por tipo.** Fila de indicadores arriba: personal vigente de Claro, Agentes,
+   Coordinadores, Backoffice y Otros (staff). El tipo sale del **cargo** del contrato
+   (`utils/redMaestra.tipoPersonal`): COORDINADOR → coordinador; JEFE/DIRECTOR/GERENTE → otro;
+   BACK OFFICE → backoffice; AGENTE/ASESOR → agente; el resto → otro. En local: 328 = 267 + 18 + 17 + 26.
+   Un clic en un indicador filtra la tabla (también hay un selector "Todo el personal").
+2. **Pestaña "Nuevos ingresos"**: historial de las fichas de Claro que RRHH registró
+   (`users_company.created_at`) entre dos fechas de Bogotá, por defecto los últimos 30 días, con
+   "Sin requerimiento" para las que aún no tienen requerimiento en la RM. `GET /api/red-maestra/ingresos?desde&hasta`.
+3. **Pestaña "Retiros"**: retirados de Claro (retiro del contrato más reciente) con sus jefes, el retiro de
+   RRHH y la **fecha de retiro en la Red Maestra**, editable; por defecto solo pendientes.
+   `GET /api/red-maestra/retiros?desde&hasta` y `PUT /api/red-maestra/:id/retiro-rm`. La misma fecha la
+   registran los jefes desde su portal (`asistencia.md` §59); aquí se ve quién la puso. El panel del agente
+   muestra el bloque "Retiro" cuando está retirado.
+
+Migración **102** (`red_maestra.fecha_retiro_rm`, `retiro_rm_por_users_company_id`, `retiro_rm_por_user_id`,
+`retiro_rm_registrado_en`), idempotente, requiere la 101; **pendiente en producción, va antes del código**.
