@@ -22,6 +22,7 @@ const reporteHorasExtraController = require('../controllers/asistencia/reporteHo
 const financieraController = require('../controllers/asistencia/financieraController');
 const cambioTurnoController = require('../controllers/asistencia/cambioTurnoController');
 const novedadEquipoController = require('../controllers/asistencia/novedadEquipoController');
+const retiroEquipoController = require('../controllers/asistencia/retiroEquipoController');
 
 const {
     iniciarPausaSchema,
@@ -53,7 +54,9 @@ const {
     horariosCambioTurnoQuerySchema,
     aprobarCambioTurnoSchema,
     rechazarCambioTurnoSchema,
-    novedadesEquipoQuerySchema
+    novedadesEquipoQuerySchema,
+    retirosEquipoQuerySchema,
+    retiroRmSchema
 } = require('../validators/asistenciaSchemas');
 
 router.use(verifyToken);
@@ -95,6 +98,10 @@ router.put('/cambios-turno/:id/rechazar', canDirigirEquipo, validar(rechazarCamb
 router.get('/equipo/permisos', asyncHandler(equipoController.permisos));
 // Historial de novedades de RRHH del equipo (§56).
 router.get('/novedades-equipo', canVerEquipo, validar(novedadesEquipoQuerySchema), asyncHandler(novedadEquipoController.historial));
+// Retiros de Claro del equipo y su fecha de retiro en la Red Maestra (§59). La registra quien ve el equipo.
+router.get('/retiros-equipo', canVerEquipo, validar(retirosEquipoQuerySchema), asyncHandler(retiroEquipoController.listar));
+router.get('/retiros-equipo/pendientes', canVerEquipo, asyncHandler(retiroEquipoController.pendientes));
+router.put('/retiros-equipo/:empleadoId/retiro-rm', canVerEquipo, validar(retiroRmSchema), asyncHandler(retiroEquipoController.registrarRetiroRm));
 
 router.get('/equipo', canVerEquipo, asyncHandler(equipoController.equipo));
 router.get('/equipo/:empleadoId/jornadas', canVerEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));

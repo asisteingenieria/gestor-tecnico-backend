@@ -3468,3 +3468,44 @@ corresponde. Frontend: lint y build sin errores. **No se probó en el navegador.
 1. La 100 antes del backend: sin la columna, asignar horarios falla (el `INSERT` la nombra).
 2. Backend y frontend juntos.
 3. Entregar al equipo de AsisLock la §9 de `docs/asislock/API_AsisLock.md`.
+
+## 59. Retiros de Claro del equipo y su retiro en la Red Maestra (2026-11-12, migración 102)
+
+Cuando RRHH registra el retiro de alguien de Claro, sus jefes deben sacarlo de la Red Maestra (RM) de
+Claro y dejar constancia de la fecha. El admin del Gestor la ve en su módulo Red Maestra
+(`claude/modulo recursoshumanos.md` §53).
+
+**Quién lo ve.** Los jefes del contrato retirado por las tres líneas de mando (jefe inmediato, jefe de
+área y gestor de asistencia), con todo su árbol de consulta (`equipoRepository.idsDelArbol`, §57). Solo
+retiros de **Claro** (cliente por nombre) y solo cuando el retiro es del contrato más reciente.
+
+**Alerta.** Dos piezas:
+- Aviso en la campana (`notificacion_asistencia`, `tipo = 'retiro_empleado'`, sin columnas nuevas) al
+  jefe inmediato, al de área y al gestor, en vivo por socket. Lo dispara `userCompanyController.registrarRetiro`
+  con `retiroEquipoService.avisarRetiro`, *best-effort* (si falla, el retiro no se cae).
+- El conteo de **pendientes** (retiros sin `fecha_retiro_rm`) se calcula, no depende del aviso: cubre los
+  retiros cargados por otros caminos (cargues SQL, Excel). Con pendientes > 0 el portal muestra un banner
+  arriba y el ítem "Retiros" con contador en el menú.
+
+**Endpoints** (`routes/asistencia.js`, `canVerEquipo`, también el coordinador):
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/retiros-equipo?pendientes=true` | retirados de Claro del árbol |
+| GET | `/retiros-equipo/pendientes` | `{ pendientes }` para el banner |
+| PUT | `/retiros-equipo/:empleadoId/retiro-rm` | `{ fecha_retiro_rm }` (null la borra); 404 si no es de su árbol |
+
+Regla (`domain/asistencia/retirosEquipo.errorFechaRetiroRm`, compartida con el admin): la fecha no puede
+ser futura (hoy de Bogotá) ni anterior al ingreso → 422. Se guarda en `red_maestra` por la **ficha** del
+jefe (`retiro_rm_por_users_company_id`); el admin queda en `retiro_rm_por_user_id`. Registrar la fecha
+**no cambia** el "Estado RM" (eso lo sigue manejando el admin).
+
+**Frontend.** `RetirosEquipo.jsx` (vista "Retiros" del selector de Equipo, rutas `asistencia/equipo/retiros`
+y `operaciones/equipo/retiros`), banner en `AsistenciaLayout.jsx`, y en `CampanaAlertas.jsx` el aviso
+`retiro_empleado` lleva a esa vista.
+
+**Pruebas.** `tests/asistencia/retirosEquipo.test.js` (4). Punta a punta en local (22 checks, deshechos):
+jefe 126 ve sus 10 retiros, 422/400/404/403, el admin ve y corrige la fecha del jefe, y un retiro registrado
+por financiera crea los avisos al coordinador y al jefe de área.
+
+**Despliegue.** Migración 102 (requiere la 101) **antes** del código; backend y frontend juntos.

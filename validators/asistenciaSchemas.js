@@ -157,6 +157,16 @@ const novedadesEquipoQuerySchema = {
     }
 };
 
+// Retiros del equipo para la Red Maestra (§59): la fecha vacía o null borra la fecha registrada.
+const retirosEquipoQuerySchema = {
+    query: { pendientes: { enum: ['true', 'false'] } }
+};
+
+const retiroRmSchema = {
+    params: { empleadoId: { requerido: true, tipo: 'entero' } },
+    body: { fecha_retiro_rm: { tipo: 'fecha' } }
+};
+
 const periodoQuerySchema = {
     query: { periodo: { requerido: true, tipo: 'texto' } }
 };
@@ -236,6 +246,8 @@ module.exports = {
     rechazarCambioTurnoSchema,
     periodoQuerySchema,
     novedadesEquipoQuerySchema,
+    retirosEquipoQuerySchema,
+    retiroRmSchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
     jornadasEmpleadoSchema,
