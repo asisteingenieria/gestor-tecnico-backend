@@ -3509,3 +3509,28 @@ jefe 126 ve sus 10 retiros, 422/400/404/403, el admin ve y corrige la fecha del 
 por financiera crea los avisos al coordinador y al jefe de área.
 
 **Despliegue.** Migración 102 (requiere la 101) **antes** del código; backend y frontend juntos.
+
+## 60. Monitor del equipo del coordinador, estilo planta telefónica (2026-11-13)
+
+**Pedido:** que la vista "Equipo → Hoy" del coordinador se vea como el monitor de la planta (Aware,
+`Descargas/referencia.png`): mosaicos grandes con totales y una tabla **Hora Login · Nombre · Estado · Tiempo**
+con la fila del color del estado. Sin migración.
+
+**Backend:** `calcularJornada` devuelve `entradaEn`, `estadoDesde` (inicio del estado actual: la salida, la
+pausa abierta, la desconexión abierta o el último evento que lo devolvió a conectado —entrada, `fin_*`,
+`fin_desconexion`, `inicio_extra`—) y `segundosEnEstado` (contra el `ahora` del servidor). `equipoService.estadoEnVivo`
+los expone como `entrada_en`, `estado_desde` y `segundos_en_estado` (también los recibe financiera en
+"Asistencia en vivo", que no los usa). No se corta en `fin`: el evento recién insertado con `NOW(3)` puede quedar
+milisegundos después del `ahora` de Node (se vio en la prueba: daba 500 al marcar entrada). 5 pruebas nuevas.
+
+**Frontend:** `MonitorEquipo.jsx`, solo en `/asistencia/equipo` (coordinador); el jefe en `/operaciones/equipo`
+y financiera siguen con `EquipoAsistencia`. Mosaicos En turno / Conectados / En pausa / Desconectados / Ausentes
+(un clic filtra), buscador, columnas ordenables (Nombre ascendente por defecto) y clic en la fila → trazabilidad.
+Hora Login = primer login de AsisLock o, si no hay, la entrada de la jornada (portal/molinete), en 24 h Bogotá.
+Tiempo = `segundos_en_estado` + lo transcurrido desde la carga, hh:mm:ss; "—" en finalizado, sin iniciar y ausente.
+Colores de fila: conectado verde, baño/break/almuerzo amarillo, capacitación azul, desconectado naranja,
+ausente rojo, sin iniciar/finalizado gris. Estilos `.ai-monitor-*` en `components.css`, con tema oscuro.
+
+**Verificación (local):** `npm test` 363/363; lint y build del frontend sin errores; en el navegador con el jefe
+de prueba `9000000001` en `/asistencia/equipo`: 4 en turno, 2 conectados, 2 en pausa (almuerzo y baño), tiempo
+corriendo. Las jornadas de prueba se borraron. **Despliegue:** solo código, backend y frontend juntos.

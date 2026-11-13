@@ -265,3 +265,43 @@ test('sin tolerancia: entrar 8 min después del turno son 8 min tarde', () => {
     const resultado = calcularJornada([evento('entrada', '08:08:00')], { ...HORARIO, tolerancia_entrada_min: 0 }, horaDia('09:00:00'));
     assert.equal(resultado.minutosTarde, 8);
 });
+
+// Monitor del equipo: desde cuándo está en su estado actual (columna "Tiempo").
+test('tiempo en el estado: conectado cuenta desde el fin de la última pausa', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_break', '10:00:00'), evento('fin_break', '10:15:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('10:20:30'));
+    assert.equal(r.estado, 'en_curso');
+    assert.equal(r.entradaEn.getTime(), horaDia('08:00:00').getTime());
+    assert.equal(r.estadoDesde.getTime(), horaDia('10:15:00').getTime());
+    assert.equal(r.segundosEnEstado, 330);
+});
+
+test('tiempo en el estado: en pausa cuenta desde el inicio de la pausa', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_bano', '09:00:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('09:04:10'));
+    assert.equal(r.estado, 'en_pausa');
+    assert.equal(r.segundosEnEstado, 250);
+});
+
+test('tiempo en el estado: desconectado sigue contando aunque la jornada se detenga', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('inicio_desconexion', '16:00:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('17:30:00'));
+    assert.equal(r.estadoDesde.getTime(), horaDia('16:00:00').getTime());
+    assert.equal(r.segundosEnEstado, 90 * 60);
+});
+
+test('tiempo en el estado: finalizada se queda en la salida; sin entrada es null', () => {
+    const eventos = [evento('entrada', '08:00:00'), evento('salida', '17:00:00')];
+    const r = calcularJornada(eventos, HORARIO, horaDia('18:00:00'));
+    assert.equal(r.estadoDesde.getTime(), horaDia('17:00:00').getTime());
+    assert.equal(r.segundosEnEstado, 0);
+    assert.equal(calcularJornada([], HORARIO, horaDia('09:00:00')).segundosEnEstado, null);
+});
+
+test('tiempo en el estado: entrada recién marcada unos ms después de "ahora" no rompe el cálculo', () => {
+    const entrada = { tipo: 'entrada', ocurrido_en: new Date(horaDia('08:00:00').getTime() + 5) };
+    const r = calcularJornada([entrada], HORARIO, horaDia('08:00:00'));
+    assert.equal(r.estado, 'en_curso');
+    assert.equal(r.estadoDesde.getTime(), entrada.ocurrido_en.getTime());
+    assert.equal(r.segundosEnEstado, 0);
+});
