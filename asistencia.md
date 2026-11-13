@@ -3599,3 +3599,22 @@ el contrato debe ser el más reciente de la persona, estar activo y no tener ret
 estadísticas, horarios, horas extra y cambios de turno. En local no hay casos (equipos sin cambios: Kevin 118, Jesús
 18); se simuló un retiro sobre un contrato activo en una transacción revertida y la persona deja de salir. "Asistencia
 en vivo" de financiera usa su propia lista (`financieraService`) y no cambió. Sin migración.
+
+## 64. El admin no veía la fecha de retiro en la RM que puso el jefe (2026-11-13)
+
+**Reporte:** Kevin guardó la fecha de retiro en la Red Maestra desde Equipo → Retiros, pero el admin no veía al
+empleado con la fecha en Red Maestra → Retiros.
+
+**Causa:** el dato sí se guarda en la misma fila que lee el admin (`red_maestra.fecha_retiro_rm`, §59/§63), pero:
+1. la pestaña Retiros del admin (`RetirosRedMaestra.jsx`) abría con "Solo pendientes de retiro en RM" **marcado**:
+   al tener fecha, el retiro deja de ser pendiente y quedaba oculto;
+2. `RedMaestra.retiros` exigía además el contrato en estado `retirado`, cosa que no pide la lista del jefe
+   (`retiroEquipoRepository`) ni el guardado del admin (`getRetiroClaro`): un retiro visible para el jefe podía no
+   salir para el admin.
+
+**Cambio:** la pestaña abre con todos (pendientes primero, luego los registrados con "por <jefe>"; la casilla sigue
+para filtrar), y `RedMaestra.retiros` usa la misma regla que el jefe: retiro de Claro en el contrato más reciente.
+
+**Verificación (local):** Kevin registró por la API la fecha de un retiro suyo (ficha 285) y `RedMaestra.retiros`
+la devolvió con `retiro_rm_registrado_por` = Kevin y `pendiente: false`; la fila de prueba se borró (no existía
+antes). `npm test` 365/365, build sin errores. Sin migración.
