@@ -191,8 +191,11 @@ class RedMaestra {
 
     /** Retirados de Claro (el retiro es de su contrato más reciente) con su fecha de retiro en la RM. */
     static async retiros({ desde, hasta }) {
-        const condiciones = ['UPPER(TRIM(cl.nombre)) = ?', 'esc.nombre = ?'];
-        const params = [CLIENTE_RM, 'retirado'];
+        // Misma regla que Equipo → Retiros de los jefes (retiroEquipoRepository): un retiro de Claro en el contrato
+        // más reciente, sin exigir que el contrato esté en 'retirado'. Si no, una fecha que puso el jefe podía no
+        // salir aquí (§64).
+        const condiciones = ['UPPER(TRIM(cl.nombre)) = ?'];
+        const params = [CLIENTE_RM];
         if (desde) { condiciones.push('rt.fecha_retiro >= ?'); params.push(desde); }
         if (hasta) { condiciones.push('rt.fecha_retiro <= ?'); params.push(hasta); }
         const [rows] = await db.query(
