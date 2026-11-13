@@ -3562,3 +3562,21 @@ tres endpoints de Retiros; Kevin 200 (27 pendientes). En el navegador: el coordi
 Retiros; el jefe de prueba ve baño y almuerzo con sus colores y conserva Retiros en `/operaciones`. Lint de los
 archivos tocados y build sin errores (`AsistenciaLayout.jsx` ya traía 2 errores de lint de `Icon`, sin cambio).
 **Despliegue:** solo código, backend y frontend juntos; sin migración.
+
+## 62. "No ha llegado" en vivo en el monitor del coordinador (2026-11-13)
+
+**Qué pasaba:** el estado `ausente` solo lo pone el cierre nocturno (23:30, `cierreService.normalizarJornada`). Durante
+el día, quien no había marcado entrada salía como "Sin iniciar" aunque su turno hubiera empezado hace horas, y el
+mosaico "Ausentes" del monitor (§60-§61) siempre marcaba 0.
+
+**Regla (decidida con el usuario):** sin entrada hoy, con turno de trabajo y la hora de entrada ya pasada = **No ha
+llegado**. Sin horario o en su día de descanso no se sabe si debía venir: sigue en "Sin iniciar", igual que quien
+aún no empieza su turno. Sin tolerancia (§52).
+
+**Código:** `domain/asistencia/reglasJornada.noHaLlegado(estadoCalculado, horario, ahora)` (2 pruebas) y
+`equipoService.estadoEnVivo` lo expone como `no_ha_llegado`. En `MonitorEquipo.jsx` el estado "No ha llegado" va en
+rojo y el mosaico rojo pasa a ser **"No han llegado"** (incluye también `ausente`). Sin migración.
+
+**Verificación (local):** `npm test` 365/365. Con dos horarios de prueba hoy (borrados después): turno 08:00 a las
+15:33 → `no_ha_llegado: true`; turno 22:00 → `false`; sin horario → `false`. Build del frontend sin errores.
+**Despliegue:** solo código, backend y frontend juntos.

@@ -8,6 +8,7 @@ const { NoAutorizadoError, NoEncontradoError, ValidacionError } = require('../..
 const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/resumenMensual');
 const { calcularEstadoConDatos, calcularEstadosDelDia, construirTotales } = require('./jornadaCalculo');
 const cierreService = require('./cierreService');
+const { noHaLlegado } = require('../../domain/asistencia/reglasJornada');
 const asislockVista = require('./asislockVista');
 const molineteVista = require('./molineteVista');
 
@@ -107,6 +108,8 @@ async function estadoEnVivo(empleados) {
                 es_descanso: !!horario.es_descanso
             } : null,
             estado: estadoCalculado.estado,
+            // Sin entrada y su turno de hoy ya empezó (§62): en el monitor, 'No ha llegado' en vez de 'Sin iniciar'.
+            no_ha_llegado: noHaLlegado(estadoCalculado, horario, ahora),
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             minutos_tarde: estadoCalculado.minutosTarde,
             pausa_activa: estadoCalculado.pausaActiva,
