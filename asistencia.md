@@ -3487,7 +3487,7 @@ retiros de **Claro** (cliente por nombre) y solo cuando el retiro es del contrat
   retiros cargados por otros caminos (cargues SQL, Excel). Con pendientes > 0 el portal muestra un banner
   arriba y el ítem "Retiros" con contador en el menú.
 
-**Endpoints** (`routes/asistencia.js`, `canVerEquipo`, también el coordinador):
+**Endpoints** (`routes/asistencia.js`, `canVerEquipo`, también el coordinador; **desde §61 `canDirigirEquipo`, sin el coordinador**):
 
 | Método | Ruta | Qué hace |
 |---|---|---|
@@ -3534,3 +3534,49 @@ ausente rojo, sin iniciar/finalizado gris. Estilos `.ai-monitor-*` en `component
 **Verificación (local):** `npm test` 363/363; lint y build del frontend sin errores; en el navegador con el jefe
 de prueba `9000000001` en `/asistencia/equipo`: 4 en turno, 2 conectados, 2 en pausa (almuerzo y baño), tiempo
 corriendo. Las jornadas de prueba se borraron. **Despliegue:** solo código, backend y frontend juntos.
+
+## 61. Retiros de la Red Maestra solo para los jefes y mosaicos por estado de AsisLock (2026-11-13)
+
+**Pedido del usuario (tras desplegar §60):**
+1. La fecha de retiro en la Red Maestra la registran **solo los jefes que gestionan** (como Kevin Buitrago), no los
+   coordinadores. La vista Retiros se le quita al coordinador.
+2. Los mosaicos del monitor del coordinador muestran **cada estado de AsisLock**, no solo "En pausa".
+
+**Retiros (cambia §59):**
+- Backend: `GET /retiros-equipo`, `GET /retiros-equipo/pendientes` y `PUT /retiros-equipo/:id/retiro-rm` pasan de
+  `canVerEquipo` a `canDirigirEquipo` (quien gestiona; el coordinador recibe 403). El árbol de consulta sigue
+  por las tres líneas: el jefe ve también los retirados de sus coordinadores.
+- El aviso de la campana (`destinatariosAvisoRetiro`) va al **jefe de área y al gestor**, ya no al jefe inmediato.
+  Si el coordinador es además el gestor, lo recibe como gestor.
+- Frontend: sin "Retiros" en el menú, el selector de Equipo ni el banner del coordinador (`/asistencia`); la ruta
+  `asistencia/equipo/retiros` redirige a `asistencia/equipo`. La campana oculta los avisos `retiro_empleado` que
+  ya le habían llegado al coordinador. El jefe (`/operaciones`) no cambia.
+
+**Mosaicos del monitor (`MonitorEquipo.jsx`):** En turno · Conectados · Break · Baño · Almuerzo · Capacitación ·
+Desconectados · Sin iniciar · Finalizados · Ausentes (un clic filtra). Cada pausa con su color de fila: break
+amarillo, baño morado, almuerzo ocre, capacitación azul. Desde el portal solo se marcan baño y almuerzo: break y
+capacitación llegan de AsisLock.
+
+**Verificación (local):** `npm test` 363/363. Por API: Jesús Romero (coordinador, `puede_gestionar: false`) 403 en los
+tres endpoints de Retiros; Kevin 200 (27 pendientes). En el navegador: el coordinador ve los 10 mosaicos y no ve
+Retiros; el jefe de prueba ve baño y almuerzo con sus colores y conserva Retiros en `/operaciones`. Lint de los
+archivos tocados y build sin errores (`AsistenciaLayout.jsx` ya traía 2 errores de lint de `Icon`, sin cambio).
+**Despliegue:** solo código, backend y frontend juntos; sin migración.
+
+## 62. "No ha llegado" en vivo en el monitor del coordinador (2026-11-13)
+
+**Qué pasaba:** el estado `ausente` solo lo pone el cierre nocturno (23:30, `cierreService.normalizarJornada`). Durante
+el día, quien no había marcado entrada salía como "Sin iniciar" aunque su turno hubiera empezado hace horas, y el
+mosaico "Ausentes" del monitor (§60-§61) siempre marcaba 0.
+
+**Regla (decidida con el usuario):** sin entrada hoy, con turno de trabajo y la hora de entrada ya pasada = **No ha
+llegado**. Sin horario o en su día de descanso no se sabe si debía venir: sigue en "Sin iniciar", igual que quien
+aún no empieza su turno. Sin tolerancia (§52).
+
+**Código:** `domain/asistencia/reglasJornada.noHaLlegado(estadoCalculado, horario, ahora)` (2 pruebas) y
+`equipoService.estadoEnVivo` lo expone como `no_ha_llegado`. En `MonitorEquipo.jsx` el estado "No ha llegado" va en
+rojo y el mosaico rojo pasa a ser **"No han llegado"** (incluye también `ausente`). Sin migración.
+
+**Verificación (local):** `npm test` 365/365. Con dos horarios de prueba hoy (borrados después): turno 08:00 a las
+15:33 → `no_ha_llegado: true`; turno 22:00 → `false`; sin horario → `false`. Build del frontend sin errores.
+**Despliegue:** solo código, backend y frontend juntos.

@@ -1,4 +1,5 @@
 const { ReglaAsistenciaError } = require('../../errors/AppError');
+const { combinarFechaHora } = require('../../utils/fechaBogota');
 
 function assertPuedeIniciarPausa(estadoCalculado, tipo) {
     if (estadoCalculado.estado === 'pendiente') {
@@ -36,7 +37,17 @@ function assertPuedeMarcarSalida(estadoCalculado) {
     }
 }
 
+// "No ha llegado" (asistencia.md §62): sin entrada hoy, con turno de trabajo y la hora de entrada ya
+// pasó. Sin horario o en su día de descanso no se sabe si debía venir: no cuenta. El estado 'ausente'
+// lo pone el cierre nocturno; esto es su equivalente en vivo, durante el día.
+function noHaLlegado(estadoCalculado, horario, ahora) {
+    if (estadoCalculado.estado !== 'pendiente') return false;
+    if (!horario || horario.es_descanso || !horario.hora_entrada) return false;
+    return ahora >= combinarFechaHora(horario.fecha, horario.hora_entrada);
+}
+
 module.exports = {
+    noHaLlegado,
     assertPuedeIniciarPausa,
     assertPuedeFinalizarPausa,
     assertPuedeMarcarSalida

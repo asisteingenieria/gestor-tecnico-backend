@@ -98,10 +98,11 @@ router.put('/cambios-turno/:id/rechazar', canDirigirEquipo, validar(rechazarCamb
 router.get('/equipo/permisos', asyncHandler(equipoController.permisos));
 // Historial de novedades de RRHH del equipo (§56).
 router.get('/novedades-equipo', canVerEquipo, validar(novedadesEquipoQuerySchema), asyncHandler(novedadEquipoController.historial));
-// Retiros de Claro del equipo y su fecha de retiro en la Red Maestra (§59). La registra quien ve el equipo.
-router.get('/retiros-equipo', canVerEquipo, validar(retirosEquipoQuerySchema), asyncHandler(retiroEquipoController.listar));
-router.get('/retiros-equipo/pendientes', canVerEquipo, asyncHandler(retiroEquipoController.pendientes));
-router.put('/retiros-equipo/:empleadoId/retiro-rm', canVerEquipo, validar(retiroRmSchema), asyncHandler(retiroEquipoController.registrarRetiroRm));
+// Retiros de Claro del equipo y su fecha de retiro en la Red Maestra (§59). Solo quien gestiona
+// un equipo (jefe como Kevin Buitrago); el coordinador no la ve ni la registra (§61).
+router.get('/retiros-equipo', canDirigirEquipo, validar(retirosEquipoQuerySchema), asyncHandler(retiroEquipoController.listar));
+router.get('/retiros-equipo/pendientes', canDirigirEquipo, asyncHandler(retiroEquipoController.pendientes));
+router.put('/retiros-equipo/:empleadoId/retiro-rm', canDirigirEquipo, validar(retiroRmSchema), asyncHandler(retiroEquipoController.registrarRetiroRm));
 
 router.get('/equipo', canVerEquipo, asyncHandler(equipoController.equipo));
 router.get('/equipo/:empleadoId/jornadas', canVerEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));

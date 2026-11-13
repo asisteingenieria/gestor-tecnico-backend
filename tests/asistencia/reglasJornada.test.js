@@ -63,3 +63,21 @@ test('assertPuedeMarcarSalida rechaza fuera de la ventana habilitada', () => {
 test('assertPuedeMarcarSalida permite dentro de la ventana habilitada', () => {
     assert.doesNotThrow(() => assertPuedeMarcarSalida(estado({ puedeMarcarSalida: true })));
 });
+
+// "No ha llegado" en vivo (§62).
+const { noHaLlegado } = require('../../domain/asistencia/reglasJornada');
+const { combinarFechaHora: hora } = require('../../utils/fechaBogota');
+
+test('no ha llegado: sin entrada y ya pasó la hora de entrada del turno', () => {
+    const horario = { fecha: '2026-11-13', hora_entrada: '08:00:00', es_descanso: 0 };
+    const pendiente = { estado: 'pendiente' };
+    assert.equal(noHaLlegado(pendiente, horario, hora('2026-11-13', '07:59:59')), false);
+    assert.equal(noHaLlegado(pendiente, horario, hora('2026-11-13', '08:00:00')), true);
+    assert.equal(noHaLlegado({ estado: 'en_curso' }, horario, hora('2026-11-13', '09:00:00')), false);
+});
+
+test('no ha llegado: sin horario o en descanso no cuenta', () => {
+    const ahora = hora('2026-11-13', '12:00:00');
+    assert.equal(noHaLlegado({ estado: 'pendiente' }, null, ahora), false);
+    assert.equal(noHaLlegado({ estado: 'pendiente' }, { fecha: '2026-11-13', hora_entrada: '00:00:00', es_descanso: 1 }, ahora), false);
+});

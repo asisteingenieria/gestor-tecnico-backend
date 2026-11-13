@@ -6,9 +6,9 @@ const { presentarRetiro, destinatariosAvisoRetiro, mensajeAvisoRetiro, errorFech
 const { fechaLaboral } = require('../../utils/fechaBogota');
 const { NoEncontradoError, ReglaAsistenciaError } = require('../../errors/AppError');
 
-// Retiros del equipo para la Red Maestra de Claro (asistencia.md §59). Lo ve y lo registra quien ve su
-// equipo (canVerEquipo: coordinador, jefe de área o gestor): el retiro en la Red Maestra lo hace el jefe
-// directo del agente, que casi siempre es su coordinador.
+// Retiros del equipo para la Red Maestra de Claro (asistencia.md §59). Desde §61 lo ve y lo registra solo quien
+// gestiona un equipo (canDirigirEquipo: jefe de área o gestor, como Kevin Buitrago); el coordinador no.
+// El árbol sí sigue las tres líneas: el jefe ve también a los retirados de sus coordinadores.
 
 // La raíz va en la lista: salen los retirados que la tenían a ella como jefe, aunque ya no estén en el árbol.
 async function arbolDe(usersCompanyId) {
