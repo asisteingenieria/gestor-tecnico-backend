@@ -3618,3 +3618,35 @@ para filtrar), y `RedMaestra.retiros` usa la misma regla que el jefe: retiro de 
 **Verificación (local):** Kevin registró por la API la fecha de un retiro suyo (ficha 285) y `RedMaestra.retiros`
 la devolvió con `retiro_rm_registrado_por` = Kevin y `pendiente: false`; la fila de prueba se borró (no existía
 antes). `npm test` 365/365, build sin errores. Sin migración.
+
+## 65. Pestaña "Fechas de jefes" en Red Maestra del admin (2026-11-13)
+
+**Pedido:** al lado de Retiros, una pestaña que muestre a qué empleado retirado un jefe (p. ej. Kevin Buitrago) le
+puso la fecha de retiro en la Red Maestra, qué fecha y quién.
+
+**Backend:** `RedMaestra.retiros` devuelve además `registrado_por_jefe` (hay fecha y la escribió una ficha,
+`retiro_rm_por_users_company_id`, es decir, un jefe desde su portal; si la puso el admin queda en
+`retiro_rm_por_user_id` y no cuenta) y `retiro_rm_jefe_id`. Mismo endpoint `GET /api/red-maestra/retiros`.
+
+**Frontend:** `src/components/redMaestra/FechasJefesRedMaestra.jsx`, pestaña "Fechas de jefes" (con contador) en
+`RedMaestra.jsx`: documento, empleado, campaña, retiro RRHH, **fecha retiro Red Maestra**, **registrada por** (el
+jefe) y **registrada el** (fecha y hora de Bogotá), lo más reciente primero; buscador, filtro por jefe y exportar
+CSV. Solo consulta: para corregir una fecha se usa la pestaña Retiros. Clic en la fila abre la ficha RM.
+
+**Verificación (local):** Kevin registró por la API la fecha de la ficha 285; como admin (sesión de prueba firmada en
+local, borrada después) la pestaña mostró GIL PRADA JUAN DIEGO · 12 nov 2026 · KEVIN YOBANY BUITRAGO LADINO · 13 nov
+2026 11:14 a. m. La fila de prueba se borró. `npm test` 365/365; lint y build sin errores. Sin migración.
+
+## 66. El jefe ve a quién ya le puso fecha de retiro en la RM (2026-11-13)
+
+**Qué pasaba:** Equipo → Retiros del jefe (`RetirosEquipo.jsx`) abría con "Solo pendientes" marcado: al guardar la
+fecha, el empleado salía de la lista y el jefe no veía a quiénes ya se la había puesto (lo mismo que §64 en el admin).
+
+**Cambio (solo frontend):** la casilla pasa a un selector **Todos · Pendientes · Registrados**, cada uno con su
+contador, que abre en Todos (pendientes primero, como ordena el servidor). Los registrados muestran la fecha, quién
+la puso y cuándo ("Registró Kevin … · 13 nov 11:18 a. m."), con `retiro_rm_registrado_en` que ya enviaba el backend.
+El encabezado dice "N retirados · N pendientes · N registrados".
+
+**Verificación (local, navegador como Kevin):** 27 retiros, 27 pendientes; al guardar la fecha de Juan Diego Gil Prada
+pasó a 26 pendientes · 1 registrado y en Registrados salió con la fecha y "Registró Kevin Yobany Buitrago Ladino ·
+13 nov 11:18 a. m.". La fila de prueba se borró. Lint y build sin errores. Sin migración ni backend.

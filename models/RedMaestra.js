@@ -206,7 +206,10 @@ class RedMaestra {
                     ji.nombre_propio AS jefe_inmediato, ja.nombre_propio AS jefe_area,
                     oer.valor AS estado_rm,
                     DATE_FORMAT(rm.fecha_retiro_rm, '%Y-%m-%d') AS fecha_retiro_rm, rm.retiro_rm_registrado_en,
-                    COALESCE(rmf.nombre_propio, rmu.full_name) AS retiro_rm_registrado_por
+                    COALESCE(rmf.nombre_propio, rmu.full_name) AS retiro_rm_registrado_por,
+                    -- La puso un jefe desde su portal (Equipo → Retiros) y no el admin: pestaña "Fechas de jefes" (§65).
+                    (rm.fecha_retiro_rm IS NOT NULL AND rm.retiro_rm_por_users_company_id IS NOT NULL) AS registrado_por_jefe,
+                    rm.retiro_rm_por_users_company_id AS retiro_rm_jefe_id
              ${FROM_EMPLEADO}
              JOIN retiro rt ON rt.contrato_idcontrato = c.idcontrato
              LEFT JOIN tipo_retiro tr ON tr.idtipo_retiro = rt.tipo_retiro_idtipo_retiro
@@ -220,7 +223,9 @@ class RedMaestra {
              ORDER BY rm.fecha_retiro_rm IS NOT NULL, rt.fecha_retiro DESC, uc.primer_apellido`,
             params
         );
-        return rows.map((r) => ({ ...r, tipo_personal: tipoPersonal(r.cargo), pendiente: !r.fecha_retiro_rm }));
+        return rows.map((r) => ({
+            ...r, tipo_personal: tipoPersonal(r.cargo), pendiente: !r.fecha_retiro_rm, registrado_por_jefe: !!r.registrado_por_jefe
+        }));
     }
 
     /** Retiro de Claro de su contrato más reciente, o null (para que el admin registre la fecha RM). */
