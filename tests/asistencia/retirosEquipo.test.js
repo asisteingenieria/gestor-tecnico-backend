@@ -14,8 +14,10 @@ test('retiro sin fecha de Red Maestra queda pendiente; con fecha, quién la regi
     assert.equal(hecho.retiro_rm_registrado_por, 'Kevin', 'si lo registró un jefe, se muestra el jefe');
 });
 
-test('el aviso va a las tres líneas de mando sin repetir, sin vacíos y sin el retirado', () => {
-    assert.deepEqual(destinatariosAvisoRetiro({ empleadoId: 9, jefeInmediatoId: 3, jefeAreaId: 4, gestorAsistenciaId: 3 }), [3, 4]);
+test('el aviso va al jefe de área y al gestor, sin el coordinador, sin repetir, sin vacíos y sin el retirado', () => {
+    assert.deepEqual(destinatariosAvisoRetiro({ empleadoId: 9, jefeInmediatoId: 3, jefeAreaId: 4, gestorAsistenciaId: 4 }), [4]);
+    // El coordinador (jefe inmediato) no recibe el aviso (§61), salvo que también sea el gestor.
+    assert.deepEqual(destinatariosAvisoRetiro({ empleadoId: 9, jefeInmediatoId: 3, jefeAreaId: 4, gestorAsistenciaId: 3 }), [4, 3]);
     assert.deepEqual(destinatariosAvisoRetiro({ empleadoId: 9, jefeInmediatoId: null, jefeAreaId: 9, gestorAsistenciaId: null }), []);
 });
 

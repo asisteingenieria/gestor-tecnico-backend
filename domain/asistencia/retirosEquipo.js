@@ -33,11 +33,13 @@ function presentarRetiro(fila) {
 }
 
 /**
- * Fichas a las que se avisa de un retiro: las tres líneas de mando del contrato retirado, sin repetir,
+ * Fichas a las que se avisa de un retiro: el jefe de área y el gestor de asistencia del contrato retirado, sin repetir,
  * sin vacíos y sin el propio retirado (un jefe que se retira no se avisa a sí mismo).
  */
-function destinatariosAvisoRetiro({ empleadoId, jefeInmediatoId, jefeAreaId, gestorAsistenciaId }) {
-    return [...new Set([jefeInmediatoId, jefeAreaId, gestorAsistenciaId])]
+// Desde §61 no se avisa al jefe inmediato (coordinador): el retiro en la Red Maestra lo registran los jefes
+// que gestionan el equipo, no el coordinador. Si el coordinador además es el gestor, entra como gestor.
+function destinatariosAvisoRetiro({ empleadoId, jefeAreaId, gestorAsistenciaId }) {
+    return [...new Set([jefeAreaId, gestorAsistenciaId])]
         .filter((id) => id && id !== empleadoId);
 }
 
