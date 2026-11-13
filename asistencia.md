@@ -3580,3 +3580,22 @@ rojo y el mosaico rojo pasa a ser **"No han llegado"** (incluye también `ausent
 **Verificación (local):** `npm test` 365/365. Con dos horarios de prueba hoy (borrados después): turno 08:00 a las
 15:33 → `no_ha_llegado: true`; turno 22:00 → `false`; sin horario → `false`. Build del frontend sin errores.
 **Despliegue:** solo código, backend y frontend juntos.
+
+## 63. Menú del jefe sin "Retiros" y el equipo solo con personal vigente (2026-11-13)
+
+**Menú del jefe (`/operaciones`):** se cortaba por el número de opciones. "Retiros" sale del menú superior
+(`AsistenciaLayout.jsx`); se entra por Equipo → Retiros, el banner amarillo de pendientes o la campana. Solo frontend.
+
+**Cómo llega la fecha de retiro en la RM al admin (respuesta al usuario):** el jefe la guarda en Equipo → Retiros y
+se escribe directo en `red_maestra.fecha_retiro_rm` (con quién y cuándo), la misma fila que lee el módulo Red Maestra
+del admin. No hay envío: el admin la ve al abrir o recargar su pestaña Retiros y el retiro deja de estar pendiente. No
+recibe notificación (se puede agregar si se pide).
+
+**Retirados en "Equipo" (jefes y coordinadores):** la lista ya exigía contrato activo, pero tomaba el contrato
+activo **más reciente**; el retiro (`Retiro.registrar`) solo pasa a "retirado" el contrato **más reciente** de la
+persona. Si le quedaba un contrato anterior en `activo` (traspaso, cargue) o un retiro cargado sin cambiar el estado,
+seguía saliendo. Ahora `equipoRepository.listaEmpleadosDelArbol` y `listaEmpleadosACargo` usan `CONTRATO_VIGENTE`:
+el contrato debe ser el más reciente de la persona, estar activo y no tener retiro. Afecta Equipo hoy, histórico,
+estadísticas, horarios, horas extra y cambios de turno. En local no hay casos (equipos sin cambios: Kevin 118, Jesús
+18); se simuló un retiro sobre un contrato activo en una transacción revertida y la persona deja de salir. "Asistencia
+en vivo" de financiera usa su propia lista (`financieraService`) y no cambió. Sin migración.

@@ -2,6 +2,12 @@ const db = require('../../config/db');
 
 const ESTADOS_CONTRATO_ACTIVOS = ['activo', 'periodo_prueba'];
 
+// Contrato vigente para listar el equipo (§63): es el más reciente de la persona y no tiene un retiro
+// registrado. Así un retirado no sale aunque le quede un contrato anterior en 'activo' (traspasos,
+// cargues) o un retiro cargado sin cambiar el estado del contrato. Va junto a `ec.nombre IN (activos)`.
+const CONTRATO_VIGENTE = (alias) => `${alias}.idcontrato = (SELECT MAX(cv.idcontrato) FROM contrato cv WHERE cv.users_company_id = ${alias}.users_company_id)
+           AND NOT EXISTS (SELECT 1 FROM retiro rv WHERE rv.contrato_idcontrato = ${alias}.idcontrato)`;
+
 // Corrección 2026-09-23: la jerarquía de "empleados a cargo" del módulo se calcula por
 // contrato.jefe_area_id, no por jefe_inmediato_id (decisión original de asistencia.md §2).
 // El jefe de área es quien crea horarios y aprueba horas extra de todo su equipo, no solo
@@ -97,6 +103,7 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
          LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
          LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
          WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?)
+           AND ${CONTRATO_VIGENTE('c')}
          ORDER BY uc.nombre_propio`,
         [directorUsersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
@@ -177,11 +184,9 @@ async function listaEmpleadosDelArbol(raizUsersCompanyId, conn = db) {
          LEFT JOIN users_company g ON g.id = ${GESTOR}
          LEFT JOIN users_company ji ON ji.id = c.jefe_inmediato_id
          WHERE c.users_company_id IN (?) AND ec.nombre IN (?, ?)
-           AND c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2
-                                JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
-                               WHERE c2.users_company_id = c.users_company_id AND ec2.nombre IN (?, ?))
+           AND ${CONTRATO_VIGENTE('c')}
          ORDER BY uc.nombre_propio`,
-        [ids, ...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS]
+        [ids, ...ESTADOS_CONTRATO_ACTIVOS]
     );
     return filas.map((f) => ({ ...f, directo: f.gestor_id === raizUsersCompanyId }));
 }
