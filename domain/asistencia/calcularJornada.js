@@ -22,6 +22,9 @@ const ESTADO_SIN_ENTRADA = {
     minutosDesconexion: 0,
     pausaActiva: null,
     desconexionActiva: null,
+    entradaEn: null,
+    estadoDesde: null,
+    segundosEnEstado: null,
     minutosTarde: 0,
     minutosExtra: 0,
     minutosSalidaAnticipada: 0,
@@ -206,6 +209,7 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     if (salida && salida.origen === 'sistema') alertas.push('sin_marcar_salida');
 
     const estado = salida ? 'finalizada' : (pausaActiva || desconexionActiva ? 'en_pausa' : 'en_curso');
+    const estadoDesde = inicioDelEstado({ ordenados, entrada, salida, pausaActiva, desconexionActiva });
     // ¿El tiempo laborado sigue sumando en este instante? Sí en curso y en capacitación (que cuenta
     // como laborada aunque el estado sea 'en_pausa'); no en baño/break/almuerzo ni desconectado.
     const cuentaTiempo = !salida && !desconexionActiva && (!pausaActiva || !DESCUENTA[pausaActiva.tipo]);
@@ -228,6 +232,11 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         minutosDesconexion: Math.round(minutosDesconexion),
         pausaActiva,
         desconexionActiva,
+        // Desde cuándo está en el estado que muestra el monitor (conectado, la pausa, desconectado o
+        // finalizado) y cuánto lleva en él a `ahora`: la columna "Tiempo" del monitor del equipo.
+        entradaEn: entrada.ocurrido_en,
+        estadoDesde,
+        segundosEnEstado: Math.max(0, Math.floor(((salida ? salida.ocurrido_en : ahora).getTime() - estadoDesde.getTime()) / 1000)),
         minutosTarde: Math.round(minutosTarde),
         minutosExtra: Math.round(minutosExtra),
         minutosSalidaAnticipada: Math.round(minutosSalidaAnticipada),
@@ -236,6 +245,25 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         segundosParaHabilitarSalida,
         alertas
     };
+}
+
+// Eventos que devuelven a la persona a "conectado": la entrada y el fin de una pausa o desconexión.
+const VUELVE_A_CONECTADO = new Set([
+    'entrada', 'fin_bano', 'fin_break', 'fin_almuerzo', 'fin_capacitacion', 'fin_desconexion', 'inicio_extra'
+]);
+
+// Inicio del estado actual. Una pausa abierta manda sobre la desconexión, igual que `estado`.
+// Conectado: el último evento que lo devolvió a conectado. No se corta en `fin`: el evento recién
+// insertado con NOW(3) de la BD puede quedar milisegundos después del `ahora` de Node.
+function inicioDelEstado({ ordenados, entrada, salida, pausaActiva, desconexionActiva }) {
+    if (salida) return salida.ocurrido_en;
+    if (pausaActiva) return pausaActiva.desde;
+    if (desconexionActiva) return desconexionActiva.desde;
+    let desde = entrada.ocurrido_en;
+    for (const e of ordenados) {
+        if (VUELVE_A_CONECTADO.has(e.tipo) && e.ocurrido_en > desde) desde = e.ocurrido_en;
+    }
+    return desde;
 }
 
 function normalizarClave(fecha) {

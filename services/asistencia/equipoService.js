@@ -111,6 +111,11 @@ async function estadoEnVivo(empleados) {
             minutos_tarde: estadoCalculado.minutosTarde,
             pausa_activa: estadoCalculado.pausaActiva,
             desconexion_activa: estadoCalculado.desconexionActiva,
+            // Monitor del equipo (Hora Login · Nombre · Estado · Tiempo): la entrada del día y desde
+            // cuándo está en su estado actual, con los segundos ya contados contra la hora del servidor.
+            entrada_en: estadoCalculado.entradaEn ?? null,
+            estado_desde: estadoCalculado.estadoDesde ?? null,
+            segundos_en_estado: estadoCalculado.segundosEnEstado ?? null,
             alertas: estadoCalculado.alertas,
             asislock: asislockPorEmpleado[empleado.users_company_id] ?? null
         };
