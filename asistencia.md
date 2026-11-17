@@ -3650,3 +3650,110 @@ El encabezado dice "N retirados · N pendientes · N registrados".
 **Verificación (local, navegador como Kevin):** 27 retiros, 27 pendientes; al guardar la fecha de Juan Diego Gil Prada
 pasó a 26 pendientes · 1 registrado y en Registrados salió con la fecha y "Registró Kevin Yobany Buitrago Ladino ·
 13 nov 11:18 a. m.". La fila de prueba se borró. Lint y build sin errores. Sin migración ni backend.
+
+## 67. Mallas del 14 al 20 de noviembre cargadas por SQL (2026-11-14)
+
+Sin cambios de código. Operación de datos en producción con las mallas que mandaron los jefes, cargadas
+con un SQL directo a `horario_asignado` en vez de la pantalla "Cargar malla (Excel)" (§55). Los `.sql` llevan
+cédulas: quedaron en Descargas y **no se versionan**.
+
+**Por qué SQL y no la pantalla:** la pantalla solo aplica a quien gestiona al empleado (GESTOR =
+`COALESCE(gestor_asistencia_id, jefe_area_id)`, `listaEmpleadosACargo`). La malla de T&T mezclaba gente de Kevin
+(96 en local), los 9 coordinadores y una analista de calidad que gestiona Nelson David Acero, más casos sueltos
+de Santiago Nuncira y Mayra Barbosa. Habría que subirla desde varias cuentas. El SQL carga a todos los del Excel
+por cédula, sin importar el jefe.
+
+**Revisión de los Excel recibidos** (con `leerMalla` real, las mismas reglas que la pantalla):
+
+| Archivo | Resultado |
+|---|---|
+| `Reporte Mallas (1).xlsx` | Igual byte a byte a `Reporte Mallas.xlsx` del 11-nov: semana 7-13, no la de esta semana |
+| `01_Mallas_Nuncira_Santiago`, `01_Mallas_Giovanny_Ospina`, `01_Mallas_David_Acero` (primeras versiones) | Plantillas vacías: Entrada/Salida/Almuerzo sin valor en todas las filas (no eran fórmulas ni columnas ocultas) |
+| `01_Mallas_David_Lopez_14_20_Noviembre` | Completa: 5 personas de Tecnología. **No cargada todavía** |
+| `01_Mallas_David_Acero (9) (1) (1)` | 120 personas, 9 coordinadores de T&T. Lina Páez (1022424860) con la semana repetida: la pantalla rechaza los dos bloques ("más de una fila para ese día"). Se quitó el segundo bloque → `01_Mallas_David_Acero_14_20_Noviembre.xlsx` |
+| `01_Mallas_Nuncira_Santiago (11) (1)OP` | 183 personas, 13 coordinadores, 0 errores. 17 en Teletrabajo |
+| Giovanny Ospina | Sigue vacía, pendiente que la llene |
+
+Rarezas que el lector ya resuelve: fechas mezcladas (serie de Excel y texto `14/11/2026`, ambas DD/MM bien leídas),
+"Libre" escrito en Entrada (= descanso), primera columna sin encabezado, nombres con espacio inicial.
+
+**SQL generados** (`Descargas/horarios_malla_TyT_14_20_nov.sql` y `horarios_malla_Nuncira_14_20_nov.sql`):
+mismo esquema que `horarios_malla_24_30_oct.sql`. Tabla temporal por cédula, `SELECT` de cédulas sin ficha activa,
+`INSERT … SELECT … ON DUPLICATE KEY UPDATE` sobre (users_company_id, fecha), solo contratos `activo`/`periodo_prueba`,
+tolerancia 0 (086), sin plantilla (la vista muestra "Turno" en vez de "Malla HH:MM-HH:MM"), notas `Malla` /
+`Malla: Libre`, en una transacción e idempotente.
+- **T&T:** sin modalidad (todo Presencial, queda la del contrato). En local: 749 filas (107 personas × 7).
+- **Nuncira:** con modalidad, Presencial → `presencial`, Teletrabajo → `virtual`; los descansos no la tocan
+  (`COALESCE(VALUES(modalidad), horario_asignado.modalidad)`). **Ojo:** la tabla temporal no puede tener una columna
+  `modalidad`: en el `ON DUPLICATE KEY UPDATE` de un `INSERT … SELECT` MySQL la marca ambigua (error "Column
+  'modalidad' in field list is ambiguous"). Se llamó `modalidad_dia`. En local: 1.183 filas (169 × 7: 837
+  presenciales, 97 virtuales, 249 descansos).
+- **Cédulas que no cruzan:** Adriannys Guédez viene como 1402568 (ficha 6001402568) y Edgar Gamez como 6776237 (ficha
+  6006776237). Se mandan las dos cédulas y solo cruza la que existe. Parecen PPT con el prefijo 600 cortado.
+- **Lina Páez** está en las dos mallas con horas distintas de martes a viernes: T&T/Kevin 08:00-17:00 y
+  Nuncira/Hellen 08:30-17:30. Quedó con la de T&T y se excluyó del SQL de Nuncira hasta que confirmen cuál vale.
+
+**En producción (2026-11-14):** ambos SQL corridos y `node scripts/recalcularJornadas.js --desde=2026-11-14
+--hasta=2026-11-14` después de cada uno (88 y luego 149 jornadas). Verificado con
+`asislockConsultaService.horarioPorCedula`, que es lo mismo que consulta AsisLock (§58):
+- 1000212934 tiene 14-nov 08:00-12:00 y 15-nov descanso ("Malla: Libre", horas en `null` a propósito para que
+  AsisLock no lea 00:00 como turno).
+- 1000379456 tiene 17-nov 10:30-20:00 con `modalidad: virtual`, `modalidad_origen: horario`.
+
+Con esto se confirma además que la migración 100 y el código de §58 están en producción. AsisLock no necesita
+aviso: consulta el horario en vivo.
+
+**Subir después el mismo Excel desde la cuenta de Kevin** no rompe nada. Las horas son las mismas, los descansos salen
+"Igual" y los turnos salen "Reemplaza" (la malla trae modalidad `presencial` y el SQL de T&T la dejó NULL). Al
+aplicar solo agrega la plantilla "Malla …", la modalidad y el autor. A los que no son de su equipo los omite.
+
+**Pendientes:**
+- 13 cédulas de cada malla que no existían en local (ingresos recientes). Si en producción no tienen ficha, se
+  cargan volviendo a correr el mismo SQL cuando RRHH las cree.
+- 15 personas del equipo de Kevin sin fila en la malla de T&T, más Hellen Martínez y Kevin Buitrago.
+- Decidir el horario de Lina Páez.
+- Cargar la malla de David López.
+- La de Giovanny Ospina, que llegó vacía.
+- La vista "Horarios del equipo" va de lunes a domingo y la malla de sábado a viernes. En la semana del 9 al 15, el
+  miércoles a viernes muestran la malla anterior (días pasados) y el sábado y domingo la nueva. No es un error.
+
+## 68. El Director de Tecnología consulta la asistencia de todas las campañas (2026-11-17)
+
+**Pedido:** el empleado con cargo Director de Tecnología ve la asistencia de todas las campañas y su histórico.
+Al entrar a Equipo ve **su equipo**, y con un filtro cambia entre campañas. Sin migración.
+
+**Quién:** se decide por el **cargo del contrato activo** (`equipoRepository.cargoDe`), en cada petición, como el
+resto de permisos del equipo. La lista vive en `domain/asistencia/vistaTodasCampanias.js`
+(`CARGOS_VISTA_TODAS_CAMPANIAS = ['DIRECTOR DE TECNOLOGIA']`) y se compara sin tildes ni mayúsculas. No es un rol
+ni una bandera por usuario: si RRHH cambia el cargo, el permiso lo sigue. En local lo tiene David Eduardo López
+Cuartas (ficha 49, entra con su cédula).
+
+**Solo consulta.** En vivo, histórico mensual y trazabilidad de cualquier empleado con contrato activo. Lo que
+escribe (horarios, horas extra, correcciones, cambios de turno, retiros RM) sigue siendo solo para su equipo:
+`canDirigirEquipo` + `assertEmpleadoACargo` no cambiaron. Novedades y Retiros también siguen siendo de su equipo.
+
+**Backend (`equipoService`):**
+- `veTodasLasCampaniasDe(id)` y `assertVeTodasLasCampanias`. `puedeVerEquipo` (y por tanto `canVerEquipo`)
+  también deja pasar a quien ve todas, aunque no tenga personal a cargo.
+- `GET /equipo/permisos` agrega `ver_todas_campanias`.
+- `GET /equipo/campanias`: campañas con personal activo y su conteo (`empleadoRepository.findCampaniasConEmpleados`). 403 a los demás.
+- `GET /equipo`: sin filtros = su árbol, como antes. `?alcance=todas` o `?campania_id=N` = gente activa de
+  todas o de esa campaña (`findActivosPorCampania`) por el mismo `estadoEnVivo`. Validador `equipoQuerySchema`.
+- `GET /equipo/resumen-mensual?periodo&campania_id`: el mes de una campaña con la misma forma que el del equipo
+  (`personasDelMes`). **Todas a la vez no:** el histórico se arma persona por persona con el cierre de días
+  pasados, y con ~400 personas sería pesado. El comparativo de toda la empresa es el de financiera.
+- `assertEmpleadoEnArbol` (jornadas y trazabilidad del equipo) acepta además a cualquier empleado activo para
+  quien ve todas las campañas.
+
+**Frontend:** `hooks/useAlcanceEquipo.js` (permisos + campañas; alcance en la URL `?campania=todas|<id>`) y
+`FiltroCampaniaEquipo.jsx` ("Mi equipo" primero, "Todas las campañas" solo en Hoy). Los usan `EquipoAsistencia`
+(Hoy) y `EquipoMensual` (Histórico). `SelectorVistaEquipo` conserva la campaña entre Hoy e Histórico, y la
+trazabilidad vuelve al alcance de donde vino. El subtítulo dice "· solo consulta" fuera de su equipo.
+
+**Avisos en vivo:** fuera de su equipo no recibe los avisos por socket (no está en la sala de monitores, que es de
+financiera). Esa vista se refresca con el sondeo de 30 s.
+
+**Verificación (local):** 370 pruebas unitarias. Por HTTP, con la sesión de cédula de David: su equipo 11,
+todas 390, 18 campañas, BACK 19 en vivo y 19 en el histórico, `alcance=otra` da 400. Un jefe sin el cargo (ficha 7)
+recibe 403 en `alcance=todas`, `/equipo/campanias` y en la trazabilidad de alguien ajeno, y sigue viendo sus 5.
+Lint y build del frontend sin errores. En el navegador como David: entra con "11 personas a tu cargo" y "Mi equipo"; "Todas las campañas" muestra 390 · solo consulta; BACK pasa a Histórico con 19 personas; el detalle de un agente de BACK abre su trazabilidad y "Volver al equipo" regresa a BACK. Sin errores en consola.

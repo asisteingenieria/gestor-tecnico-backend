@@ -180,6 +180,11 @@ const empleadosFinancieraQuerySchema = {
     query: { campania_id: { tipo: 'entero' } }
 };
 
+// "Equipo hoy" (§68): sin filtros es su equipo; `alcance=todas` o `campania_id` para quien ve todas las campañas.
+const equipoQuerySchema = {
+    query: { alcance: { tipo: 'texto', enum: ['todas'] }, campania_id: { tipo: 'entero' } }
+};
+
 const jornadasEmpleadoSchema = {
     params: { empleadoId: { requerido: true, tipo: 'entero' } },
     query: { desde: { tipo: 'fecha' }, hasta: { tipo: 'fecha' } }
@@ -250,6 +255,7 @@ module.exports = {
     retiroRmSchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
+    equipoQuerySchema,
     jornadasEmpleadoSchema,
     iniciarPausaSchema,
     trazabilidadParamsSchema,

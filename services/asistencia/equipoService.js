@@ -1,5 +1,6 @@
 const db = require('../../config/db');
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
+const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
 const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
@@ -9,6 +10,7 @@ const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/re
 const { calcularEstadoConDatos, calcularEstadosDelDia, construirTotales } = require('./jornadaCalculo');
 const cierreService = require('./cierreService');
 const { noHaLlegado } = require('../../domain/asistencia/reglasJornada');
+const { veTodasLasCampanias, alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const asislockVista = require('./asislockVista');
 const molineteVista = require('./molineteVista');
 
@@ -23,8 +25,38 @@ async function assertEmpleadoACargo(directorUsersCompanyId, empleadoId, conn) {
 
 // Para consultar basta con que la persona cuelgue de él en cualquier nivel (el director ve a la gente
 // de sus jefes, §51). Para escribir —horarios, horas extra, correcciones— sigue siendo assertEmpleadoACargo.
+// Quien ve todas las campañas (§68) consulta además a cualquier empleado con contrato activo.
 async function assertEmpleadoEnArbol(directorUsersCompanyId, empleadoId) {
-    if (!(await equipoRepo.esDelArbol(directorUsersCompanyId, empleadoId))) throw new NoAutorizadoError('El empleado no está a su cargo');
+    if (await equipoRepo.esDelArbol(directorUsersCompanyId, empleadoId)) return;
+    if (await veTodasLasCampaniasDe(directorUsersCompanyId) && await empleadoRepo.findActivo(empleadoId)) return;
+    throw new NoAutorizadoError('El empleado no está a su cargo');
+}
+
+// Cargos con consulta de la asistencia de todas las campañas (§68), por el cargo de su contrato activo.
+// Se calcula en cada petición, como el resto de permisos del equipo, para que siga a RRHH.
+async function veTodasLasCampaniasDe(usersCompanyId) {
+    if (!usersCompanyId) return false;
+    return veTodasLasCampanias(await equipoRepo.cargoDe(usersCompanyId));
+}
+
+async function assertVeTodasLasCampanias(usersCompanyId) {
+    if (!(await veTodasLasCampaniasDe(usersCompanyId))) {
+        throw new NoAutorizadoError('Solo puedes consultar la asistencia de tu equipo');
+    }
+}
+
+// Campañas con personal activo para el filtro de "Equipo" (§68).
+async function campaniasVisibles(usersCompanyId) {
+    requireUsersCompanyId(usersCompanyId);
+    await assertVeTodasLasCampanias(usersCompanyId);
+    return empleadoRepo.findCampaniasConEmpleados();
+}
+
+// Personas activas de todas las campañas (campaniaId null) o de una (§68), con la forma de las
+// pantallas de equipo.
+async function empleadosDeCampania(campaniaId) {
+    const roster = await empleadoRepo.findActivosPorCampania(campaniaId);
+    return roster.map((e) => ({ ...e, jefe_inmediato: null, directo: null }));
 }
 
 // La gente del árbol con la forma que esperan las pantallas de equipo. `jefe_area` = quién la gestiona,
@@ -52,16 +84,18 @@ async function esJefeDeEquipo(usersCompanyId) {
 // `puede_gestionar` = además gestiona la asistencia de alguien (horarios, horas extra, correcciones).
 async function puedeVerEquipo(usersCompanyId) {
     if (!usersCompanyId) return false;
-    return equipoRepo.tienePersonalACargo(usersCompanyId);
+    if (await equipoRepo.tienePersonalACargo(usersCompanyId)) return true;
+    return veTodasLasCampaniasDe(usersCompanyId);
 }
 
 async function permisosEquipo(usersCompanyId) {
-    if (!usersCompanyId) return { puede_ver: false, puede_gestionar: false };
-    const [puedeVer, puedeGestionar] = await Promise.all([
+    if (!usersCompanyId) return { puede_ver: false, puede_gestionar: false, ver_todas_campanias: false };
+    const [tienePersonal, puedeGestionar, verTodas] = await Promise.all([
         equipoRepo.tienePersonalACargo(usersCompanyId),
-        equipoRepo.tieneEmpleadosACargo(usersCompanyId)
+        equipoRepo.tieneEmpleadosACargo(usersCompanyId),
+        veTodasLasCampaniasDe(usersCompanyId)
     ]);
-    return { puede_ver: puedeVer, puede_gestionar: puedeGestionar };
+    return { puede_ver: tienePersonal || verTodas, puede_gestionar: puedeGestionar, ver_todas_campanias: verTodas };
 }
 
 async function cargoDe(usersCompanyId) {
@@ -70,10 +104,14 @@ async function cargoDe(usersCompanyId) {
 }
 
 // "Equipo hoy": toda la gente que cuelga de él. `directo` dice a quién gestiona él mismo (a esos les
-// asigna horarios y les pide horas extra).
-async function equipo(directorUsersCompanyId) {
+// asigna horarios y les pide horas extra). Con `alcance` 'todas' o una `campaniaId`, quien ve todas las
+// campañas (§68) consulta esa gente en vez de su equipo.
+async function equipo(directorUsersCompanyId, { alcance, campaniaId } = {}) {
     requireUsersCompanyId(directorUsersCompanyId);
-    return estadoEnVivo(await empleadosDelArbol(directorUsersCompanyId));
+    const consulta = alcanceDeConsulta({ alcance, campaniaId });
+    if (consulta.tipo === 'equipo') return estadoEnVivo(await empleadosDelArbol(directorUsersCompanyId));
+    await assertVeTodasLasCampanias(directorUsersCompanyId);
+    return estadoEnVivo(await empleadosDeCampania(consulta.campaniaId));
 }
 
 // Estado de hoy de una lista de personas, con su turno del día (§46-§47). Lo usan "Equipo hoy" del
@@ -201,28 +239,50 @@ async function estadisticasEquipo({ directorUsersCompanyId, desde, hasta }) {
 // Resumen mensual del equipo (asistencia.md §35): por empleado, los totales del mes y la grilla
 // día a día, para que el jefe lleve la traza mes a mes. Normaliza los días pasados (cierre) para
 // que las ausencias queden bien antes de agregar.
-async function resumenMensualEquipo({ directorUsersCompanyId, periodo }) {
-    requireUsersCompanyId(directorUsersCompanyId);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo || '')) {
-        throw new ValidacionError('El periodo debe tener el formato AAAA-MM');
-    }
-    const { desde, hasta } = rangoDelMes(periodo);
-    const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
-    const ahora = new Date();
-
-    const filas = await Promise.all(empleados.map(async (empleado) => {
-        await cierreService.normalizarRangoSiEsPasado(empleado.users_company_id, desde, hasta, ahora);
-        const jornadas = await jornadaRepo.findRango(empleado.users_company_id, desde, hasta);
-        return {
+// Las filas base del histórico: su árbol, o la gente activa de una campaña (§68).
+async function personasDelMes(directorUsersCompanyId, campaniaId) {
+    const consulta = alcanceDeConsulta({ campaniaId });
+    if (consulta.tipo === 'equipo') {
+        const empleados = await equipoRepo.listaEmpleadosDelArbol(directorUsersCompanyId);
+        return empleados.map((empleado) => ({
             users_company_id: empleado.users_company_id,
             nombre: empleado.nombre_propio,
             documento: empleado.numero_identificacion,
             cargo: empleado.cargo,
             centro_costo: empleado.centro_costo,
             jefe_area: empleado.directo ? null : empleado.jefe,
-            jefe_inmediato: empleado.jefe_inmediato_id === directorUsersCompanyId ? null : empleado.jefe_inmediato,
-            ...resumenDeJornadas(jornadas)
-        };
+            jefe_inmediato: empleado.jefe_inmediato_id === directorUsersCompanyId ? null : empleado.jefe_inmediato
+        }));
+    }
+    await assertVeTodasLasCampanias(directorUsersCompanyId);
+    const roster = await empleadoRepo.findActivosPorCampania(consulta.campaniaId);
+    return roster.map((empleado) => ({
+        users_company_id: empleado.users_company_id,
+        nombre: empleado.nombre,
+        documento: empleado.cedula,
+        cargo: empleado.cargo,
+        campania: empleado.campania,
+        centro_costo: empleado.centro_costo,
+        jefe_area: empleado.jefe_area,
+        jefe_inmediato: null
+    }));
+}
+
+// Con una `campaniaId`, quien ve todas las campañas (§68) consulta el mes de esa campaña. Todas a la vez
+// no: el histórico va campaña por campaña (el comparativo de toda la empresa es el de financiera).
+async function resumenMensualEquipo({ directorUsersCompanyId, periodo, campaniaId = null }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo || '')) {
+        throw new ValidacionError('El periodo debe tener el formato AAAA-MM');
+    }
+    const { desde, hasta } = rangoDelMes(periodo);
+    const personas = await personasDelMes(directorUsersCompanyId, campaniaId);
+    const ahora = new Date();
+
+    const filas = await Promise.all(personas.map(async (persona) => {
+        await cierreService.normalizarRangoSiEsPasado(persona.users_company_id, desde, hasta, ahora);
+        const jornadas = await jornadaRepo.findRango(persona.users_company_id, desde, hasta);
+        return { ...persona, ...resumenDeJornadas(jornadas) };
     }));
     filas.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 
@@ -266,6 +326,8 @@ module.exports = {
     esJefeDeEquipo,
     puedeVerEquipo,
     permisosEquipo,
+    veTodasLasCampaniasDe,
+    campaniasVisibles,
     cargoDe,
     equipo,
     jornadasDe,

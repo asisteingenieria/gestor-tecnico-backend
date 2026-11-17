@@ -5,9 +5,17 @@ async function permisos(req, res) {
     res.json(await equipoService.permisosEquipo(req.user.users_company_id));
 }
 
+// Sin filtros: su equipo. `alcance=todas` o `campania_id`: solo quien ve todas las campañas (§68).
 async function equipo(req, res) {
-    const resultado = await equipoService.equipo(req.user.users_company_id);
+    const resultado = await equipoService.equipo(req.user.users_company_id, {
+        alcance: req.query.alcance,
+        campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null
+    });
     res.json(resultado);
+}
+
+async function campanias(req, res) {
+    res.json(await equipoService.campaniasVisibles(req.user.users_company_id));
 }
 
 async function jornadasDe(req, res) {
@@ -41,7 +49,8 @@ async function estadisticasEquipo(req, res) {
 async function resumenMensual(req, res) {
     const resultado = await equipoService.resumenMensualEquipo({
         directorUsersCompanyId: req.user.users_company_id,
-        periodo: req.query.periodo
+        periodo: req.query.periodo,
+        campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null
     });
     res.json(resultado);
 }
@@ -57,4 +66,4 @@ async function registrarEventoManual(req, res) {
     res.json(resultado);
 }
 
-module.exports = { permisos, equipo, jornadasDe, trazabilidadDe, estadisticasEquipo, resumenMensual, registrarEventoManual };
+module.exports = { permisos, equipo, campanias,jornadasDe, trazabilidadDe, estadisticasEquipo, resumenMensual, registrarEventoManual };

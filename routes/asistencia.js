@@ -46,6 +46,7 @@ const {
     periodoQuerySchema,
     reporteFinancieraQuerySchema,
     empleadosFinancieraQuerySchema,
+    equipoQuerySchema,
     jornadasEmpleadoSchema,
     solicitarCambioTurnoSchema,
     estadoCambioTurnoQuerySchema,
@@ -104,11 +105,13 @@ router.get('/retiros-equipo', canDirigirEquipo, validar(retirosEquipoQuerySchema
 router.get('/retiros-equipo/pendientes', canDirigirEquipo, asyncHandler(retiroEquipoController.pendientes));
 router.put('/retiros-equipo/:empleadoId/retiro-rm', canDirigirEquipo, validar(retiroRmSchema), asyncHandler(retiroEquipoController.registrarRetiroRm));
 
-router.get('/equipo', canVerEquipo, asyncHandler(equipoController.equipo));
+// El Director de Tecnología (§68) además consulta todas las campañas: `alcance=todas` o `campania_id`.
+router.get('/equipo', canVerEquipo, validar(equipoQuerySchema), asyncHandler(equipoController.equipo));
+router.get('/equipo/campanias', canVerEquipo, asyncHandler(equipoController.campanias));
 router.get('/equipo/:empleadoId/jornadas', canVerEquipo, validar(empleadoIdParamSchema), asyncHandler(equipoController.jornadasDe));
 router.get('/equipo/:empleadoId/jornada/:fecha/trazabilidad', canVerEquipo, validar(trazabilidadEquipoParamsSchema), asyncHandler(equipoController.trazabilidadDe));
 router.get('/equipo/estadisticas', canVerEquipo, validar(rangoQuerySchema), asyncHandler(equipoController.estadisticasEquipo));
-router.get('/equipo/resumen-mensual', canVerEquipo, validar(periodoQuerySchema), asyncHandler(equipoController.resumenMensual));
+router.get('/equipo/resumen-mensual', canVerEquipo, validar(reporteFinancieraQuerySchema),asyncHandler(equipoController.resumenMensual));
 router.post('/equipo/jornada/:id/evento', canDirigirEquipo, validar(eventoManualSchema), asyncHandler(equipoController.registrarEventoManual));
 
 router.get('/horarios/plantillas', canDirigirEquipo, asyncHandler(horarioController.listarPlantillas));
