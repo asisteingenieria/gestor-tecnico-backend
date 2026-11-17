@@ -3,7 +3,7 @@ const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
 const horarioRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
-const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
+const { fichasPorCedula } = require('./fichaPorCedulaService');
 const registroRepo = require('../../repositories/asistencia/asislockRegistroRepository');
 const loginBiometricoRepo = require('../../repositories/asistencia/loginBiometricoRepository');
 const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository');
@@ -113,7 +113,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
         if (motivoHora) return finalizar('rechazado', { motivo: motivoHora });
 
         const cedula = asislock.normalizarCedula(registro.usuario);
-        const empleados = cedula ? await empleadoRepo.findPorNumeroIdentificacion(cedula, conn) : [];
+        const empleados = await fichasPorCedula(cedula, conn);
         if (empleados.length === 0) return finalizar('rechazado', { motivo: 'empleado_no_encontrado' });
         if (empleados.length > 1) return finalizar('rechazado', { motivo: 'cedula_ambigua' });
         const usersCompanyId = empleados[0];

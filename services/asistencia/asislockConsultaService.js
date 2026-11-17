@@ -1,4 +1,5 @@
 const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
+const { fichasPorCedula } = require('./fichaPorCedulaService');
 const horarioRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const eventoRepo = require('../../repositories/asistencia/jornadaEventoRepository');
@@ -13,7 +14,7 @@ const { AppError, NoEncontradoError, ValidacionError } = require('../../errors/A
 async function resolverEmpleado(cedulaCruda) {
     const cedula = asislock.normalizarCedula(cedulaCruda);
     if (!cedula) throw new ValidacionError('La cédula es inválida');
-    const ids = await empleadoRepo.findPorNumeroIdentificacion(cedula);
+    const ids = await fichasPorCedula(cedula);
     if (ids.length === 0) throw new AppError('No hay un empleado con esa cédula', 404, 'EMPLEADO_NO_ENCONTRADO');
     if (ids.length > 1) throw new AppError('La cédula corresponde a más de una ficha', 409, 'CEDULA_AMBIGUA');
     const activo = await empleadoRepo.findActivo(ids[0]);

@@ -6,6 +6,7 @@ const { assertPuedeIniciarPausa } = require('../../domain/asistencia/reglasJorna
 const {
     PARAMETROS_DEFECTO,
     normalizarCedula,
+    cedulaPptConPrefijo,
     normalizarFecha,
     normalizarHora,
     instantesDelRegistro,
@@ -325,4 +326,13 @@ test('logout con la hora extra abierta la cierra (fin_extra)', () => {
     const eventos = [ev('entrada', '08:00:00'), ev('salida', '17:00:00'), ev('inicio_extra', '19:03:00')];
     const d = decidirLogout({ eventos, horario: HORARIO, instante: h('21:10:00'), parametros: PARAMETROS });
     assert.deepEqual(d, { accion: 'fin_extra', eventos: ['fin_extra'], motivo: null });
+});
+
+test('cedulaPptConPrefijo: el PPT de 7 dígitos lleva el prefijo 600 de RRHH (§69)', () => {
+    assert.equal(cedulaPptConPrefijo('6776237'), '6006776237');
+    assert.equal(cedulaPptConPrefijo('1402568'), '6001402568');
+    assert.equal(cedulaPptConPrefijo('1026583349'), null);
+    assert.equal(cedulaPptConPrefijo('12345'), null);
+    assert.equal(cedulaPptConPrefijo('67762AB'), null);
+    assert.equal(cedulaPptConPrefijo(null), null);
 });

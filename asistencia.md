@@ -3757,3 +3757,36 @@ financiera). Esa vista se refresca con el sondeo de 30 s.
 todas 390, 18 campañas, BACK 19 en vivo y 19 en el histórico, `alcance=otra` da 400. Un jefe sin el cargo (ficha 7)
 recibe 403 en `alcance=todas`, `/equipo/campanias` y en la trazabilidad de alguien ajeno, y sigue viendo sus 5.
 Lint y build del frontend sin errores. En el navegador como David: entra con "11 personas a tu cargo" y "Mi equipo"; "Todas las campañas" muestra 390 · solo consulta; BACK pasa a Histórico con 19 personas; el detalle de un agente de BACK abre su trazabilidad y "Volver al equipo" regresa a BACK. Sin errores en consola.
+
+## 69. AsisLock y los PPT: Gestor acepta el número sin el prefijo 600 (2026-11-17)
+
+**Problema:** Edgar David Gamez Mendoza tiene en Gestor la ficha **6006776237** (tipo PPT) y en AsisLock aparece como
+**6776237**. AsisLock no le traía el horario: `GET /api/integraciones/asislock/v1/empleados/6776237/horario` respondía
+404 `EMPLEADO_NO_ENCONTRADO`. Sus logins y logouts también se rechazaban como `empleado_no_encontrado`, así que
+no se le registraban las jornadas. En local, las 4 fichas tipo PPT siguen el mismo formato (`600` + 7 dígitos), y
+Adriannys Guédez (6001402568 / 1402568) está en el mismo caso. En la malla de la §67 ya venían así.
+
+**Arreglo (sin migración, sin tocar datos):** cuando la cédula exacta no existe y es un número de 7 dígitos, Gestor
+la busca como `600` + número **solo entre fichas tipo PPT**. La cédula exacta siempre gana.
+- `domain/asistencia/asislock.js`: `cedulaPptConPrefijo` (con pruebas).
+- `empleadoRepository.findPptPorNumero` (join a `tipo_identificacion.codigo = 'PPT'`).
+- `services/asistencia/fichaPorCedulaService.js`: `fichasPorCedula`, que usan la consulta por cédula de AsisLock
+  (`asislockConsultaService.resolverEmpleado`, §58) y la recepción de logins (`asislockService`, §18).
+- La respuesta devuelve la cédula tal como la mandó AsisLock.
+- No se cambió el molinete ni el cargue de mallas por Excel.
+
+**Logins ya rechazados:** quedan en `asislock_registro` con `resultado = 'rechazado'` y `motivo =
+'empleado_no_encontrado'`. Si AsisLock los reenvía, Gestor los procesa de nuevo, porque solo los no rechazados
+cuentan como duplicado. Pero aplica el límite `asislock_max_horas_atraso` (72 h): lo más viejo se vuelve a
+rechazar. Para ver cuántos hay en producción:
+
+```sql
+SELECT usuario, DATE(ocurrido_en) dia, COUNT(*) n
+  FROM asislock_registro
+ WHERE motivo = 'empleado_no_encontrado' AND usuario IN ('6776237', '1402568')
+ GROUP BY usuario, dia ORDER BY dia;
+```
+
+**Verificación (local):** 375 pruebas unitarias. `fichasPorCedula('6776237')` → ficha 180 (Edgar);
+`'1402568'` → 162 (Adriannys); `'9999999'` → ninguna; una CC de 10 dígitos sigue exacta.
+`horarioPorCedula('6776237')` devuelve a Edgar con sus días del 14 al 17 de noviembre.

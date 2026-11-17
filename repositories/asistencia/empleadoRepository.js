@@ -10,6 +10,18 @@ async function findPorNumeroIdentificacion(numero, conn = db) {
     return filas.map((f) => f.id);
 }
 
+// Fichas tipo PPT (Permiso por Protección Temporal) con ese número (asistencia.md §69).
+async function findPptPorNumero(numero, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT uc.id
+           FROM users_company uc
+           JOIN tipo_identificacion ti ON ti.idtipo_identificacion = uc.tipo_identificacion_idtipo_identificacion
+          WHERE uc.numero_identificacion = ? AND ti.codigo = ?`,
+        [numero, 'PPT']
+    );
+    return filas.map((f) => f.id);
+}
+
 const ESTADOS_CONTRATO_ACTIVOS = ['activo', 'periodo_prueba'];
 const NOMBRE = "TRIM(CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido))";
 
@@ -90,4 +102,4 @@ async function findNumerosExistentes(numeros, conn = db) {
     return filas.map((f) => f.numero);
 }
 
-module.exports = { findPorNumeroIdentificacion, findNumerosExistentes, findCampaniasConEmpleados, findActivosPorCampania, findActivo };
+module.exports = { findPorNumeroIdentificacion, findPptPorNumero, findNumerosExistentes, findCampaniasConEmpleados, findActivosPorCampania, findActivo };

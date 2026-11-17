@@ -54,6 +54,14 @@ function normalizarCedula(valor) {
     return limpia.length > 0 ? limpia : null;
 }
 
+// RRHH guarda el Permiso por Protección Temporal con el prefijo 600 (6006776237) y AsisLock y las mallas
+// traen el número de 7 dígitos (6776237) (asistencia.md §69). Si la cédula exacta no existe, se busca
+// esta forma, solo entre fichas tipo PPT. null si la cédula no tiene esa forma.
+const PREFIJO_PPT = '600';
+function cedulaPptConPrefijo(cedula) {
+    return /^\d{7}$/.test(cedula ?? '') ? `${PREFIJO_PPT}${cedula}` : null;
+}
+
 /** 'HH:MM' o 'HH:MM:SS' → 'HH:MM:SS' o null. */
 function normalizarHora(valor) {
     if (typeof valor !== 'string') return null;
@@ -312,6 +320,7 @@ function resumenDelDia(registros) {
 module.exports = {
     PARAMETROS_DEFECTO,
     normalizarCedula,
+    cedulaPptConPrefijo,
     normalizarFecha,
     normalizarHora,
     instantesDelRegistro,
