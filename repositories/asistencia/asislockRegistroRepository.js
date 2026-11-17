@@ -56,4 +56,21 @@ async function findDelDia(usersCompanyIds, fecha, conn = db) {
     return filas;
 }
 
-module.exports = { findParaActualizar, guardar, findDelDia };
+// Avisos rechazados de unas cédulas con un motivo (asistencia.md §69: recuperar los logins de un
+// PPT que no se encontraba). En orden cronológico, el login antes que el logout del mismo instante.
+async function findRechazados({ usuarios, motivo, desde = null, hasta = null }, conn = db) {
+    if (usuarios.length === 0) return [];
+    const condiciones = ['resultado = ?', 'motivo = ?', 'usuario IN (?)'];
+    const parametros = ['rechazado', motivo, usuarios];
+    if (desde) { condiciones.push('ocurrido_en >= ?'); parametros.push(desde); }
+    if (hasta) { condiciones.push('ocurrido_en < ?'); parametros.push(hasta); }
+    const [filas] = await conn.query(
+        `SELECT * FROM asislock_registro
+          WHERE ${condiciones.join(' AND ')}
+          ORDER BY ocurrido_en, FIELD(evento, 'login', 'logout'), idasislock_registro`,
+        parametros
+    );
+    return filas;
+}
+
+module.exports = { findParaActualizar, guardar, findDelDia, findRechazados };

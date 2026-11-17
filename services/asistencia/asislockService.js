@@ -10,6 +10,7 @@ const horaExtraRepo = require('../../repositories/asistencia/horaExtraRepository
 const { asislock } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
+const cierreService = require('./cierreService');
 
 // Integración AsisLock → asistencia (asistencia.md §18). Cada login/logout se procesa en su
 // propia transacción: un registro con problemas no frena a los demás del mismo envío.
@@ -62,9 +63,10 @@ async function guardarCopia(registro) {
     }
 }
 
-function datosBitacora(registro, evento, hora) {
+// `llave`: la del aviso original cuando se reprocesa un rechazado (§69), para sobrescribir esa fila.
+function datosBitacora(registro, evento, hora, llave = null) {
     return {
-        llave: asislock.llaveEvento(registro, evento),
+        llave: llave ?? asislock.llaveEvento(registro, evento),
         asislockId: registro.id ?? null,
         evento,
         usuario: String(registro.usuario ?? '').slice(0, 20),
@@ -78,11 +80,13 @@ function datosBitacora(registro, evento, hora) {
     };
 }
 
-async function procesarEventoEnTransaccion({ registro, evento, hora, instante, fecha, ahora }) {
+// `reproceso` (§69): recuperar un aviso que se rechazó; usa su llave original y no aplica el límite de
+// antigüedad (asislock_max_horas_atraso), que es para reenvíos de AsisLock, no para una recuperación.
+async function procesarEventoEnTransaccion({ registro, evento, hora, instante, fecha, ahora, reproceso = null }) {
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const bitacora = datosBitacora(registro, evento, hora);
+        const bitacora = datosBitacora(registro, evento, hora, reproceso?.llave);
 
         const previo = await registroRepo.findParaActualizar(bitacora.llave, evento, conn);
         if (previo && previo.resultado !== 'rechazado') {
@@ -110,7 +114,7 @@ async function procesarEventoEnTransaccion({ registro, evento, hora, instante, f
 
         const parametros = { ...asislock.PARAMETROS_DEFECTO, ...(await parametroRepo.obtener(conn)) };
         const motivoHora = asislock.motivoRechazoHora(instante, ahora, parametros);
-        if (motivoHora) return finalizar('rechazado', { motivo: motivoHora });
+        if (motivoHora && !(reproceso && motivoHora === 'demasiado_antiguo')) return finalizar('rechazado', { motivo: motivoHora });
 
         const cedula = asislock.normalizarCedula(registro.usuario);
         const empleados = await fichasPorCedula(cedula, conn);
@@ -229,4 +233,63 @@ async function recibirRegistros(registros) {
     return resultados;
 }
 
-module.exports = { recibirRegistros };
+/**
+ * Recupera los avisos de AsisLock que se rechazaron porque la cédula no tenía ficha y que hoy sí la
+ * encuentran (asistencia.md §69: PPT con el prefijo 600). Cada aviso se vuelve a procesar con su
+ * hora original y su llave, en orden cronológico; después se cierran los días ya pasados que
+ * cambiaron. Sin `aplicar` solo dice qué haría.
+ */
+async function reprocesarRechazados({ cedulas, desde = null, hasta = null, aplicar = false, ahora = new Date() }) {
+    const filas = await registroRepo.findRechazados({ usuarios: cedulas, motivo: 'empleado_no_encontrado', desde, hasta });
+    const resultados = [];
+    const diasTocados = new Map();
+
+    for (const fila of filas) {
+        const fecha = asislock.normalizarFecha(fila.fecha_reportada);
+        const fichas = await fichasPorCedula(asislock.normalizarCedula(fila.usuario));
+        const base = {
+            id: fila.idasislock_registro, usuario: fila.usuario, evento: fila.evento,
+            fecha, ocurrido_en: fila.ocurrido_en, users_company_id: fichas.length === 1 ? fichas[0] : null
+        };
+        if (fichas.length !== 1) {
+            resultados.push({ ...base, resultado: fichas.length === 0 ? 'sigue_sin_ficha' : 'cedula_ambigua' });
+            continue;
+        }
+        if (!aplicar) {
+            resultados.push({ ...base, resultado: 'se_reprocesaria' });
+            continue;
+        }
+        const registro = {
+            id: fila.asislock_id,
+            usuario: fila.usuario,
+            fecha: fila.fecha_reportada,
+            [`hora_${fila.evento}`]: fila.hora_reportada,
+            estado_conexion: fila.estado_conexion,
+            ip_local: fila.ip_local,
+            ip_publica: fila.ip_publica,
+            aplicativo: fila.aplicativo,
+            conectado_biometrico: fila.conectado_biometrico
+        };
+        const resultado = await procesarEvento({
+            registro, evento: fila.evento, hora: fila.hora_reportada, instante: fila.ocurrido_en, fecha, ahora,
+            reproceso: { llave: fila.llave }
+        });
+        resultados.push({ ...base, ...resultado });
+        if (resultado.resultado === 'registrado' && fecha) {
+            if (!diasTocados.has(fichas[0])) diasTocados.set(fichas[0], new Set());
+            diasTocados.get(fichas[0]).add(fecha);
+        }
+    }
+
+    // Días pasados: se cierran como lo haría el cierre nocturno (salida a la hora programada si quedó abierta).
+    const diasCerrados = [];
+    for (const [usersCompanyId, fechas] of diasTocados) {
+        for (const fecha of [...fechas].sort()) {
+            const cierre = await cierreService.normalizarSiEsPasada(usersCompanyId, fecha, ahora);
+            diasCerrados.push({ users_company_id: usersCompanyId, fecha, estado: cierre?.estado ?? 'sin cambios' });
+        }
+    }
+    return { total: filas.length, resultados, diasCerrados };
+}
+
+module.exports = { recibirRegistros, reprocesarRechazados };

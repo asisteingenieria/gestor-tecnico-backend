@@ -3790,3 +3790,32 @@ SELECT usuario, DATE(ocurrido_en) dia, COUNT(*) n
 **Verificación (local):** 375 pruebas unitarias. `fichasPorCedula('6776237')` → ficha 180 (Edgar);
 `'1402568'` → 162 (Adriannys); `'9999999'` → ninguna; una CC de 10 dígitos sigue exacta.
 `horarioPorCedula('6776237')` devuelve a Edgar con sus días del 14 al 17 de noviembre.
+
+### 69.1 Recuperar los logins rechazados: `scripts/recuperarRechazadosAsislock.js`
+
+Mientras Gestor no lo encontraba, los logins y logouts de Edgar se rechazaron. Esos días le aparecen como
+ausente o sin jornada aunque trabajó, y eso pasa al reporte mensual y a nómina. Los avisos quedaron completos en
+`asislock_registro` (hora, estado de conexión, IP, llave), así que el script los vuelve a procesar:
+
+```bash
+node scripts/recuperarRechazadosAsislock.js --cedulas=6776237                     # simulación: qué haría
+node scripts/recuperarRechazadosAsislock.js --cedulas=6776237,1402568 --aplicar   # Edgar y Adriannys
+# opcional: --desde=2026-11-01 --hasta=2026-11-17 (fecha Bogotá, ambas incluidas)
+```
+
+- La cédula va como la manda AsisLock (sin el 600). Solo toma los `rechazado` con motivo `empleado_no_encontrado`
+  que hoy sí encuentran ficha (`fichasPorCedula`).
+- Usa el mismo flujo que un aviso nuevo (`asislockService.reprocesarRechazados` → `procesarEvento`): misma decisión de
+  entrada, pausas, desconexión y salida, y la misma bitácora. Va en orden cronológico, con la hora original y la llave
+  original, así que sobrescribe la fila rechazada. **No** aplica el límite de 72 h (`asislock_max_horas_atraso`), que es
+  para los reenvíos de AsisLock.
+- Después cierra los días ya pasados que cambió (`cierreService.normalizarSiEsPasada`), como el cierre nocturno.
+- Es idempotente: un aviso recuperado deja de estar rechazado y no se vuelve a tomar.
+- Si el día ya tenía una jornada `ausente` del cierre (tenía horario y no marcó), el login la retoma y se recalcula.
+
+**Verificación (local):** se sembraron dos avisos rechazados de 6776237 del 14-nov (login 08:00 y logout 17:00).
+La simulación los listó con la ficha 180. Con `--aplicar` quedaron `registrado` (entrada / desconexión) y la jornada
+finalizada con 540 min. Una segunda corrida encontró 0. Los datos de prueba se borraron.
+
+**Producción:** correr primero la simulación, después de desplegar el arreglo del §69 (sin él, `fichasPorCedula` no
+encuentra la ficha y todo sale `sigue_sin_ficha`).
