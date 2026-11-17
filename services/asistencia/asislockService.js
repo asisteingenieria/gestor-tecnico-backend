@@ -11,6 +11,7 @@ const { asislock } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
 const cierreService = require('./cierreService');
+const { fechaLaboral } = require('../../utils/fechaBogota');
 
 // Integración AsisLock → asistencia (asistencia.md §18). Cada login/logout se procesa en su
 // propia transacción: un registro con problemas no frena a los demás del mismo envío.
@@ -282,9 +283,11 @@ async function reprocesarRechazados({ cedulas, desde = null, hasta = null, aplic
     }
 
     // Días pasados: se cierran como lo haría el cierre nocturno (salida a la hora programada si quedó abierta).
+    // El día de hoy no: lo cierra su logout o el cierre de esta noche.
+    const hoy = fechaLaboral(ahora);
     const diasCerrados = [];
     for (const [usersCompanyId, fechas] of diasTocados) {
-        for (const fecha of [...fechas].sort()) {
+        for (const fecha of [...fechas].filter((f) => f < hoy).sort()) {
             const cierre = await cierreService.normalizarSiEsPasada(usersCompanyId, fecha, ahora);
             diasCerrados.push({ users_company_id: usersCompanyId, fecha, estado: cierre?.estado ?? 'sin cambios' });
         }

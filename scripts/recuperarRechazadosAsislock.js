@@ -9,7 +9,6 @@
  *   node scripts/recuperarRechazadosAsislock.js --cedulas=6776237,1402568 --aplicar
  * Opcional: --desde=2026-11-01 --hasta=2026-11-17 (fecha Bogotá, ambos incluidos).
  */
-const db = require('../config/db');
 const { reprocesarRechazados } = require('../services/asistencia/asislockService');
 const { combinarFechaHora, sumarDias } = require('../utils/fechaBogota');
 
@@ -50,9 +49,12 @@ async function main() {
     }
 }
 
+// Sale con process.exit, como los demás scripts de asistencia. No se usa db.end(): cada evento
+// registrado lanza el aviso en vivo (notificarCambioJornada) sin esperarlo, y sus consultas chocaban
+// con el pool ya cerrado. Fuera del servidor ese aviso no tiene a quién llegar.
 main()
+    .then(() => process.exit(0))
     .catch((error) => {
         console.error('Error:', error.message);
-        process.exitCode = 1;
-    })
-    .finally(() => db.end());
+        process.exit(1);
+    });
