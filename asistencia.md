@@ -3951,3 +3951,17 @@ llega" y en el Histórico como una celda vacía, igual que un día sin horario. 
   Baño (cian sólido) en los mosaicos. Celda "Descanso" en el calendario y su leyenda, y KPI "Días de descanso".
 - Test en `novedadesAsistencia.test.js` (388 en total).
 
+## 74. El Director de Tecnología consulta los horarios de todas las campañas (2026-11-18)
+
+Extiende §68 a la pantalla de Horarios (`/operaciones/horarios`). Sin migración.
+
+- Entra viendo su equipo, como siempre, con todo lo de gestión. Con el filtro "Mi equipo / Todas las campañas /
+  <campaña>" (el mismo de Equipo, `?campania=` en la URL) ve la semana de horarios de esa gente en **solo consulta**:
+  sin "Nueva plantilla", "Cargar malla" ni "Asignar horario", las celdas no se abren y el panel de la izquierda pasa a
+  "Turnos de la semana" (las plantillas que usan esos horarios, sin editar ni borrar).
+- Backend: `GET /horarios` acepta `alcance=todas` o `campania_id` (`consultarHorariosQuerySchema`). Con alcance,
+  `horarioService.consultarHorarios` exige `veTodasLasCampaniasDe` (si no, 403) y trae los horarios de los activos de
+  la campaña en una consulta (`findRangoPorEmpleados`). Asignar, editar y borrar siguen con `assertEmpleadoACargo`.
+- Probado en local con su ficha (49), semana 26-oct a 1-nov: su equipo 15 horarios, una campaña 355, todas 1.145; un
+  jefe normal con `alcance=todas` recibe 403.
+

@@ -7,6 +7,7 @@ const equipoService = require('./equipoService');
 const notificacionService = require('./notificacionService');
 const mallaHorarios = require('../../domain/asistencia/mallaHorarios');
 const { fechaLaboral } = require('../../utils/fechaBogota');
+const { alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const XLSX = require('xlsx');
 const { NoAutorizadoError, NoEncontradoError, ReglaAsistenciaError, ValidacionError } = require('../../errors/AppError');
 
@@ -130,8 +131,19 @@ async function asignarMasivo({ directorUsersCompanyId, empleados, desde, hasta, 
     return { success: true, horarios_creados: filas.length };
 }
 
-async function consultarHorarios({ directorUsersCompanyId, empleadoId, desde, hasta }) {
+// Sin alcance: los horarios de su equipo. Con `alcance` 'todas' o una `campaniaId`, quien ve todas las
+// campañas (§68) consulta los de esa gente, en solo lectura (§74): asignar, editar y borrar siguen
+// exigiendo que el empleado esté a su cargo.
+async function consultarHorarios({ directorUsersCompanyId, empleadoId, desde, hasta, alcance, campaniaId }) {
     requireUsersCompanyId(directorUsersCompanyId);
+    const consulta = alcanceDeConsulta({ alcance, campaniaId });
+    if (consulta.tipo !== 'equipo') {
+        if (!(await equipoService.veTodasLasCampaniasDe(directorUsersCompanyId))) {
+            throw new NoAutorizadoError('Solo puedes consultar los horarios de tu equipo');
+        }
+        const roster = await empleadoRepo.findActivosPorCampania(consulta.campaniaId);
+        return horarioAsignadoRepo.findRangoPorEmpleados(roster.map((e) => e.users_company_id), desde, hasta);
+    }
     if (empleadoId) {
         await equipoService.assertEmpleadoACargo(directorUsersCompanyId, empleadoId);
         return horarioAsignadoRepo.findRango(empleadoId, desde, hasta);

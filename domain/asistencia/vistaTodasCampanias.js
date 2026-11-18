@@ -1,6 +1,6 @@
 // Cargos que, además de su equipo, consultan la asistencia de todas las campañas (asistencia.md §68).
-// Es solo lectura: en vivo, histórico y trazabilidad. Gestionar (horarios, horas extra, correcciones)
-// sigue siendo solo para su equipo. Se comparan sin tildes ni mayúsculas, como vienen del catálogo `cargo`.
+// Es solo lectura: en vivo, histórico, trazabilidad y los horarios asignados (§74). Gestionar (asignar
+// horarios, horas extra, correcciones) sigue siendo solo para su equipo. Se comparan sin tildes ni mayúsculas, como vienen del catálogo `cargo`.
 const CARGOS_VISTA_TODAS_CAMPANIAS = ['DIRECTOR DE TECNOLOGIA'];
 
 function normalizarCargo(cargo) {
