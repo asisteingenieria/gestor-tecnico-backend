@@ -157,6 +157,13 @@ async function estadoEnVivo(empleados) {
             entrada_en: estadoCalculado.entradaEn ?? null,
             estado_desde: estadoCalculado.estadoDesde ?? null,
             segundos_en_estado: estadoCalculado.segundosEnEstado ?? null,
+            // Acumulado del día por estado (conectado, break, baño, almuerzo, capacitación, desconectado).
+            segundos_por_estado: estadoCalculado.segundosPorEstado ?? null,
+            veces_por_estado: estadoCalculado.vecesPorEstado ?? null,
+            // Tiempo total desde la entrada (primer login) y si sigue corriendo: hasta la salida, o hasta el
+            // tope de una desconexión (fin de turno, §42).
+            segundos_en_jornada: estadoCalculado.entradaEn ? estadoCalculado.segundosEnJornada : null,
+            jornada_corre: !!estadoCalculado.cuentaJornada,
             alertas: estadoCalculado.alertas,
             asislock: asislockPorEmpleado[empleado.users_company_id] ?? null
         };

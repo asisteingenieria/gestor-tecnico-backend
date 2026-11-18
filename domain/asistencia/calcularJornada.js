@@ -25,6 +25,8 @@ const ESTADO_SIN_ENTRADA = {
     entradaEn: null,
     estadoDesde: null,
     segundosEnEstado: null,
+    segundosPorEstado: null,
+    vecesPorEstado: null,
     minutosTarde: 0,
     minutosExtra: 0,
     minutosSalidaAnticipada: 0,
@@ -97,6 +99,8 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
     // tampoco cuenta como tiempo laborado.
     let minutosDesconexion = 0;
     let desconexionDesde = null;
+    // Cuántas veces entró a cada pausa o se desconectó en el día (columnas del monitor del equipo).
+    const veces = { break: 0, bano: 0, almuerzo: 0, capacitacion: 0, desconectado: 0 };
 
     const acumularPausa = (tipo, duracion) => {
         minutosPausa[tipo] += duracion;
@@ -109,7 +113,10 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         if (evento.ocurrido_en > fin) continue;
 
         if (evento.tipo === 'inicio_desconexion') {
-            if (desconexionDesde === null) desconexionDesde = evento.ocurrido_en;
+            if (desconexionDesde === null) {
+                desconexionDesde = evento.ocurrido_en;
+                veces.desconectado += 1;
+            }
         } else if (evento.tipo === 'fin_desconexion') {
             if (desconexionDesde !== null) {
                 minutosDesconexion += Math.max(0, minutosEntre(desconexionDesde, evento.ocurrido_en));
@@ -118,6 +125,7 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         } else if (TIPO_DE_INICIO[evento.tipo]) {
             const tipo = TIPO_DE_INICIO[evento.tipo];
             pendiente = { tipo, desde: evento.ocurrido_en };
+            veces[tipo] += 1;
             if (tipo === 'almuerzo' && inicioAlmuerzoReal === null) inicioAlmuerzoReal = evento.ocurrido_en;
         } else if (TIPO_DE_FIN[evento.tipo]) {
             const tipo = TIPO_DE_FIN[evento.tipo];
@@ -237,6 +245,17 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         entradaEn: entrada.ocurrido_en,
         estadoDesde,
         segundosEnEstado: Math.max(0, Math.floor(((salida ? salida.ocurrido_en : ahora).getTime() - estadoDesde.getTime()) / 1000)),
+        // Acumulado del día por estado, a `ahora` y sin redondear: las columnas por estado del monitor
+        // del equipo. Conectado = laborado sin la capacitación (que cuenta como laborada pero va aparte).
+        segundosPorEstado: {
+            conectado: Math.floor(Math.max(0, minutosTrabajados - minutosCapacitacion) * 60),
+            break: Math.floor(minutosBreak * 60),
+            bano: Math.floor(minutosPausaBano * 60),
+            almuerzo: Math.floor(minutosPausaAlmuerzo * 60),
+            capacitacion: Math.floor(minutosCapacitacion * 60),
+            desconectado: Math.floor(minutosDesconexion * 60)
+        },
+        vecesPorEstado: veces,
         minutosTarde: Math.round(minutosTarde),
         minutosExtra: Math.round(minutosExtra),
         minutosSalidaAnticipada: Math.round(minutosSalidaAnticipada),

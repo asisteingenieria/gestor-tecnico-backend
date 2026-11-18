@@ -305,3 +305,38 @@ test('tiempo en el estado: entrada recién marcada unos ms después de "ahora" n
     assert.equal(r.estadoDesde.getTime(), entrada.ocurrido_en.getTime());
     assert.equal(r.segundosEnEstado, 0);
 });
+
+test('segundosPorEstado: acumulado del día por estado, con la pausa abierta contada hasta ahora', () => {
+    const eventos = [
+        evento('entrada', '08:00:00'),
+        evento('inicio_break', '09:00:00'), evento('fin_break', '09:15:00'),
+        evento('inicio_capacitacion', '10:00:00'), evento('fin_capacitacion', '10:30:00'),
+        evento('inicio_desconexion', '11:00:00'), evento('fin_desconexion', '11:05:00'),
+        evento('inicio_bano', '11:30:00')
+    ];
+    const r = calcularJornada(eventos, HORARIO, horaDia('11:40:00'));
+    // 220 min brutos − 15 break − 10 baño − 5 desconexión = 190 laborados, de los que 30 son capacitación.
+    assert.deepEqual(r.segundosPorEstado, {
+        conectado: 160 * 60, break: 15 * 60, bano: 10 * 60, almuerzo: 0, capacitacion: 30 * 60, desconectado: 5 * 60
+    });
+});
+
+test('segundosPorEstado: null sin entrada', () => {
+    assert.equal(calcularJornada([], HORARIO, horaDia('09:00:00')).segundosPorEstado, null);
+});
+
+test('vecesPorEstado: cuenta cada entrada a una pausa y cada desconexión del día', () => {
+    const eventos = [
+        evento('entrada', '08:00:00'),
+        evento('inicio_bano', '09:00:00'), evento('fin_bano', '09:05:00'),
+        evento('inicio_bano', '10:00:00'), evento('fin_bano', '10:05:00'),
+        evento('inicio_break', '10:30:00'), evento('fin_break', '10:45:00'),
+        evento('inicio_desconexion', '11:00:00'), evento('fin_desconexion', '11:02:00'),
+        evento('inicio_bano', '11:30:00')
+    ];
+    const r = calcularJornada(eventos, HORARIO, horaDia('11:35:00'));
+    assert.deepEqual(r.vecesPorEstado, { break: 1, bano: 3, almuerzo: 0, capacitacion: 0, desconectado: 1 });
+    // El tiempo total corre desde la entrada, con pausas y desconexión incluidas.
+    assert.equal(r.segundosEnJornada, 215 * 60);
+    assert.equal(r.cuentaJornada, true);
+});
