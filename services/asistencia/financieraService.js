@@ -128,6 +128,14 @@ async function resumenMensual({ periodo, campaniaId = null }) {
             const agg = aggPorEmp.get(r.users_company_id) || resumenCero();
             // Grilla con los días con novedad marcados (también los que no tienen jornada), como la del jefe.
             const novedadesMes = novedadesPorFecha(mes.novedadesDe.get(r.users_company_id), desde, hastaHoy);
+            // Días de descanso de su malla (§73): marcados en la grilla y contados en `dias_descanso`.
+            const descansos = new Set((turnosPorEmp.get(r.users_company_id) || [])
+                .filter((t) => t.es_descanso)
+                .map((t) => (t.fecha instanceof Date ? t.fecha.toISOString().slice(0, 10) : String(t.fecha).slice(0, 10))));
+            const resumenDiasDe = () => {
+                const { dias, dias_descanso } = resumenDeJornadas(diasPorEmp.get(r.users_company_id) || [], novedadesMes, descansos);
+                return { dias, dias_descanso };
+            };
             return {
                 ...agg,
                 users_company_id: r.users_company_id,
@@ -137,7 +145,7 @@ async function resumenMensual({ periodo, campaniaId = null }) {
                 centro_costo: r.centro_costo,
                 turno: ultimoTurno(turnosPorEmp.get(r.users_company_id) || []),
                 turnos: turnosPorEmp.get(r.users_company_id) || [],
-                dias: resumenDeJornadas(diasPorEmp.get(r.users_company_id) || [], novedadesMes).dias
+                ...resumenDiasDe(r.users_company_id)
             };
         });
         const totalesCampania = totalesEquipo(empleadosCampania);

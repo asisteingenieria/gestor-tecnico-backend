@@ -81,3 +81,19 @@ test('ajustarAgregado (histórico de financiera): resta las ausencias cubiertas 
     const parcial = ajustarAgregado({ ausencias: 1 }, new Map([['2026-11-12', 'ausente']]), novedadesPorFecha([votacion], '2026-11-01', '2026-11-30'));
     assert.deepEqual([parcial.ausencias, parcial.dias_novedad], [1, 0]);
 });
+
+test('resumenDeJornadas: los días de descanso van en la grilla y nunca son ausencia (§73)', () => {
+    const jornadas = [
+        { fecha: '2026-11-08', estado: 'finalizada', minutos_tarde: 0, minutos_trabajados: 480 },
+        { fecha: '2026-11-09', estado: 'ausente', minutos_tarde: 0, minutos_trabajados: 0 }
+    ];
+    const descansos = new Set(['2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11']);
+    const novedades = novedadesPorFecha([incapacidad], '2026-11-01', '2026-11-30'); // 10 y 11
+    const r = resumenDeJornadas(jornadas, novedades, descansos);
+    // 08 trabajó (sigue trabajado); 09 descanso aunque quedó ausente; 10-11 manda la novedad.
+    assert.deepEqual(r.dias.map((d) => `${d.fecha.slice(8)}:${d.estado}`), ['08:finalizada', '09:descanso', '10:novedad', '11:novedad']);
+    assert.equal(r.dias_descanso, 1);
+    assert.equal(r.ausencias, 0);
+    assert.equal(r.dias_trabajados, 1);
+    assert.equal(totalesEquipo([r, { dias_descanso: 2 }]).dias_descanso, 3);
+});

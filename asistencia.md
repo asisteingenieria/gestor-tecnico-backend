@@ -3933,3 +3933,21 @@ los lugares y para todos los roles.
 - **Por decidir con el negocio**: como `minutos_tarde` sigue redondeado, quien llega menos de 30 s tarde cuenta como
   puntual. Sin tolerancia (§52) podría pedirse que cualquier segundo cuente como tarde; es cambiar el redondeo por
   `segundosTarde > 0` y recalcular.
+
+## 73. Días de descanso marcados en Hoy y en el Histórico (2026-11-18)
+
+Antes el descanso nunca contaba como ausencia ni como "No ha llegado", pero en Hoy se veía como "Sin iniciar"/"Aún no
+llega" y en el Histórico como una celda vacía, igual que un día sin horario. Sin migración.
+
+- **Regla**: el día de descanso es el `horario_asignado.es_descanso` de la malla. Si la persona trabaja ese día, sale
+  con su estado real. Una novedad de RRHH que cubre el día manda sobre el descanso (§71).
+- **Hoy** (solo frontend; `estadoEnVivo` ya mandaba `turno.es_descanso`): estado "Descanso" en vez de "Sin iniciar",
+  con mosaico propio en la vista del coordinador y pestaña + KPI en la de jefes/directores/financiera.
+- **Histórico**: `resumenDeJornadas(jornadas, novedades, descansos)` marca `estado: 'descanso'` en la grilla (con o
+  sin jornada) y cuenta `dias_descanso`; nunca suma ausencia. El del equipo lee los horarios del mes en una consulta
+  (`findRangoPorEmpleados`); el de financiera usa los turnos que ya traía. Se marcan los descansos del **mes completo**,
+  también los que vienen: son la malla, no hechos.
+- **Color**: rayas diagonales cian (`#06b6d4`), validado con los colores del calendario; la textura lo distingue del
+  Baño (cian sólido) en los mosaicos. Celda "Descanso" en el calendario y su leyenda, y KPI "Días de descanso".
+- Test en `novedadesAsistencia.test.js` (388 en total).
+
