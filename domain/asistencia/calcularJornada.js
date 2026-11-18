@@ -28,6 +28,7 @@ const ESTADO_SIN_ENTRADA = {
     segundosPorEstado: null,
     vecesPorEstado: null,
     minutosTarde: 0,
+    segundosTarde: 0,
     minutosExtra: 0,
     minutosSalidaAnticipada: 0,
     desviacionAlmuerzoMin: 0,
@@ -257,6 +258,9 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
         },
         vecesPorEstado: veces,
         minutosTarde: Math.round(minutosTarde),
+        // Retraso exacto, sin redondear, para mostrarlo como 45:41 (§72). `minutosTarde` (redondeado) es el que
+        // se guarda en `jornada` y decide si el día fue puntual o tarde.
+        segundosTarde: Math.floor(minutosTarde * 60),
         minutosExtra: Math.round(minutosExtra),
         minutosSalidaAnticipada: Math.round(minutosSalidaAnticipada),
         desviacionAlmuerzoMin: Math.round(desviacionAlmuerzoMin),

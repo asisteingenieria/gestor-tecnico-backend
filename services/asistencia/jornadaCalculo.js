@@ -59,6 +59,7 @@ function construirTotales(estadoCalculado, eventos) {
         horaEntradaReal: entrada ? entrada.ocurrido_en : null,
         horaSalidaReal: salida ? salida.ocurrido_en : null,
         minutosTarde: estadoCalculado.minutosTarde,
+        segundosTarde: estadoCalculado.segundosTarde,
         minutosTrabajados: estadoCalculado.minutosTrabajados,
         minutosPausaBano: estadoCalculado.minutosPausaBano,
         minutosPausaAlmuerzo: estadoCalculado.minutosPausaAlmuerzo,

@@ -2,8 +2,9 @@ const empleadoRepo = require('../../repositories/asistencia/empleadoRepository')
 const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsignadoRepository');
 const resumenMensualRepo = require('../../repositories/asistencia/resumenMensualRepository');
 const equipoService = require('./equipoService');
-const { totalesEquipo } = require('../../domain/asistencia/resumenMensual');
-const { rangoDelMes } = require('../../utils/fechaBogota');
+const { totalesEquipo, resumenDeJornadas } = require('../../domain/asistencia/resumenMensual');
+const { porEmpleado, novedadesPorFecha, ajustarAgregado } = require('../../domain/asistencia/novedadesAsistencia');
+const { rangoDelMes, fechaLaboral } = require('../../utils/fechaBogota');
 const { NoEncontradoError, ValidacionError } = require('../../errors/AppError');
 
 // Asistencia vista por financiera (asistencia.md §32): la trazabilidad de cualquier empleado
@@ -60,11 +61,19 @@ async function resumenMensual({ periodo, campaniaId = null }) {
     const rangoPrev = rangoDelMes(periodoAnterior);
 
     // Todas las campañas con empleados activos (aunque no tengan jornadas ese mes) + sus agregados.
-    const [campaniasActivas, todos, todosPrev] = await Promise.all([
+    const [campaniasActivas, aggMes, aggPrev] = await Promise.all([
         empleadoRepo.findCampaniasConEmpleados(),
         resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde, hasta }),
         resumenMensualRepo.agregadosPorEmpleado({ campaniaId: null, desde: rangoPrev.desde, hasta: rangoPrev.hasta })
     ]);
+    // Novedades de RRHH (§71.1): un día cubierto en que no trabajó no es ausencia sino "día con novedad".
+    const hoy = fechaLaboral(new Date());
+    const [mes, prev] = await Promise.all([
+        conNovedades(aggMes, desde, hasta, hoy),
+        conNovedades(aggPrev, rangoPrev.desde, rangoPrev.hasta, hoy)
+    ]);
+    const todos = mes.agregados;
+    const todosPrev = prev.agregados;
 
     const agruparPorCampania = (filas) => {
         const mapa = new Map();
@@ -103,7 +112,7 @@ async function resumenMensual({ periodo, campaniaId = null }) {
         const diasPorEmp = new Map();
         for (const d of dias) {
             if (!diasPorEmp.has(d.users_company_id)) diasPorEmp.set(d.users_company_id, []);
-            diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
+            diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, segundos_tarde: d.segundos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
         }
         // Turnos del mes por empleado (§46): el día a día para el calendario y el último turno
         // (sin contar descansos) como su horario del mes.
@@ -114,8 +123,11 @@ async function resumenMensual({ periodo, campaniaId = null }) {
                 fecha: h.fecha, plantilla: h.plantilla, hora_entrada: h.hora_entrada, hora_salida: h.hora_salida, es_descanso: !!h.es_descanso
             });
         }
+        const hastaHoy = hasta < hoy ? hasta : hoy;
         const empleadosCampania = roster.map((r) => {
             const agg = aggPorEmp.get(r.users_company_id) || resumenCero();
+            // Grilla con los días con novedad marcados (también los que no tienen jornada), como la del jefe.
+            const novedadesMes = novedadesPorFecha(mes.novedadesDe.get(r.users_company_id), desde, hastaHoy);
             return {
                 ...agg,
                 users_company_id: r.users_company_id,
@@ -125,7 +137,7 @@ async function resumenMensual({ periodo, campaniaId = null }) {
                 centro_costo: r.centro_costo,
                 turno: ultimoTurno(turnosPorEmp.get(r.users_company_id) || []),
                 turnos: turnosPorEmp.get(r.users_company_id) || [],
-                dias: diasPorEmp.get(r.users_company_id) || []
+                dias: resumenDeJornadas(diasPorEmp.get(r.users_company_id) || [], novedadesMes).dias
             };
         });
         const totalesCampania = totalesEquipo(empleadosCampania);
@@ -141,6 +153,41 @@ async function resumenMensual({ periodo, campaniaId = null }) {
     return { periodo, periodo_anterior: periodoAnterior, desde, hasta, por_campania, totales, campania };
 }
 
+// Corrige los agregados del periodo con las novedades de RRHH (§71.1): resta las ausencias cubiertas y suma
+// `dias_novedad` (solo hasta hoy). Quien no marcó ninguna jornada pero tuvo novedad entra con ceros, para que
+// cuente en su campaña. Devuelve también las novedades por empleado, para la grilla del detalle.
+async function conNovedades(agregados, desde, hasta, hoy) {
+    const hastaHoy = hasta < hoy ? hasta : hoy;
+    const filas = desde <= hastaHoy ? await resumenMensualRepo.novedadesDeActivos({ desde, hasta: hastaHoy }) : [];
+    const novedadesDe = porEmpleado(filas);
+    if (novedadesDe.size === 0) {
+        return { agregados: agregados.map((a) => ({ ...a, dias_novedad: 0 })), novedadesDe };
+    }
+    const estados = await resumenMensualRepo.estadosDia({ usersCompanyIds: [...novedadesDe.keys()], desde, hasta: hastaHoy });
+    const estadosDe = new Map();
+    for (const e of estados) {
+        if (!estadosDe.has(e.users_company_id)) estadosDe.set(e.users_company_id, new Map());
+        estadosDe.get(e.users_company_id).set(e.fecha, e.estado);
+    }
+    const ajustar = (agg) => {
+        const lista = novedadesDe.get(agg.users_company_id);
+        if (!lista) return { ...agg, dias_novedad: 0 };
+        return ajustarAgregado(agg, estadosDe.get(agg.users_company_id) || new Map(), novedadesPorFecha(lista, desde, hastaHoy));
+    };
+    const resultado = agregados.map(ajustar);
+    const conAgregado = new Set(agregados.map((a) => a.users_company_id));
+    for (const [id, lista] of novedadesDe) {
+        if (conAgregado.has(id)) continue;
+        const f = lista[0];
+        const fila = ajustar({
+            ...resumenCero(), users_company_id: id, documento: f.documento, nombre: f.nombre,
+            idcampania: f.idcampania, campania: f.campania, cargo: f.cargo
+        });
+        if (fila.dias_novedad > 0) resultado.push(fila);
+    }
+    return { agregados: resultado, novedadesDe };
+}
+
 // Último turno trabajable de la lista (vienen ordenados por fecha), o null si solo hay descansos.
 function ultimoTurno(turnos) {
     const trabajables = turnos.filter((t) => !t.es_descanso);
@@ -151,8 +198,8 @@ function ultimoTurno(turnos) {
 // Totales en cero para un empleado activo que no marcó ninguna jornada en el mes.
 function resumenCero() {
     return {
-        dias_trabajados: 0, dias_puntuales: 0, dias_tarde: 0, ausencias: 0,
-        minutos_trabajados: 0, minutos_tarde: 0, minutos_extra: 0, minutos_bano: 0,
+        dias_trabajados: 0, dias_puntuales: 0, dias_tarde: 0, ausencias: 0, dias_novedad: 0,
+        minutos_trabajados: 0, minutos_tarde: 0, segundos_tarde: 0, minutos_extra: 0, minutos_bano: 0,
         minutos_break: 0, minutos_almuerzo: 0, minutos_capacitacion: 0, minutos_salida_anticipada: 0,
         porcentaje_puntualidad: null
     };

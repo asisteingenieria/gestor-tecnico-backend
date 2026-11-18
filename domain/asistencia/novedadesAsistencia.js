@@ -69,4 +69,30 @@ function novedadesPorFecha(novedades, desde, hasta) {
     return mapa;
 }
 
-module.exports = { cubreDiaCompleto, novedadDelDia, porEmpleado, novedadesPorFecha, TIPOS_PARCIALES };
+// Estados de jornada que cuentan como día trabajado (igual que resumenMensual).
+const TRABAJADO = new Set(['en_curso', 'en_pausa', 'finalizada']);
+
+/**
+ * Corrige los totales de un empleado que vienen agregados en SQL (histórico de financiera, §71.1) con la misma
+ * regla que resumenDeJornadas: un día cubierto por una novedad en que no trabajó deja de ser ausencia (si lo era)
+ * y cuenta en `dias_novedad`, haya o no jornada ese día.
+ * `estadosPorFecha` = Map fecha → estado de la jornada; `novedades` = Map fecha → novedad (novedadesPorFecha).
+ */
+function ajustarAgregado(agregado, estadosPorFecha, novedades) {
+    let ausentesCubiertas = 0;
+    let diasNovedad = 0;
+    for (const [fecha, novedad] of novedades) {
+        if (!novedad.cubre_dia) continue;
+        const estado = estadosPorFecha.get(fecha);
+        if (TRABAJADO.has(estado)) continue;
+        diasNovedad += 1;
+        if (estado === 'ausente') ausentesCubiertas += 1;
+    }
+    return {
+        ...agregado,
+        ausencias: Math.max(0, (Number(agregado.ausencias) || 0) - ausentesCubiertas),
+        dias_novedad: diasNovedad
+    };
+}
+
+module.exports = { cubreDiaCompleto, novedadDelDia, porEmpleado, novedadesPorFecha, ajustarAgregado, TIPOS_PARCIALES };

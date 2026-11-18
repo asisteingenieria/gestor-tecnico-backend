@@ -3896,3 +3896,40 @@ directores y coordinadores no deben ver "No ha llegado" (Hoy) ni "Ausente" (Hist
 - Tests: `tests/asistencia/novedadesAsistencia.test.js` (7; 385 en total).
 - **Por confirmar con el negocio**: si "Horas de votacion" debe cubrir el día y si "Suspensiones" debe verse como
   novedad (hoy sí) o como ausencia.
+
+### 71.1 Financiera también ve las novedades (2026-11-18)
+
+- **Hoy** ("Asistencia en vivo") ya las tenía: usa `estadoEnVivo`.
+- **Histórico mensual** (`financieraService.resumenMensual`) sumaba las ausencias en SQL sin cruzar novedades.
+  Ahora `conNovedades` trae las novedades de los activos del rango (`resumenMensualRepository.novedadesDeActivos`,
+  hasta hoy) y el estado de sus jornadas (`estadosDia`), y corrige cada agregado con
+  `ajustarAgregado` (dominio, misma regla que `resumenDeJornadas`): resta las ausencias cubiertas y suma
+  `dias_novedad`. Quien solo tuvo novedad, sin jornadas, entra con ceros para contar en su campaña. Se aplica
+  también al mes anterior (tendencia).
+- El detalle de una campaña arma la grilla con `resumenDeJornadas(..., novedades).dias`: el calendario marca
+  qué días tuvo novedad cada persona (tipo en el title), con KPI "Días con novedad", columna "Con novedad",
+  distintivo junto al nombre y columnas en los dos CSV.
+- Test de `ajustarAgregado` (386 en total).
+
+## 72. Retraso exacto de la llegada, sin redondear (2026-11-18)
+
+Pedido: una entrada a las 08:45:41 con turno de las 08:00 mostraba "+46 min tarde"; debe decir **45:41**, en todos
+los lugares y para todos los roles.
+
+- El dominio ya calculaba el retraso exacto; `calcularJornada` lo redondeaba (`Math.round`) al devolver
+  `minutosTarde`. Ahora devuelve además **`segundosTarde`** (sin redondear). `minutosTarde` no cambia: es el que
+  decide si el día fue puntual o tarde y el que suma la puntualidad.
+- **Migración 103**: `jornada.segundos_tarde` (INT, 0 por defecto), que `actualizarTotales` escribe junto a
+  `minutos_tarde`. Rellena el histórico con la misma regla del cálculo (entrada real − (hora de entrada del horario
+  del día + 5 h + tolerancia)), solo días tarde que no son de descanso; lo que no cuadre con `minutos_tarde` queda
+  en minutos × 60. En local las 12 jornadas tarde coincidieron con el cálculo del dominio. **Va antes del código.**
+- Los segundos llegan a Hoy (`segundos_tarde` en `estadoEnVivo` y en `mi-jornada`), a la trazabilidad
+  (`segundosTarde`), al histórico del equipo y de financiera (suma `segundos_tarde` y por día) y a Mis estadísticas
+  (`segundos_tarde_acumulados`).
+- Frontend: `tardeExacto(segundos, minutos)` (`utils/llegadaAsistencia.js`) → "45:41 min" o "1:05:41 h"; en
+  Mi jornada, trazabilidad, Equipo Hoy (coordinador y jefes/directores/financiera), histórico del equipo y de
+  financiera (calendario, tabla y CSV, columna "Tiempo tarde") y Mis estadísticas.
+- Test en `calcularJornada.test.js` (387 en total).
+- **Por decidir con el negocio**: como `minutos_tarde` sigue redondeado, quien llega menos de 30 s tarde cuenta como
+  puntual. Sin tolerancia (§52) podría pedirse que cualquier segundo cuente como tarde; es cambiar el redondeo por
+  `segundosTarde > 0` y recalcular.

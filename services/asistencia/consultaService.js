@@ -57,6 +57,7 @@ async function estadoDeHoy(usersCompanyId) {
         } : null,
         hora_entrada_real: entrada ? entrada.ocurrido_en.toISOString() : null,
         minutos_tarde: estado.minutosTarde,
+        segundos_tarde: estado.segundosTarde,
         minutos_trabajados: estado.minutosTrabajados,
         segundos_trabajados: estado.segundosTrabajados,
         segundos_en_jornada: estado.segundosEnJornada,
@@ -150,6 +151,7 @@ async function misEstadisticas({ usersCompanyId, desde, hasta }) {
         dias_puntuales: diasPuntuales,
         porcentaje_puntualidad: diasTrabajados > 0 ? Math.round((diasPuntuales / diasTrabajados) * 100) : null,
         minutos_tarde_acumulados: jornadas.reduce((acc, j) => acc + j.minutos_tarde, 0),
+        segundos_tarde_acumulados: jornadas.reduce((acc, j) => acc + (Number(j.segundos_tarde) || 0), 0),
         minutos_trabajados_acumulados: jornadas.reduce((acc, j) => acc + j.minutos_trabajados, 0),
         minutos_extra_acumulados: jornadas.reduce((acc, j) => acc + j.minutos_extra, 0)
     };
