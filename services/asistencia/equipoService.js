@@ -13,6 +13,8 @@ const { noHaLlegado } = require('../../domain/asistencia/reglasJornada');
 const { veTodasLasCampanias, alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const asislockVista = require('./asislockVista');
 const molineteVista = require('./molineteVista');
+const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
+const { novedadDelDia, porEmpleado, novedadesPorFecha } = require('../../domain/asistencia/novedadesAsistencia');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -121,13 +123,17 @@ async function estadoEnVivo(empleados) {
     const ahora = new Date();
     const fecha = fechaLaboral(ahora);
     const ids = empleados.map((e) => e.users_company_id);
-    const [asislockPorEmpleado, estados] = await Promise.all([
+    const [asislockPorEmpleado, estados, novedades] = await Promise.all([
         asislockVista.resumenesDelDia(ids, fecha),
-        calcularEstadosDelDia(ids, fecha, ahora)
+        calcularEstadosDelDia(ids, fecha, ahora),
+        novedadEquipoRepo.vigentesDe(ids, fecha, fecha)
     ]);
+    const novedadesDe = porEmpleado(novedades);
 
     return empleados.map((empleado) => {
         const { estadoCalculado, horario } = estados.get(empleado.users_company_id);
+        // Novedad de RRHH de hoy (incapacidad, vacaciones, licencia…, §71): si cubre el día, no es "No ha llegado".
+        const novedad = novedadDelDia(novedadesDe.get(empleado.users_company_id), fecha);
         return {
             users_company_id: empleado.users_company_id,
             nombre: empleado.nombre,
@@ -147,7 +153,9 @@ async function estadoEnVivo(empleados) {
             } : null,
             estado: estadoCalculado.estado,
             // Sin entrada y su turno de hoy ya empezó (§62): en el monitor, 'No ha llegado' en vez de 'Sin iniciar'.
-            no_ha_llegado: noHaLlegado(estadoCalculado, horario, ahora),
+            // Con una novedad que cubre el día, tampoco (§71).
+            no_ha_llegado: !novedad?.cubre_dia && noHaLlegado(estadoCalculado, horario, ahora),
+            novedad,
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             minutos_tarde: estadoCalculado.minutosTarde,
             pausa_activa: estadoCalculado.pausaActiva,
@@ -286,10 +294,17 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo, campaniaI
     const personas = await personasDelMes(directorUsersCompanyId, campaniaId);
     const ahora = new Date();
 
+    const hoy = fechaLaboral(ahora);
+    const hastaHoy = hasta < hoy ? hasta : hoy;
+    // Novedades de RRHH del mes de todo el equipo en una consulta (§71): los días cubiertos no son ausencias.
+    const novedadesDe = porEmpleado(await novedadEquipoRepo.vigentesDe(personas.map((p) => p.users_company_id), desde, hasta));
+
     const filas = await Promise.all(personas.map(async (persona) => {
         await cierreService.normalizarRangoSiEsPasado(persona.users_company_id, desde, hasta, ahora);
         const jornadas = await jornadaRepo.findRango(persona.users_company_id, desde, hasta);
-        return { ...persona, ...resumenDeJornadas(jornadas) };
+        // Hasta hoy: unas vacaciones que siguen la próxima semana no cuentan días que aún no pasan.
+        const novedadesMes = novedadesPorFecha(novedadesDe.get(persona.users_company_id), desde, hastaHoy);
+        return { ...persona, ...resumenDeJornadas(jornadas, novedadesMes) };
     }));
     filas.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 

@@ -64,4 +64,24 @@ async function listarDelArbol({ idsArbol, raizUsersCompanyId, desde, hasta, empl
     return filas;
 }
 
-module.exports = { listarDelArbol };
+// Novedades de RRHH de unas personas que se cruzan con [desde, hasta], para marcar los días con novedad en
+// Hoy y en el histórico (§71). Una sola consulta para todo el equipo. Sin fecha final = un solo día. Solo
+// tipo y fechas: nada de diagnóstico.
+async function vigentesDe(usersCompanyIds, desde, hasta, conn = db) {
+    if (!usersCompanyIds || usersCompanyIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT c.users_company_id, nr.idnovedad_rrhh, tn.nombre AS tipo,
+                nr.fecha_inicial, COALESCE(nr.fecha_final, nr.fecha_inicial) AS fecha_final
+           FROM novedad_rrhh nr
+           JOIN contrato c ON c.idcontrato = nr.contrato_idcontrato
+           JOIN tipo_novedad tn ON tn.idtipo_novedad = nr.tipo_novedad_idtipo_novedad
+          WHERE c.users_company_id IN (?)
+            AND nr.fecha_inicial <= ?
+            AND COALESCE(nr.fecha_final, nr.fecha_inicial) >= ?
+          ORDER BY nr.fecha_inicial`,
+        [usersCompanyIds, hasta, desde]
+    );
+    return filas;
+}
+
+module.exports = { listarDelArbol, vigentesDe };
