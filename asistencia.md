@@ -3819,3 +3819,53 @@ finalizada con 540 min. Una segunda corrida encontró 0. Los datos de prueba se 
 
 **Producción:** correr primero la simulación, después de desplegar el arreglo del §69 (sin él, `fichasPorCedula` no
 encuentra la ficha y todo sale `sigue_sin_ficha`).
+
+
+## 70. Rediseño de Equipo (Hoy e Histórico): tiempo total, acumulado y veces por estado, gráficas (2026-11-18)
+
+Pedido del usuario a partir de dos referencias en Descargas (`ejemplo.jpg` y `Dashboard.png`). Solo frontend, salvo
+tres campos nuevos de `GET /asistencia/equipo`. **Sin migración.** Backend y frontend se despliegan juntos: sin el
+backend nuevo, las columnas por estado y el tiempo total salen en "—".
+
+### 70.1 Vista Hoy (`MonitorEquipo.jsx`)
+
+- Diseño de `Dashboard.png`: encabezado con ícono, mosaicos por estado con su color y barra inferior (siguen filtrando),
+  leyenda junto al buscador, tabla con encabezado azul marino e íconos, filas blancas alternas y el estado en pastilla.
+  Colores por estado en las clases `.ai-st--<clave>` de `components.css` (las comparten mosaicos, leyenda y pastillas).
+- Columnas: Hora Login (con pastilla roja **"Tarde +Xh YYm"** si `minutos_tarde > 0`) · Nombre · **Horario** del día
+  (`turno`; "Descanso" / "Sin horario") · Estado · **Tiempo total** · **Tiempo disponible** · Break · Baño · Almuerzo ·
+  Capacitación · Desconectado.
+- **Tiempo total** = desde la entrada (primer login), sin detenerse en pausas ni desconexiones; se detiene en la salida o
+  en el tope de una desconexión (§42). Sale de `segundos_en_jornada` + `jornada_corre`.
+- **Tiempo disponible** = acumulado del día conectado (laborado sin capacitación). Solo suma estando Conectado.
+- **Columnas de pausa**: estando en ese estado, la pastilla cuenta desde que entró **esta vez** (`segundos_en_estado`)
+  y debajo va "Acum. HH:MM:SS · N veces"; fuera de él, el acumulado del día y las veces. Volver a entrar reinicia la
+  pastilla y suma una vez.
+- El contador "tiempo en el estado actual" ya no tiene columna propia: vive en la pastilla de la columna del estado.
+
+### 70.2 Backend
+
+- `domain/asistencia/calcularJornada.js` devuelve además `segundosPorEstado` (conectado, break, bano, almuerzo,
+  capacitacion, desconectado; sin redondear, a `ahora`) y `vecesPorEstado` (cada `inicio_<pausa>` y cada
+  `inicio_desconexion` que abre una desconexión). `null` sin entrada.
+- `services/asistencia/equipoService.js` (`estadoEnVivo`) los expone como `segundos_por_estado`, `veces_por_estado`,
+  `segundos_en_jornada` y `jornada_corre`. Campos nuevos; nada cambió de forma.
+- Tests: 3 nuevos en `tests/asistencia/calcularJornada.test.js` (378 en total).
+
+### 70.3 Vista Histórico (`EquipoMensual.jsx` + `GraficasEquipoMes.jsx`)
+
+- Mismo diseño que Hoy: los KPIs pasan a mosaicos (se suma Horas trabajadas), barra de filtros, calendario en panel con
+  encabezado azul marino y tabla de detalle con íconos, avatar, pastillas en ausencias / días tarde / puntualidad y fila
+  de total. Es la misma pantalla para coordinadores (`/asistencia`) y jefes (`/operaciones`).
+- Selector **Tabla | Gráfica** sobre el detalle por empleado (abre en Tabla). Dos gráficas de barras apiladas en HTML
+  (no chart.js, para tomar los tokens de tema): **Asistencia del mes** en días (puntual · tarde · ausente, con la
+  puntualidad al final, de menor a mayor) y **Distribución del tiempo** en horas (disponible · capacitación · break ·
+  baño · almuerzo · extra, de más a menos horas en pausas). "Disponible" = trabajadas − capacitación − extra, para no
+  contar dos veces. Detalle al pasar el mouse, clic a la trazabilidad, mismos filtros, primeras 20 + "Ver las N".
+- Colores `--gm-*` validados con el validador de paletas del skill `dataviz` en claro y oscuro (el ámbar tiene su tono
+  en oscuro). El orden de las series es el validado: no reordenarlas.
+
+### 70.4 Pendientes
+
+- Novedades y Retiros siguen con el diseño anterior.
+- Barra horizontal de ~15 px en las páginas con scroll vertical: el contenedor general mide `100vw`. No es de este cambio.
