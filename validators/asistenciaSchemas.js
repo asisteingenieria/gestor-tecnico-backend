@@ -83,7 +83,10 @@ const consultarHorariosQuerySchema = {
     query: {
         empleadoId: { tipo: 'entero' },
         desde: { tipo: 'fecha' },
-        hasta: { tipo: 'fecha' }
+        hasta: { tipo: 'fecha' },
+        // Quien ve todas las campañas (§68, §74): consulta los horarios de otra campaña o de todas.
+        alcance: { tipo: 'texto', enum: ['todas'] },
+        campania_id: { tipo: 'entero' }
     }
 };
 

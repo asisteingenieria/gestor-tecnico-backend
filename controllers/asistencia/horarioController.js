@@ -45,7 +45,9 @@ async function consultarHorarios(req, res) {
         directorUsersCompanyId: req.user.users_company_id,
         empleadoId: req.query.empleadoId ? Number(req.query.empleadoId) : null,
         desde: req.query.desde,
-        hasta: req.query.hasta
+        hasta: req.query.hasta,
+        alcance: req.query.alcance,
+        campaniaId: req.query.campania_id ? Number(req.query.campania_id) : null
     });
     res.json(resultado);
 }
