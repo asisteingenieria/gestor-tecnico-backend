@@ -3896,3 +3896,17 @@ directores y coordinadores no deben ver "No ha llegado" (Hoy) ni "Ausente" (Hist
 - Tests: `tests/asistencia/novedadesAsistencia.test.js` (7; 385 en total).
 - **Por confirmar con el negocio**: si "Horas de votacion" debe cubrir el día y si "Suspensiones" debe verse como
   novedad (hoy sí) o como ausencia.
+
+### 71.1 Financiera también ve las novedades (2026-11-18)
+
+- **Hoy** ("Asistencia en vivo") ya las tenía: usa `estadoEnVivo`.
+- **Histórico mensual** (`financieraService.resumenMensual`) sumaba las ausencias en SQL sin cruzar novedades.
+  Ahora `conNovedades` trae las novedades de los activos del rango (`resumenMensualRepository.novedadesDeActivos`,
+  hasta hoy) y el estado de sus jornadas (`estadosDia`), y corrige cada agregado con
+  `ajustarAgregado` (dominio, misma regla que `resumenDeJornadas`): resta las ausencias cubiertas y suma
+  `dias_novedad`. Quien solo tuvo novedad, sin jornadas, entra con ceros para contar en su campaña. Se aplica
+  también al mes anterior (tendencia).
+- El detalle de una campaña arma la grilla con `resumenDeJornadas(..., novedades).dias`: el calendario marca
+  qué días tuvo novedad cada persona (tipo en el title), con KPI "Días con novedad", columna "Con novedad",
+  distintivo junto al nombre y columnas en los dos CSV.
+- Test de `ajustarAgregado` (386 en total).

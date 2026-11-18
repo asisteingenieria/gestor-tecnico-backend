@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { novedadDelDia, porEmpleado, novedadesPorFecha, cubreDiaCompleto } = require('../../domain/asistencia/novedadesAsistencia');
+const { novedadDelDia, porEmpleado, novedadesPorFecha, cubreDiaCompleto, ajustarAgregado } = require('../../domain/asistencia/novedadesAsistencia');
 const { resumenDeJornadas, totalesEquipo } = require('../../domain/asistencia/resumenMensual');
 
 const incapacidad = { users_company_id: 7, idnovedad_rrhh: 1, tipo: 'Incapacidades origen comun 1- 2 días', fecha_inicial: new Date('2026-11-10T00:00:00Z'), fecha_final: new Date('2026-11-11T00:00:00Z') };
@@ -68,4 +68,16 @@ test('resumenDeJornadas sin novedades queda igual que antes, y totalesEquipo sum
     assert.equal(r.ausencias, 1);
     assert.equal(r.dias_novedad, 0);
     assert.equal(totalesEquipo([{ dias_novedad: 2 }, { dias_novedad: 3 }]).dias_novedad, 5);
+});
+
+test('ajustarAgregado (histórico de financiera): resta las ausencias cubiertas y cuenta los días con novedad', () => {
+    const estados = new Map([['2026-11-10', 'ausente'], ['2026-11-11', 'finalizada'], ['2026-11-13', 'ausente']]);
+    const novedades = novedadesPorFecha([{ ...incapacidad, fecha_final: '2026-11-12' }], '2026-11-01', '2026-11-30');
+    const r = ajustarAgregado({ users_company_id: 7, ausencias: 2, dias_trabajados: 1 }, estados, novedades);
+    // 10 ausente cubierto → novedad; 11 trabajó → sigue trabajado; 12 sin jornada → novedad; 13 ausente sin cubrir.
+    assert.equal(r.ausencias, 1);
+    assert.equal(r.dias_novedad, 2);
+    assert.equal(r.dias_trabajados, 1);
+    const parcial = ajustarAgregado({ ausencias: 1 }, new Map([['2026-11-12', 'ausente']]), novedadesPorFecha([votacion], '2026-11-01', '2026-11-30'));
+    assert.deepEqual([parcial.ausencias, parcial.dias_novedad], [1, 0]);
 });
