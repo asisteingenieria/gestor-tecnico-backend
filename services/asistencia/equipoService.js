@@ -299,18 +299,37 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo, campaniaI
     const hoy = fechaLaboral(ahora);
     const hastaHoy = hasta < hoy ? hasta : hoy;
     // Novedades de RRHH del mes de todo el equipo en una consulta (§71): los días cubiertos no son ausencias.
-    const novedadesDe = porEmpleado(await novedadEquipoRepo.vigentesDe(personas.map((p) => p.users_company_id), desde, hasta));
+    const ids = personas.map((p) => p.users_company_id);
+    const [novedades, horarios] = await Promise.all([
+        novedadEquipoRepo.vigentesDe(ids, desde, hasta),
+        // Días de descanso del mes completo (§73): son la malla, no hechos, así que se ven también los que vienen.
+        horarioAsignadoRepo.findRangoPorEmpleados(ids, desde, hasta)
+    ]);
+    const novedadesDe = porEmpleado(novedades);
+    const descansosDe = descansosPorEmpleado(horarios);
 
     const filas = await Promise.all(personas.map(async (persona) => {
         await cierreService.normalizarRangoSiEsPasado(persona.users_company_id, desde, hasta, ahora);
         const jornadas = await jornadaRepo.findRango(persona.users_company_id, desde, hasta);
         // Hasta hoy: unas vacaciones que siguen la próxima semana no cuentan días que aún no pasan.
         const novedadesMes = novedadesPorFecha(novedadesDe.get(persona.users_company_id), desde, hastaHoy);
-        return { ...persona, ...resumenDeJornadas(jornadas, novedadesMes) };
+        return { ...persona, ...resumenDeJornadas(jornadas, novedadesMes, descansosDe.get(persona.users_company_id)) };
     }));
     filas.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 
     return { periodo, desde, hasta, empleados: filas, totales: totalesEquipo(filas) };
+}
+
+// Map users_company_id → Set de fechas 'AAAA-MM-DD' marcadas como descanso en su horario (§73).
+function descansosPorEmpleado(horarios) {
+    const mapa = new Map();
+    for (const h of horarios) {
+        if (!h.es_descanso) continue;
+        const fecha = h.fecha instanceof Date ? h.fecha.toISOString().slice(0, 10) : String(h.fecha).slice(0, 10);
+        if (!mapa.has(h.users_company_id)) mapa.set(h.users_company_id, new Set());
+        mapa.get(h.users_company_id).add(fecha);
+    }
+    return mapa;
 }
 
 async function registrarEventoManual({ directorUsersCompanyId, jornadaId, tipo, nota, registradoPor }) {
