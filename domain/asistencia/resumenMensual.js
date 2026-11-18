@@ -8,6 +8,8 @@ const TRABAJADO = new Set(['en_curso', 'en_pausa', 'finalizada']);
 const CAMPOS_MINUTOS = {
     minutos_trabajados: 'minutos_trabajados',
     minutos_tarde: 'minutos_tarde',
+    // Retraso exacto (§72); minutos_tarde va redondeado y decide puntual/tarde.
+    segundos_tarde: 'segundos_tarde',
     minutos_extra: 'minutos_extra',
     minutos_bano: 'minutos_pausa_bano',
     minutos_break: 'minutos_break',
@@ -54,6 +56,7 @@ function resumenDeJornadas(jornadas, novedades = new Map()) {
             // Ausente o sin entrada en un día cubierto por la novedad: 'novedad'.
             estado: novedad?.cubre_dia && !TRABAJADO.has(j.estado) ? 'novedad' : j.estado,
             minutos_tarde: num(j.minutos_tarde),
+            segundos_tarde: num(j.segundos_tarde),
             minutos_trabajados: num(j.minutos_trabajados),
             minutos_extra: num(j.minutos_extra),
             novedad
@@ -62,7 +65,7 @@ function resumenDeJornadas(jornadas, novedades = new Map()) {
     // Días con novedad sin jornada (sin horario ese día): también se ven en la grilla.
     for (const [fecha, novedad] of diasNovedad) {
         if (!fechasConJornada.has(fecha)) {
-            resumen.dias.push({ fecha, estado: 'novedad', minutos_tarde: 0, minutos_trabajados: 0, minutos_extra: 0, novedad });
+            resumen.dias.push({ fecha, estado: 'novedad', minutos_tarde: 0, segundos_tarde: 0, minutos_trabajados: 0, minutos_extra: 0, novedad });
         }
     }
     resumen.dias.sort((a, b) => a.fecha.localeCompare(b.fecha));

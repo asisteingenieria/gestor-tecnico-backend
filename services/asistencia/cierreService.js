@@ -14,6 +14,7 @@ const TOTALES_AUSENTE = {
     horaEntradaReal: null,
     horaSalidaReal: null,
     minutosTarde: 0,
+    segundosTarde: 0,
     minutosTrabajados: 0,
     minutosPausaBano: 0,
     minutosPausaAlmuerzo: 0,

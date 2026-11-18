@@ -112,7 +112,7 @@ async function resumenMensual({ periodo, campaniaId = null }) {
         const diasPorEmp = new Map();
         for (const d of dias) {
             if (!diasPorEmp.has(d.users_company_id)) diasPorEmp.set(d.users_company_id, []);
-            diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
+            diasPorEmp.get(d.users_company_id).push({ fecha: d.fecha, estado: d.estado, minutos_tarde: d.minutos_tarde, segundos_tarde: d.segundos_tarde, minutos_trabajados: d.minutos_trabajados, minutos_extra: d.minutos_extra });
         }
         // Turnos del mes por empleado (§46): el día a día para el calendario y el último turno
         // (sin contar descansos) como su horario del mes.
@@ -199,7 +199,7 @@ function ultimoTurno(turnos) {
 function resumenCero() {
     return {
         dias_trabajados: 0, dias_puntuales: 0, dias_tarde: 0, ausencias: 0, dias_novedad: 0,
-        minutos_trabajados: 0, minutos_tarde: 0, minutos_extra: 0, minutos_bano: 0,
+        minutos_trabajados: 0, minutos_tarde: 0, segundos_tarde: 0, minutos_extra: 0, minutos_bano: 0,
         minutos_break: 0, minutos_almuerzo: 0, minutos_capacitacion: 0, minutos_salida_anticipada: 0,
         porcentaje_puntualidad: null
     };

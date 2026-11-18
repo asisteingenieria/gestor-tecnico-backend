@@ -340,3 +340,11 @@ test('vecesPorEstado: cuenta cada entrada a una pausa y cada desconexión del d�
     assert.equal(r.segundosEnJornada, 215 * 60);
     assert.equal(r.cuentaJornada, true);
 });
+
+test('segundosTarde: el retraso exacto, sin redondear (§72)', () => {
+    // tolerancia 5 min; entrada 08:50:41 -> 45 min 41 s tarde; minutosTarde redondea a 46.
+    const resultado = calcularJornada([evento('entrada', '08:50:41')], HORARIO, horaDia('09:30:00'));
+    assert.equal(resultado.segundosTarde, 45 * 60 + 41);
+    assert.equal(resultado.minutosTarde, 46);
+    assert.equal(calcularJornada([evento('entrada', '08:00:00')], HORARIO, horaDia('09:00:00')).segundosTarde, 0);
+});

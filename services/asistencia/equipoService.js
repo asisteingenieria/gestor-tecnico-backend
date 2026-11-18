@@ -158,6 +158,7 @@ async function estadoEnVivo(empleados) {
             novedad,
             minutos_trabajados: estadoCalculado.minutosTrabajados,
             minutos_tarde: estadoCalculado.minutosTarde,
+            segundos_tarde: estadoCalculado.segundosTarde,
             pausa_activa: estadoCalculado.pausaActiva,
             desconexion_activa: estadoCalculado.desconexionActiva,
             // Monitor del equipo (Hora Login · Nombre · Estado · Tiempo): la entrada del día y desde
@@ -243,6 +244,7 @@ async function estadisticasEquipo({ directorUsersCompanyId, desde, hasta }) {
             dias_trabajados: diasTrabajados,
             ausencias: jornadas.filter((j) => j.estado === 'ausente').length,
             minutos_tarde_acumulados: jornadas.reduce((acc, j) => acc + j.minutos_tarde, 0),
+            segundos_tarde_acumulados: jornadas.reduce((acc, j) => acc + (Number(j.segundos_tarde) || 0), 0),
             minutos_extra_acumulados: jornadas.reduce((acc, j) => acc + j.minutos_extra, 0),
             porcentaje_puntualidad: diasTrabajados > 0 ? Math.round((diasPuntuales / diasTrabajados) * 100) : null
         };

@@ -36,6 +36,7 @@ async function agregadosPorEmpleado({ campaniaId = null, desde, hasta }, conn = 
                 SUM(j.estado = 'ausente') AS ausencias,
                 SUM(j.minutos_trabajados) AS minutos_trabajados,
                 SUM(j.minutos_tarde) AS minutos_tarde,
+                SUM(j.segundos_tarde) AS segundos_tarde,
                 SUM(j.minutos_extra) AS minutos_extra,
                 SUM(j.minutos_pausa_bano) AS minutos_bano,
                 SUM(j.minutos_break) AS minutos_break,
@@ -54,7 +55,7 @@ async function agregadosPorEmpleado({ campaniaId = null, desde, hasta }, conn = 
     );
 
     const CAMPOS = ['dias_trabajados', 'dias_puntuales', 'dias_tarde', 'ausencias', 'minutos_trabajados',
-        'minutos_tarde', 'minutos_extra', 'minutos_bano', 'minutos_break', 'minutos_almuerzo',
+        'minutos_tarde', 'segundos_tarde', 'minutos_extra', 'minutos_bano', 'minutos_break', 'minutos_almuerzo',
         'minutos_capacitacion', 'minutos_salida_anticipada'];
     return filas.map((f) => {
         const fila = {
@@ -78,7 +79,7 @@ async function jornadasDiaPorCampania({ campaniaId, desde, hasta }, conn = db) {
     const [filas] = await conn.query(
         `SELECT j.users_company_id,
                 DATE_FORMAT(j.fecha, '%Y-%m-%d') AS fecha,
-                j.estado, j.minutos_tarde, j.minutos_trabajados, j.minutos_extra
+                j.estado, j.minutos_tarde, j.segundos_tarde, j.minutos_trabajados, j.minutos_extra
          FROM jornada j
          JOIN contrato c ON ${CONTRATO_ACTIVO}
          WHERE j.fecha BETWEEN ? AND ? AND c.campania_idcampania = ?
@@ -90,6 +91,7 @@ async function jornadasDiaPorCampania({ campaniaId, desde, hasta }, conn = db) {
         fecha: f.fecha,
         estado: f.estado,
         minutos_tarde: Number(f.minutos_tarde) || 0,
+        segundos_tarde: Number(f.segundos_tarde) || 0,
         minutos_trabajados: Number(f.minutos_trabajados) || 0,
         minutos_extra: Number(f.minutos_extra) || 0
     }));
