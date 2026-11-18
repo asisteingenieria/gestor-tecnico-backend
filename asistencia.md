@@ -3869,3 +3869,30 @@ backend nuevo, las columnas por estado y el tiempo total salen en "—".
 
 - Novedades y Retiros siguen con el diseño anterior.
 - Barra horizontal de ~15 px en las páginas con scroll vertical: el contenedor general mide `100vw`. No es de este cambio.
+
+## 71. Novedades de RRHH en Equipo: sin "No ha llegado" ni ausencia cuando hay novedad (2026-11-18)
+
+Pedido: si RRHH cargó una novedad (incapacidad, vacaciones, licencia, suspensión…) que cubre el día, los jefes,
+directores y coordinadores no deben ver "No ha llegado" (Hoy) ni "Ausente" (Histórico), y debe haber un distintivo.
+**Sin migración**: se cruza `novedad_rrhh` (por su contrato) al consultar.
+
+- **Regla** (`domain/asistencia/novedadesAsistencia.js`, puro): una novedad cubre de `fecha_inicial` a
+  `fecha_final` (sin final = un día). Todos los tipos cubren el día completo **menos "Horas de votacion"**
+  (`TIPOS_PARCIALES`): esa se muestra, pero el día se mide como cualquier otro. Si dos se cruzan, gana la que cubre.
+- **No se toca la jornada guardada**: el cierre puede haber dejado el día `ausente`; el cruce es al consultar, así
+  que una novedad cargada días después corrige también los días ya cerrados.
+- **Hoy** (`equipoService.estadoEnVivo`, lo usan coordinador, jefes/directores y "Asistencia en vivo" de
+  financiera): cada persona trae `novedad = { id, tipo, desde, hasta, cubre_dia }` y `no_ha_llegado` es falso si
+  la novedad cubre el día. Una consulta para todo el equipo (`novedadEquipoRepository.vigentesDe`, solo tipo y
+  fechas, nada de diagnóstico).
+- **Histórico** (`resumenDeJornadas(jornadas, novedadesPorFecha)`): un día cubierto en que no trabajó no suma en
+  `ausencias` sino en `dias_novedad`, y en la grilla va como `estado: 'novedad'` (también los días sin jornada, p.
+  ej. vacaciones sin horario). Si trabajó igual, el día sigue trabajado y lleva la novedad. Solo **hasta hoy**:
+  unas vacaciones que siguen no cuentan días futuros. `totalesEquipo` suma `dias_novedad`.
+- **Frontend**: estado/pastilla "Incapacidad", "Vacaciones"… (`utils/novedadesAsistencia.js`), mosaico/pestaña
+  "Con novedad", distintivo `NovedadChip` junto al nombre (tipo completo y fechas en el title), celda "Novedad RRHH"
+  en el calendario, columna "Con novedad" y serie en la gráfica de asistencia. Color ciruela `#a8338f`, validado
+  con puntual/tarde/ausente en claro y oscuro.
+- Tests: `tests/asistencia/novedadesAsistencia.test.js` (7; 385 en total).
+- **Por confirmar con el negocio**: si "Horas de votacion" debe cubrir el día y si "Suspensiones" debe verse como
+  novedad (hoy sí) o como ausencia.
