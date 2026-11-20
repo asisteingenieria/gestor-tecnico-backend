@@ -162,12 +162,12 @@ test('un saldo ajustado por financiera quita la observación y descuenta lo ajus
     assert.equal(ajustado.saldo_disfrutados_corte, 30);
 });
 
-test('sin saldo del Excel: con observación solo quien ya trabajaba antes del mes del corte (§58.3)', () => {
+test('sin saldo del Excel: con observación solo quien llevaba un año o más al corte (§58.5)', () => {
     const conSaldo = { users_company_id: 1, nombre: 'A', fecha_ingreso: '2024-01-10', saldo_id: 1, fecha_corte: '2026-11-19', dias_disfrutados_corte: 0, dias_compensados: 0, origen: 'excel' };
     const antiguo = { users_company_id: 2, nombre: 'B', fecha_ingreso: '2023-07-17' };
-    const deOctubre = { users_company_id: 3, nombre: 'C', fecha_ingreso: '2026-10-31' };
-    const deNoviembre = { users_company_id: 4, nombre: 'D', fecha_ingreso: '2026-11-01' };
-    const r = P.calcular([conSaldo, antiguo, deOctubre, deNoviembre], [], '2026-11-20');
+    const unAnioJusto = { users_company_id: 3, nombre: 'C', fecha_ingreso: '2025-11-19' };
+    const deMayo = { users_company_id: 4, nombre: 'D', fecha_ingreso: '2026-05-05' };
+    const r = P.calcular([conSaldo, antiguo, unAnioJusto, deMayo], [], '2026-11-20');
     const por = Object.fromEntries(r.filas.map((f) => [f.nombre, f]));
     assert.equal(por.A.con_observacion, false);
     assert.equal(por.B.con_observacion, true);
@@ -177,5 +177,5 @@ test('sin saldo del Excel: con observación solo quien ya trabajaba antes del me
     assert.equal(r.totales.con_observacion, 2);
     assert.equal(r.totales.ingreso_reciente, 1);
     // Sin ningún saldo cargado no hay corte: todo el que no tiene saldo queda con observación.
-    assert.equal(P.calcular([deNoviembre], [], '2026-11-20').filas[0].con_observacion, true);
+    assert.equal(P.calcular([deMayo], [], '2026-11-20').filas[0].con_observacion, true);
 });

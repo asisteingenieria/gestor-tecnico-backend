@@ -3456,6 +3456,15 @@ Las cuatro tarjetas (empleados con su "con observación", pasivo en días y peso
 sobre la lista filtrada; ahora, con filtros activos, cada una muestra debajo "Según los filtros · N en total" con el
 total general, igual que Personal de la empresa (§56.2). Solo frontend (`PasivoVacacional.jsx`, `calcularKpi`).
 
+### 58.5 "Con observación" = sin saldo del Excel y un año o más al corte (2026-11-20, reemplaza la regla de §58.3)
+
+En producción la regla de §58.3 (ingreso antes del mes del corte) dejaba 24: 18 antiguos (ingresos 2023 a sept-2025),
+5 ingresos de mayo-octubre 2026 y el registro de prueba "ASISLOCK PRUEBA" (cédula 1010, debe retirarse en RRHH). El
+usuario eligió marcar solo a los 18 antiguos. Regla (`limiteAntiguedad`, con test): con observación si no tiene saldo
+del Excel y su ingreso es **hasta "corte − 1 año"** (corte = fecha más reciente de los saldos del Excel; con el corte
+20-nov-2026, ingresos hasta el 20-nov-2025). Con menos de un año no se marca: no puede tener vacaciones de años
+anteriores. Probada con las fechas de producción: 18.
+
 ### 59.1 Campos del formulario según el tipo de novedad (2026-11-20, pedido del usuario)
 
 El formulario mostraba origen, diagnóstico y accidente de tránsito en cualquier tipo (p. ej. en Vacaciones compensadas).
