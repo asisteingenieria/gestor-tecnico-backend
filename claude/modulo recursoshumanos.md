@@ -3253,3 +3253,11 @@ ingreso, de retiro o de registro) + **Desde** / **Hasta**, que se combina con lo
 - "Descargar empleados" abre con el estado y el rango que hay en pantalla.
 - Solo frontend (`AgentManagement.jsx`, `DescargarEmpleadosModal.jsx`). Verificado en local que la tabla y la
   descarga cuentan lo mismo (retirados de octubre 44/44, ingresos activos de octubre 49/49, registro desde 1-nov 3/3).
+
+### 56.2 — KPI de Activos y Retirados según los filtros (2026-11-20)
+
+Los indicadores de Personal de la empresa (Empleados activos, Retirados, Con activos asignados y Total activos
+asignados) se cuentan sobre la lista filtrada: Campaña, Estado, Cargo, Analista, Documentos, búsqueda y rango de
+fechas. Con filtros, debajo de Activos y Retirados sale "Según los filtros · N en total" con el total general. El
+gasto mensual sigue siendo el total (viene del servidor). Solo frontend (`AgentManagement.jsx`), también en la
+vista de solo lectura.
