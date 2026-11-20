@@ -3240,3 +3240,24 @@ Para RRHH y financiera.
   (solo la vista de solo lectura del admin/`ver_empleados_rrhh` lo conserva; el endpoint de jefaturas no cambió).
 - **Local (2026-11-20):** todos 469, activos 393, retirados de octubre 44 (en local no hay retiros de noviembre);
   403 a admin/technician, 401 sin token; 399 tests OK, `vite build` OK.
+
+### 56.1 — El mismo rango de fechas en la tabla (2026-11-20)
+
+En Personal de la empresa (RRHH y financiera), debajo de los filtros, hay una fila **Rango sobre** (fecha de
+ingreso, de retiro o de registro) + **Desde** / **Hasta**, que se combina con los demás filtros de la tabla
+(Estado, Campaña, Cargo…). Ej.: Estado = Retirado y 10-nov → 20-nov muestra solo los retirados de esas fechas.
+- Con solo Retirado/Inactivo en el filtro Estado, el rango pasa solo a fecha de retiro; si no, a fecha de
+  ingreso, hasta que se elija el tipo a mano. Registro = día de Bogotá de `users_company.created_at`, el mismo
+  criterio de la descarga.
+- Con rango activo se agrega una columna con esa fecha y un contador de empleados en el rango.
+- "Descargar empleados" abre con el estado y el rango que hay en pantalla.
+- Solo frontend (`AgentManagement.jsx`, `DescargarEmpleadosModal.jsx`). Verificado en local que la tabla y la
+  descarga cuentan lo mismo (retirados de octubre 44/44, ingresos activos de octubre 49/49, registro desde 1-nov 3/3).
+
+### 56.2 — KPI de Activos y Retirados según los filtros (2026-11-20)
+
+Los indicadores de Personal de la empresa (Empleados activos, Retirados, Con activos asignados y Total activos
+asignados) se cuentan sobre la lista filtrada: Campaña, Estado, Cargo, Analista, Documentos, búsqueda y rango de
+fechas. Con filtros, debajo de Activos y Retirados sale "Según los filtros · N en total" con el total general. El
+gasto mensual sigue siendo el total (viene del servidor). Solo frontend (`AgentManagement.jsx`), también en la
+vista de solo lectura.
