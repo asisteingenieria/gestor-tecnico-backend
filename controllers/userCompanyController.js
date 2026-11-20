@@ -15,6 +15,7 @@ const { soportesNovedad, soportesTraspaso, documentosEmpleado } = require('../mi
 const { fechaLaboral } = require('../utils/fechaBogota');
 const retiroEquipoService = require('../services/asistencia/retiroEquipoService');
 const reporteJefaturas = require('../utils/reporteJefaturas');
+const reporteEmpleados = require('../utils/reporteEmpleados');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
 
@@ -299,6 +300,29 @@ const userCompanyController = {
             res.send(buffer);
         } catch (error) {
             console.error('Error al exportar jefaturas:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // Descarga en Excel de los empleados con toda su información, filtrada por estado y rango de fechas
+    // (ingreso, retiro o registro), combinables (§56). Solo RRHH y financiera.
+    async exportarEmpleados(req, res) {
+        try {
+            const { filtros, error } = reporteEmpleados.parsearFiltros(req.query);
+            if (error) return res.status(400).json({ success: false, message: error });
+            const filas = await UserCompany.getParaExportar(filtros);
+            const ahora = new Date();
+            const hoy = fechaLaboral(ahora);
+            const buffer = reporteEmpleados.generarLibro(
+                reporteEmpleados.armarFilas(filas), filtros, reporteEmpleados.fechaHoraBogota(ahora)
+            );
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="${reporteEmpleados.nombreArchivo(filtros, hoy)}"`);
+            res.setHeader('X-Total-Empleados', String(filas.length));
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Empleados');
+            res.send(buffer);
+        } catch (error) {
+            console.error('Error al exportar empleados:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },

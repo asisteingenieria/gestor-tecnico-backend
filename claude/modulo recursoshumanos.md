@@ -3209,3 +3209,34 @@ fichas, 21 ya estaban bien, 0 por revisar; quedan fuera solo fichas de prueba o 
 corrido el 2026-11-12** — 458 fichas corregidas, verificación en "ya correcto", 0 por revisar a mano (las 6
 advertencias 1287 son solo el aviso de que `BINARY expr` está obsoleto). **Falta desplegar el backend `74cf513`**
 para que los próximos cargues no vuelvan a guardar negativos.
+
+## 56. Sesión 2026-11-20 — Descarga en Excel de empleados por estado y rango de fechas
+
+**Pedido:** en el rol RRHH quitar "Descargar jefaturas" y agregar una descarga de los empleados con toda su
+información, con filtros combinables de estado y de rango de fechas (p. ej. retirados del 10 al 20 de noviembre).
+Para RRHH y financiera.
+
+- **Endpoint:** `GET /api/users-company/export/empleados?estados=&campoFecha=&desde=&hasta=` con
+  `verificarGestionRRHH` (solo `recursosHumanos`/`financiera`; el admin y `ver_empleados_rrhh` reciben 403).
+  - `estados`: lista separada por comas de `activo`, `periodo_prueba`, `suspendido`, `inactivo`, `retirado`
+    (estado del contrato más reciente); vacía = todos.
+  - `campoFecha`: `ingreso` (`contrato.fecha_ingreso`), `retiro` (`retiro.fecha_retiro`) o `registro`
+    (`users_company.created_at` pasado a día de Bogotá). Sin él y con fechas: `retiro` si solo se piden
+    retirados/inactivos, `ingreso` en otro caso.
+  - `desde`/`hasta`: AAAA-MM-DD, cualquiera sola; 400 si son inválidas o están al revés.
+  - Responde el `.xlsx` con `X-Total-Empleados` y nombre `empleados_<estados>_<desde>_a_<hasta>.xlsx`.
+- **Lógica pura** `utils/reporteEmpleados.js` (pruebas en `tests/rrhh/reporteEmpleados.test.js`); consulta
+  `UserCompany.getParaExportar` (una fila por empleado: ficha, contrato más reciente, salario vigente, seguridad
+  social activa, cuenta, dirección principal, contacto, dotación, diadema/locker/carnet, jefaturas y retiro). Sin
+  migración.
+- **Columnas (88):** primero las 59 de la plantilla de cargue masivo con el mismo nombre y fechas dd/mm/aaaa (el
+  archivo se puede volver a subir por "Cargar Excel"; verificado con `parsearArchivo`), después estado, nombre
+  completo, fecha de registro, datos del retiro, gestor de asistencia, SSFF, piso, empresa, periodo de pago, tipo
+  cotizante, bono cafetería, tarifa ARL, fechas de afiliación, ciudad de residencia, zona, vivienda, declarante y
+  libreta militar. Hoja "Filtros" con lo aplicado.
+- **Frontend:** botón "Descargar empleados" en Personal de la empresa (fuera de la vista de solo lectura) que abre
+  `DescargarEmpleadosModal.jsx` (checkboxes de estado, tipo de fecha, desde/hasta);
+  `userCompanyService.exportarEmpleados(params)`. "Descargar jefaturas" se oculta a `recursosHumanos` y `financiera`
+  (solo la vista de solo lectura del admin/`ver_empleados_rrhh` lo conserva; el endpoint de jefaturas no cambió).
+- **Local (2026-11-20):** todos 469, activos 393, retirados de octubre 44 (en local no hay retiros de noviembre);
+  403 a admin/technician, 401 sin token; 399 tests OK, `vite build` OK.
