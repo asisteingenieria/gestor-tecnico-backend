@@ -16,6 +16,7 @@ const { fechaLaboral } = require('../utils/fechaBogota');
 const retiroEquipoService = require('../services/asistencia/retiroEquipoService');
 const reporteJefaturas = require('../utils/reporteJefaturas');
 const reporteEmpleados = require('../utils/reporteEmpleados');
+const reporteNovedades = require('../utils/reporteNovedades');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
 
@@ -393,6 +394,27 @@ const userCompanyController = {
             res.json({ novedades });
         } catch (error) {
             console.error('Error al obtener novedades:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // Descarga en Excel del Consolidado de novedades con los mismos filtros de la pantalla (§57).
+    async exportarNovedades(req, res) {
+        try {
+            const { filtros, error } = reporteNovedades.parsearFiltros(req.query);
+            if (error) return res.status(400).json({ success: false, message: error });
+            const filas = reporteNovedades.filtrar(await NovedadRrhh.getAll(), filtros);
+            const ahora = new Date();
+            const buffer = reporteNovedades.generarLibro(
+                reporteNovedades.armarFilas(filas), filtros, reporteEmpleados.fechaHoraBogota(ahora)
+            );
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="${reporteNovedades.nombreArchivo(filtros, fechaLaboral(ahora))}"`);
+            res.setHeader('X-Total-Novedades', String(filas.length));
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Novedades');
+            res.send(buffer);
+        } catch (error) {
+            console.error('Error al exportar novedades:', error);
             res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
         }
     },

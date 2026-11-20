@@ -3261,3 +3261,36 @@ asignados) se cuentan sobre la lista filtrada: Campaña, Estado, Cargo, Analista
 fechas. Con filtros, debajo de Activos y Retirados sale "Según los filtros · N en total" con el total general. El
 gasto mensual sigue siendo el total (viene del servidor). Solo frontend (`AgentManagement.jsx`), también en la
 vista de solo lectura.
+
+## 57. Sesión 2026-11-20 — Novedades: filtros, rango de fechas por registro y descarga en Excel
+
+**Pedido:** en el Consolidado de novedades agregar filtros y un rango desde/hasta sobre la **fecha de registro** de
+la novedad, y un Excel descargable para RRHH y financiera.
+
+- **Pantalla** (`NovedadesRRHH.jsx`):
+  - columna nueva **Registrada** (`novedad_rrhh.created_at` en hora de Bogotá);
+  - chips **Tipo**, **Campaña** (incluye "Sin campaña") y **Soportes** (Documento del expediente / completos /
+    pendientes / no requiere; el expediente de la 098 cuenta como soportada, igual que la columna Soportes);
+  - fila **Rango sobre** (Fecha de registro —por defecto—, inicial o final) + **Desde/Hasta**. El registro se
+    compara como día de Bogotá (una novedad registrada a las 9 p. m. no cae al día siguiente);
+  - contador "N de M novedades" y "Limpiar filtros".
+  - `FiltroChip` se sacó de `AgentManagement.jsx` a `src/components/FiltroChip.jsx` para usarlo en las dos pantallas.
+- **Descarga:** botón **Descargar Excel** que baja lo que se ve: manda los mismos filtros (búsqueda incluida) a
+  `GET /api/users-company/novedades/export?q=&tipos=&campanias=&soportes=&campoFecha=&desde=&hasta=`
+  (`verificarGestionRRHH`: solo `recursosHumanos`/`financiera`; admin y `ver_empleados_rrhh` → 403). `tipos` y
+  `campanias` van por nombre separados por `|`; `soportes` por coma; `campoFecha` = `registro` (defecto) | `inicial` |
+  `final`. Responde el `.xlsx` con `X-Total-Novedades`; 400 con fechas inválidas o al revés.
+- **Lógica pura** `utils/reporteNovedades.js` (pruebas `tests/rrhh/reporteNovedades.test.js`): mismos filtros que la
+  pantalla sobre `NovedadRrhh.getAll()`. Hoja **Novedades** (24 columnas: registro, cédula, empleado, cargo, campaña,
+  centro de costo, tipo, categoría, fechas inicial/final/retorno, días, origen, accidente de tránsito, diagnóstico,
+  fechas de reporte y recibido, responsable, estado y conteo de soportes, documentos del expediente, observaciones,
+  última actualización) y hoja **Filtros**. Sin migración.
+- **Ojo:** las 374 novedades del cargue masivo (§50) tienen como fecha de registro el día del cargue (2026-11-06 en
+  producción), no la de la novedad; para filtrarlas por periodo usar "Fecha inicial".
+- **Local (2026-11-20):** contra la BD local, todo 389, Vacaciones 50, inicial en octubre 148, registro del 18-nov 2,
+  soportes pendientes 190 (cuadran con SQL directo); 400 con fechas al revés; 403 a admin y a `ver_empleados_rrhh`;
+  401 sin token; el listado sigue respondiendo (la ruta `/novedades/export` va antes de `/novedades/:novedadId`).
+  407 tests OK, `vite build` OK.
+- **Navegador (local, 2026-11-20, `prueba.rrhh`):** columna Registrada y chips visibles; registro del 18 al 20-nov = 2 de 389;
+  Tipo = Vacaciones = 50 en pantalla y "Se descargaron 50 novedades"; el archivo trae 50 filas de Vacaciones y la
+  hoja Filtros con "Tipo de novedad: Vacaciones". Sin scroll horizontal con la columna nueva.
