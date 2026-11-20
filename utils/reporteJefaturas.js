@@ -8,6 +8,7 @@
  *
  * Puro: recibe las filas de UserCompany.getJefaturas() y devuelve las hojas; `generarLibro` las escribe con xlsx.
  */
+const { fechasReales } = require('./excelFechas');
 
 const ESTADOS_VIGENTES = ['activo', 'periodo_prueba'];
 
@@ -119,6 +120,7 @@ function generarLibro({ empleados, porQuienSube }, XLSX = require('xlsx')) {
         const ws = XLSX.utils.json_to_sheet(filas, { header: encabezados });
         ws['!cols'] = encabezados.map((h) => ({ wch: ANCHOS[h] || Math.max(12, h.length + 2) }));
         ws['!autofilter'] = { ref: ws['!ref'] };
+        fechasReales(ws, XLSX); // fechas reales: el filtro de Excel las agrupa por año, mes y día (§60)
         return ws;
     };
     const encEmpleados = empleados.length ? Object.keys(empleados[0]) : ['Cédula', 'Nombre'];

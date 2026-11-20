@@ -17,6 +17,10 @@ const retiroEquipoService = require('../services/asistencia/retiroEquipoService'
 const reporteJefaturas = require('../utils/reporteJefaturas');
 const reporteEmpleados = require('../utils/reporteEmpleados');
 const reporteNovedades = require('../utils/reporteNovedades');
+const pasivoVacacional = require('../utils/pasivoVacacional');
+const vacacionesNovedad = require('../utils/vacacionesNovedad');
+const camposNovedad = require('../utils/camposNovedad');
+const PasivoVacacional = require('../models/PasivoVacacional');
 
 const { prepararTraspaso, ETIQUETAS: ETIQUETAS_TRASPASO } = require('../utils/camposTraspaso');
 
@@ -49,6 +53,18 @@ function validarNovedad({ contrato_id, tipo_novedad_id, fecha_inicial, fecha_fin
     if (fecha_retorno && fechaDia(fecha_retorno) < fechaDia(fecha_inicial)) return 'La fecha de retorno no puede ser anterior a la fecha inicial';
     if (Number(total_dias) < 0) return 'El total de días no puede ser negativo';
     return null;
+}
+
+// Valida la novedad y, si es de Vacaciones, su modalidad (disfrutadas/compensadas/ambas, §59).
+// Devuelve { error } o { datos } con los campos de vacaciones normalizados y total_dias = su suma.
+async function prepararNovedad(body) {
+    const error = validarNovedad(body);
+    if (error) return { error };
+    const tipo = await NovedadRrhh.nombreTipo(body.tipo_novedad_id);
+    const { error: errorVacaciones, campos } = vacacionesNovedad.normalizar(body, vacacionesNovedad.esVacaciones(tipo));
+    if (errorVacaciones) return { error: errorVacaciones };
+    // Sin los campos que no aplican al tipo (origen/diagnóstico fuera de incapacidades, fechas de descanso en compensadas, §59.1).
+    return { datos: camposNovedad.limpiarPorTipo({ ...body, ...campos }, tipo) };
 }
 
 function validarVacaciones(body) {
@@ -419,6 +435,87 @@ const userCompanyController = {
         }
     },
 
+    // ---- Pasivo vacacional calculado (§58) ----
+
+    async getPasivoVacacional(req, res) {
+        try {
+            const fecha = req.query.fecha || fechaLaboral(new Date());
+            if (!pasivoVacacional.fechaValida(fecha)) {
+                return res.status(400).json({ success: false, message: 'La fecha no es válida (AAAA-MM-DD)' });
+            }
+            const [empleados, novedades] = await Promise.all([
+                PasivoVacacional.getEmpleados(fecha), PasivoVacacional.getNovedadesVacaciones()
+            ]);
+            const resultado = pasivoVacacional.calcular(empleados, novedades, fecha);
+            // RRHH ve el pasivo solo en días; el salario y el valor en pesos son de financiera.
+            const conValores = pasivoVacacional.veValores(req.user);
+            res.json({ fecha, con_valores: conValores, ...(conValores ? resultado : pasivoVacacional.sinValores(resultado)) });
+        } catch (error) {
+            console.error('Error al calcular el pasivo vacacional:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async exportarPasivoVacacional(req, res) {
+        try {
+            const ahora = new Date();
+            const fecha = req.query.fecha || fechaLaboral(ahora);
+            if (!pasivoVacacional.fechaValida(fecha)) {
+                return res.status(400).json({ success: false, message: 'La fecha no es válida (AAAA-MM-DD)' });
+            }
+            const [empleados, novedades] = await Promise.all([
+                PasivoVacacional.getEmpleados(fecha), PasivoVacacional.getNovedadesVacaciones()
+            ]);
+            const resultado = pasivoVacacional.calcular(empleados, novedades, fecha);
+            const buffer = pasivoVacacional.generarLibro(
+                resultado, fecha, reporteEmpleados.fechaHoraBogota(ahora), undefined,
+                { conValores: pasivoVacacional.veValores(req.user) }
+            );
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="pasivo_vacacional_${fecha}.xlsx"`);
+            res.setHeader('X-Total-Empleados', String(resultado.filas.length));
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Empleados');
+            res.send(buffer);
+        } catch (error) {
+            console.error('Error al exportar el pasivo vacacional:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    // Financiera ajusta el saldo inicial (fecha de corte, disfrutados y compensados al corte) de un empleado (§58.2).
+    async ajustarSaldoPasivo(req, res) {
+        try {
+            const empleadoId = Number(req.params.empleadoId);
+            if (!Number.isInteger(empleadoId) || empleadoId <= 0) {
+                return res.status(400).json({ success: false, message: 'Empleado no válido' });
+            }
+            const { error, datos } = pasivoVacacional.validarAjuste(req.body, fechaLaboral(new Date()));
+            if (error) return res.status(400).json({ success: false, message: error });
+            if (!(await PasivoVacacional.empleadoExiste(empleadoId))) {
+                return res.status(404).json({ success: false, message: 'Empleado no encontrado' });
+            }
+            await PasivoVacacional.ajustarSaldo(empleadoId, datos, req.user.id);
+            res.json({ success: true, message: 'Saldo del pasivo vacacional ajustado' });
+        } catch (error) {
+            console.error('Error al ajustar el saldo del pasivo vacacional:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+    async historialSaldoPasivo(req, res) {
+        try {
+            const empleadoId = Number(req.params.empleadoId);
+            if (!Number.isInteger(empleadoId) || empleadoId <= 0) {
+                return res.status(400).json({ success: false, message: 'Empleado no válido' });
+            }
+            res.json({ success: true, ajustes: await PasivoVacacional.historialAjustes(empleadoId) });
+        } catch (error) {
+            console.error('Error al consultar los ajustes del pasivo vacacional:', error);
+            res.status(500).json({ success: false, message: 'Error interno del servidor', error: error.message });
+        }
+    },
+
+
     async getNovedadById(req, res) {
         try {
             const novedad = await NovedadRrhh.getById(req.params.novedadId);
@@ -434,11 +531,11 @@ const userCompanyController = {
 
     async createNovedad(req, res) {
         try {
-            const errorValidacion = validarNovedad(req.body);
+            const { error: errorValidacion, datos } = await prepararNovedad(req.body);
             if (errorValidacion) {
                 return res.status(400).json({ success: false, message: errorValidacion });
             }
-            const novedad = await NovedadRrhh.create(req.body);
+            const novedad = await NovedadRrhh.create(datos);
             res.status(201).json({ success: true, message: 'Novedad creada exitosamente', novedad });
         } catch (error) {
             console.error('Error al crear novedad:', error);
@@ -451,11 +548,11 @@ const userCompanyController = {
 
     async updateNovedad(req, res) {
         try {
-            const errorValidacion = validarNovedad(req.body);
+            const { error: errorValidacion, datos } = await prepararNovedad(req.body);
             if (errorValidacion) {
                 return res.status(400).json({ success: false, message: errorValidacion });
             }
-            const ok = await NovedadRrhh.update(req.params.novedadId, req.body);
+            const ok = await NovedadRrhh.update(req.params.novedadId, datos);
             if (!ok) {
                 return res.status(404).json({ success: false, message: 'Novedad no encontrada' });
             }

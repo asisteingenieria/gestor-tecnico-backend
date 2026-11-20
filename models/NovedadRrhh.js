@@ -72,14 +72,16 @@ class NovedadRrhh {
         const [result] = await db.query(
             `INSERT INTO novedad_rrhh (
                 accidente_transito, fecha_inicial, fecha_final, fecha_retorno, total_dias,
+                modalidad_vacaciones, dias_disfrutados, dias_compensados,
                 resumen_diagnostico, origen_incapacidad, observaciones, fecha_recibido, fecha_reporte,
                 tiene_documento_original, tiene_copia_documento, tiene_historia_clinica,
                 tiene_runt, tiene_furips, tiene_soat,
                 tipo_novedad_idtipo_novedad, contrato_idcontrato, responsable_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 data.accidente_transito ? 1 : 0, data.fecha_inicial, val(data.fecha_final),
                 val(data.fecha_retorno), val(data.total_dias),
+                val(data.modalidad_vacaciones), val(data.dias_disfrutados), val(data.dias_compensados),
                 val(data.resumen_diagnostico), val(data.origen_incapacidad), val(data.observaciones),
                 val(data.fecha_recibido), val(data.fecha_reporte),
                 data.tiene_documento_original ? 1 : 0, data.tiene_copia_documento ? 1 : 0,
@@ -95,6 +97,7 @@ class NovedadRrhh {
         const [result] = await db.query(
             `UPDATE novedad_rrhh SET
                 accidente_transito = ?, fecha_inicial = ?, fecha_final = ?, fecha_retorno = ?, total_dias = ?,
+                modalidad_vacaciones = ?, dias_disfrutados = ?, dias_compensados = ?,
                 resumen_diagnostico = ?, origen_incapacidad = ?, observaciones = ?, fecha_recibido = ?, fecha_reporte = ?,
                 tiene_documento_original = ?, tiene_copia_documento = ?, tiene_historia_clinica = ?,
                 tiene_runt = ?, tiene_furips = ?, tiene_soat = ?,
@@ -104,6 +107,7 @@ class NovedadRrhh {
             [
                 data.accidente_transito ? 1 : 0, data.fecha_inicial, val(data.fecha_final),
                 val(data.fecha_retorno), val(data.total_dias),
+                val(data.modalidad_vacaciones), val(data.dias_disfrutados), val(data.dias_compensados),
                 val(data.resumen_diagnostico), val(data.origen_incapacidad), val(data.observaciones),
                 val(data.fecha_recibido), val(data.fecha_reporte),
                 data.tiene_documento_original ? 1 : 0, data.tiene_copia_documento ? 1 : 0,
@@ -114,6 +118,12 @@ class NovedadRrhh {
             ]
         );
         return result.affectedRows > 0;
+    }
+
+    /** Nombre del tipo de novedad (para saber si es Vacaciones y pedir su modalidad, §59). */
+    static async nombreTipo(tipoNovedadId) {
+        const [rows] = await db.query('SELECT nombre FROM tipo_novedad WHERE idtipo_novedad = ?', [tipoNovedadId]);
+        return rows[0]?.nombre || null;
     }
 
     static async delete(id) {
