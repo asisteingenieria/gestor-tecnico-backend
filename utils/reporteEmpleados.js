@@ -11,6 +11,7 @@
  * Puro: recibe la query de la petición y las filas de UserCompany.getParaExportar(); `generarLibro` escribe
  * el .xlsx con la librería que se le pase.
  */
+const { fechasReales } = require('./excelFechas');
 
 const ESTADOS = ['activo', 'periodo_prueba', 'suspendido', 'inactivo', 'retirado'];
 const ETIQUETA_ESTADO = {
@@ -213,6 +214,7 @@ function generarLibro(filasExcel, filtros, generadoEn, XLSX = require('xlsx')) {
     const ws = XLSX.utils.json_to_sheet(filasExcel, { header: ENCABEZADOS });
     ws['!cols'] = ENCABEZADOS.map((h) => ({ wch: ANCHOS[h] || Math.max(12, h.length + 2) }));
     ws['!autofilter'] = { ref: ws['!ref'] };
+    fechasReales(ws, XLSX); // fechas reales: el filtro de Excel las agrupa por año, mes y día (§60)
     XLSX.utils.book_append_sheet(libro, ws, 'Empleados');
 
     const { estado, rango } = describirFiltros(filtros);

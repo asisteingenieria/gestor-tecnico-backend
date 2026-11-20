@@ -50,6 +50,14 @@ const verificarLecturaEmpleados = (req, res, next) => {
 };
 
 // Gasto total en salarios: solo financiera y admin. recursosHumanos ve contratación, no costos.
+// Solo el rol financiera (sin el admin del sistema): ajuste del saldo y descarga del pasivo vacacional (§58.2).
+const verificarSoloFinanciera = (req, res, next) => {
+    if (req.user.role !== 'financiera') {
+        return res.status(403).json({ success: false, message: 'Solo financiera puede hacer esta acción.' });
+    }
+    next();
+};
+
 const verificarFinanciera = (req, res, next) => {
     if (!['financiera', 'admin'].includes(req.user.role)) {
         return res.status(403).json({
@@ -106,6 +114,11 @@ router.get('/traspasos/:traspasoId/soportes/:tipoSoporteId/archivo',       verif
 router.delete('/traspasos/:traspasoId/soportes/:tipoSoporteId',            verificarGestionRRHH, userCompanyController.eliminarSoporteTraspaso);
 
 // Pasivo vacacional (submódulo cerrado al admin)
+// Pasivo vacacional calculado (§58): fórmula del Excel de Gestión Humana + saldo inicial de la migración 106
+router.get('/pasivo-vacacional',                      verificarGestionRRHH, userCompanyController.getPasivoVacacional);
+router.get('/pasivo-vacacional/export',               verificarSoloFinanciera, userCompanyController.exportarPasivoVacacional);
+router.put('/pasivo-vacacional/:empleadoId/saldo',     verificarSoloFinanciera, userCompanyController.ajustarSaldoPasivo);
+router.get('/pasivo-vacacional/:empleadoId/ajustes',   verificarSoloFinanciera, userCompanyController.historialSaldoPasivo);
 router.get('/vacaciones',                verificarGestionRRHH, userCompanyController.getVacaciones);
 router.post('/vacaciones',               verificarGestionRRHH, userCompanyController.createVacaciones);
 router.get('/vacaciones/:vacacionesId',  verificarGestionRRHH, userCompanyController.getVacacionesById);

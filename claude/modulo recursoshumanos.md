@@ -3294,3 +3294,172 @@ la novedad, y un Excel descargable para RRHH y financiera.
 - **Navegador (local, 2026-11-20, `prueba.rrhh`):** columna Registrada y chips visibles; registro del 18 al 20-nov = 2 de 389;
   Tipo = Vacaciones = 50 en pantalla y "Se descargaron 50 novedades"; el archivo trae 50 filas de Vacaciones y la
   hoja Filtros con "Tipo de novedad: Vacaciones". Sin scroll horizontal con la columna nueva.
+
+## 58. Sesión 2026-11-20 — Pasivo vacacional calculado con la fórmula del Excel de Gestión Humana (migración 106)
+
+**Pedido:** RRHH mandó `Descargas/pasivo vacacional.xlsx` (325 empleados activos, con cédulas: no se versiona) y quiere
+que el sistema calcule el pasivo con ese mismo cálculo: que coincida con el Excel en su fecha y que de ahí en adelante
+lo calcule solo. **Decisiones del usuario:** corte = la fecha del archivo (**FECHA ACTUAL = 19-nov-2026**, no fin de
+octubre como se pensaba); se cargan los empleados que cruzan con el Excel; los días compensados se editan en la pantalla
+mientras se confirma si tendrán novedad propia; sí se quiere el valor en pesos (días × salario / 30; el recargo de
+prestaciones queda pendiente de financiera).
+
+**Fórmulas del Excel** (las únicas columnas a mano son disfrutados, compensados y programadas):
+`días trabajados = DAYS360(ingreso, fecha) + 1` (método US), `acumulados = trabajados × 15 / 360`,
+`pasivo = acumulados − disfrutados − compensados`, `total = pasivo − programadas`.
+
+**Cómo lo calcula el sistema** (`utils/pasivoVacacional.js`, puro, pruebas `tests/rrhh/pasivoVacacional.test.js`):
+- Trabajados y acumulados: la misma fórmula desde la fecha de ingreso del contrato vigente (`days360` replica Excel).
+- **Disfrutados** = `dias_disfrutados_corte` del Excel + días de las novedades de **Vacaciones** que empiezan después del
+  corte y hasta la fecha consultada (la novedad cuenta entera el día en que empieza). Antes del corte se descuentan las
+  que empezaron entre la fecha y el corte. Sin saldo del Excel: todas las novedades de Vacaciones desde el ingreso.
+  Las de un contrato anterior no cuentan.
+- **Compensados** = total editable por empleado (sin fecha: vale para cualquier fecha consultada).
+- **Programadas** = novedades de Vacaciones que empiezan después de la fecha consultada (no se digitan).
+- **Valor** = días × salario vigente / 30 (pasivo y total).
+- Empleados: contrato más reciente con ingreso hasta la fecha y no retirado a esa fecha (un retirado después sí cuenta,
+  para poder calcular un cierre pasado).
+
+**Migración `106_vacaciones_saldo.sql`** (idempotente, va ANTES del código): tabla `vacaciones_saldo` (una fila por
+empleado, `UNIQUE users_company_id`): `fecha_corte` (NULL = no venía en el Excel), `dias_disfrutados_corte`,
+`dias_programados_corte` (referencia), `dias_compensados` y quién/cuándo los editó. Las tablas viejas `vacaciones` y
+`periodo_vacacional` (§7) no se tocan; sus rutas `/vacaciones` siguen pero la pantalla ya no las usa.
+
+**Cargue:** `node scripts/cargarPasivoVacacional.js --excel "<ruta>/pasivo vacacional.xlsx" [--reporte <csv>] [--aplicar]`
+- simula por defecto; `--aplicar` en una transacción; idempotente (recargar actualiza el corte);
+- cruza por cédula (PPT también con el prefijo 600); **verifica fila por fila** que ingreso, días trabajados,
+  acumulados y pasivo calculados coincidan con el Excel en su fecha, y la que no coincide no se carga;
+- no pisa los compensados que ya se editaron en la pantalla.
+
+**API** (`routes/usersCompany.js`, `verificarGestionRRHH`: RRHH y financiera):
+`GET /pasivo-vacacional?fecha=AAAA-MM-DD` (por defecto hoy en Bogotá) → `{ fecha, filas, totales }`;
+`GET /pasivo-vacacional/export?fecha=` → Excel (hoja "Pasivo vacacional" con las columnas del Excel de RRHH + salario y
+valor, hoja "Resumen"); `PUT /pasivo-vacacional/:empleadoId/compensados` `{ dias_compensados }`.
+
+**Pantalla** (`PasivoVacacional.jsx`, reescrita; se borró `VacacionesForm.jsx`): "Calcular al" + atajos "Cierre mes
+anterior" / "Cierre de este mes" / "Hoy"; KPI de empleados (cuántos sin saldo del Excel), pasivo en días y pesos,
+programadas y total; filtros Campaña, Área y Saldo (con / sin saldo del Excel); tabla con las columnas del Excel y lápiz
+para editar los compensados; "Descargar Excel" con la fecha elegida.
+
+**Verificación (local, 2026-11-20):**
+- Excel: 325 filas, las 325 con ficha y la misma fecha de ingreso; simulación y `--aplicar` = 325 creadas; segunda
+  corrida = 325 a actualizar.
+- Al 19-nov el sistema da el **mismo pasivo que el Excel en los 325**. El **total coincide en 304**: en 21 el Excel trae
+  "vacaciones programadas" sin novedad de Vacaciones registrada (p. ej. 10 en el Excel, 0 en el sistema). Para que
+  coincidan, RRHH tiene que registrar esas vacaciones como novedad; cuando se registren, cuentan solas.
+- 68 empleados activos en local no venían en el Excel (9 de prueba; el resto ingresos de 2026 y algunos antiguos como
+  directores): se calculan sin saldo (disfrutados = solo novedades) y la pantalla los marca "sin saldo del Excel". Los
+  antiguos sin saldo inflan el pasivo: RRHH debe pasar sus días disfrutados (se pueden agregar al Excel y recargar).
+- Navegador (`prueba.rrhh`): 393 empleados al 20-nov; editar compensados a 2 bajó el pasivo total exactamente 2 días
+  (revertido después); cierre de octubre 4.681,29 días / $312.279.338; descarga con 393 filas y su resumen.
+- 417 tests OK, `vite build` OK.
+
+**Valor en pesos solo para financiera (ajuste 2026-11-20, pedido del usuario):** RRHH ve el pasivo solo en días. El
+backend quita salario, `valor_pasivo`, `valor_total` y los totales en pesos de la respuesta (`sinValores`, responde
+`con_valores: false`) y del Excel (`generarLibro` con `conValores: false`) a todo rol que no sea `financiera`; la
+pantalla se guía por `con_valores`. Verificado por API: RRHH sin campos ni columnas de valor, financiera con ellos,
+admin 403. 418 tests OK.
+
+**Etiqueta "con observación" (ajuste 2026-11-20, pedido del usuario):** los empleados que no venían en el Excel de corte
+(antes "sin saldo del Excel") se marcan **"con observación"**: RRHH está revisando esos casos (p. ej. Nelson David Acero
+Cantor, ingreso 2023, con 0 disfrutados). El cálculo no cambia. Filtro "Observación" (Con / Sin observación), KPI
+"N con observación" y columna "Observación" en el Excel (más la fila del total en la hoja Resumen).
+
+**Para producción:** 106 → backend + frontend → copiar el Excel al servidor (no versionar) → simular y revisar el
+reporte → `--aplicar`. Verificar en producción las cédulas que no crucen y los activos sin saldo.
+**Pendientes:** recargo de prestaciones sobre el valor (financiera); las 21 programadas sin novedad y los activos
+antiguos sin saldo. Los compensados ya no se editan a mano: salen de la novedad de Vacaciones (§59).
+
+## 59. Sesión 2026-11-20 — Modalidad de la novedad de Vacaciones: disfrutadas, compensadas o las dos (migración 107)
+
+Gestión Humana confirmó que la novedad de Vacaciones lleva tres opciones:
+- **Disfrutadas**: el empleado toma los días de descanso.
+- **Compensadas**: los días se pagan en dinero.
+- **Disfrutadas y compensadas**: las dos, p. ej. 5 disfrutados y 5 compensados.
+
+**Migración 107** (`migrations/107_novedad_vacaciones_modalidad.sql`, idempotente, **va ANTES del código**: el modelo
+nombra las columnas): `novedad_rrhh.modalidad_vacaciones` (ENUM `disfrutadas`/`compensadas`/`disfrutadas_compensadas`),
+`dias_disfrutados` y `dias_compensados` (INT). Las novedades de Vacaciones que ya existían quedan como disfrutadas con
+todos sus días (local: 50 novedades, 311 días). En los demás tipos las tres columnas van en NULL.
+
+**Reglas** (`utils/vacacionesNovedad.js`, puro, con tests): en Vacaciones la modalidad es obligatoria, cada parte que
+aplica pide días enteros > 0 y `total_dias` = disfrutados + compensados (el servidor lo calcula; en el formulario
+"Total días" queda de solo lectura). Una novedad sin modalidad (cargue masivo viejo) cuenta como disfrutada.
+`createNovedad`/`updateNovedad` validan con `prepararNovedad` (busca el nombre del tipo con `NovedadRrhh.nombreTipo`).
+
+**Pasivo vacacional (§58):** disfrutados y compensados = los del Excel al corte + los de las novedades desde el corte,
+cada uno según la modalidad. Programadas = las dos partes de las novedades que empiezan después de la fecha. **Se quitó la
+edición manual de compensados** (ruta `PUT /pasivo-vacacional/:empleadoId/compensados`, lápiz de la pantalla y las
+columnas `compensados_actualizado_*` de la 106, que no estaba en producción); `vacaciones_saldo.dias_compensados` queda
+como el valor del Excel al corte.
+
+**Pantallas:** formulario de novedad con la sección "Vacaciones" (modalidad + días de cada parte); el detalle muestra
+modalidad y días; el consolidado muestra la modalidad debajo del tipo ("Disfrutadas y compensadas · 5 + 5 días"); el
+Excel de novedades suma "Modalidad Vacaciones", "Días Disfrutados" y "Días Compensados".
+
+**Verificado en local:** el pasivo sigue igual al Excel en 325/325 al 19-nov (4.937,3 días al 20-nov); por la API, sin
+modalidad o sin días responde 400 con el mensaje; una novedad 5+5 sumó 5 disfrutados y 5 compensados al pasivo, una
+compensada futura quedó en programadas, el Excel de novedades trae las columnas nuevas, y al borrarlas el pasivo volvió
+al valor anterior. Formulario revisado en el navegador (sin guardar). 422 tests OK.
+
+**Para producción:** 106 → 107 → backend + frontend → cargue del Excel (§58).
+
+### 58.x Orden y filtro por pasivo (2026-11-20, pedido del usuario)
+
+- La lista (y el Excel) sale por **fecha de ingreso, del más reciente al más antiguo** (`PasivoVacacional.getEmpleados`).
+- En la pantalla, "Ordenar": ingreso más reciente (por defecto), ingreso más antiguo, mayor pasivo, menor pasivo.
+- Filtro "Pasivo" por días de pasivo a la fecha: más de 30, 15 a 30, menos de 15, negativo (15 días = un año
+  acumulado). Se combina con los demás filtros y los KPI se recalculan. Al 20-nov: 34 empleados con más de 30 días
+  (1.257,2 días), 13 de ellos con observación.
+
+### 58.2 Ajuste del saldo por financiera, descarga solo financiera y carga en producción (2026-11-20)
+
+**Ajuste (migración 108):** financiera corrige en la pantalla los casos puntuales con el botón de ajuste de cada fila:
+fecha de corte, días disfrutados y compensados **al corte**, y un motivo obligatorio. Desde la fecha de corte se siguen
+sumando las novedades de Vacaciones, igual que con el Excel. El saldo queda con `origen = 'financiera'`, la fila sale
+con la etiqueta "ajustado" (filtro Observación → "Ajustado por financiera") y cada ajuste deja el antes/después en
+`vacaciones_saldo_ajuste` (historial visible en el mismo modal).
+`PUT /pasivo-vacacional/:empleadoId/saldo` y `GET /pasivo-vacacional/:empleadoId/ajustes`, middleware local
+`verificarSoloFinanciera` (solo el rol financiera, sin el admin). Validación pura en `validarAjuste` (con tests).
+`cargarPasivoVacacional.js` no pisa un saldo ajustado por financiera salvo con `--forzar`.
+
+**Descarga:** el Excel del pasivo es solo de financiera (`/export` con `verificarSoloFinanciera`); RRHH ya no ve el
+botón y consulta en pantalla, en días, sin valores.
+
+**Los que no vienen en el Excel** quedan con pasivo = acumulado − novedades de Vacaciones del sistema y la etiqueta
+"con observación", hasta que financiera los ajuste.
+
+**Carga en producción, en orden:**
+1. Migraciones 106 → 107 → 108 (idempotentes), antes del código.
+2. Desplegar backend y frontend (con `npm run build`).
+3. `node scripts/cargarPasivoVacacional.js --excel "<Excel de GH>" --reporte <csv fuera del repo>`: simula. Por cada
+   fila cruza la cédula con la ficha y recalcula a la fecha del Excel trabajados, acumulados y pasivo: solo carga la fila
+   si da lo mismo que el Excel. Revisar el resumen (sin_ficha, ingreso_distinto, no_coincide).
+4. Repetir con `--aplicar`. Solo se guarda lo necesario por empleado: fecha de corte, disfrutados, compensados (y
+   programadas de referencia).
+5. Verificar en la pantalla al día del corte: el pasivo de cada empleado cargado = el del Excel. En local: 323 de 325
+   coincidieron; las 2 diferencias eran retirados.
+
+### 59.1 Campos del formulario según el tipo de novedad (2026-11-20, pedido del usuario)
+
+El formulario mostraba origen, diagnóstico y accidente de tránsito en cualquier tipo (p. ej. en Vacaciones compensadas).
+Regla, igual en `utils/camposNovedad.js` (backend, con tests) y `src/utils/camposNovedad.js` (frontend):
+- **Origen de la incapacidad y diagnóstico**: solo en tipos de incapacidad.
+- **Accidente de tránsito**: ya no es una casilla; lo dice el tipo ("Incapacidades accidente de transito …") y se
+  muestra como etiqueta. En los datos existentes coincide exactamente (las 41 marcadas son de esos tipos).
+- **Vacaciones compensadas**: sin fecha final ni de retorno (no hay descanso); la fecha inicial se rotula
+  "Fecha de compensación" en el formulario y en el detalle.
+- Observaciones, fechas de reporte/recibido y soportes siguen en todos los tipos.
+El servidor (`prepararNovedad` → `limpiarPorTipo`) quita lo que no aplica aunque llegue. Verificado en el navegador
+(compensadas e incapacidad de tránsito, sin guardar) y por la API. 425 tests OK.
+
+## 60. Fechas reales en los Excel descargables (2026-11-20, pedido del usuario, imagen AjusteExcel)
+
+Las fechas salían como texto 'dd/mm/aaaa' y el filtro de Excel las mostraba como una lista plana. Ahora son fechas de
+Excel (número de serie con formato `dd/mm/yyyy`, o `dd/mm/yyyy hh:mm` en "Fecha De Registro"), así que el filtro las
+agrupa por año → mes → día y permite "Ordenar de más antiguo a más reciente" y "Filtros de fecha".
+- `utils/excelFechas.js` (`fechasReales(ws, XLSX)`, con tests): convierte las celdas de toda columna cuyo encabezado
+  empieza por "Fecha"; lo vacío o lo que no es fecha queda igual.
+- Aplicado en los Excel del backend: empleados (§56), novedades (§57), pasivo vacacional (§58), jefaturas y Red Maestra
+  (§52). Verificado contra el servidor local: las 25 columnas de fecha de empleados, novedades y pasivo salen como fecha.
+- Fuera de alcance: los Excel que arma el frontend en otros módulos (inventario, incidentes aprobados).

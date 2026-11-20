@@ -79,9 +79,12 @@ test('el libro trae la hoja Novedades con fechas dd/mm/aaaa y la hoja Filtros', 
     const buffer = R.generarLibro(R.armarFilas([novedad()]), filtros, '20/11/2026 10:00', XLSX);
     const libro = XLSX.read(buffer, { type: 'buffer' });
     assert.deepEqual(libro.SheetNames, ['Novedades', 'Filtros']);
-    const [fila] = XLSX.utils.sheet_to_json(libro.Sheets.Novedades);
+    const [fila] = XLSX.utils.sheet_to_json(libro.Sheets.Novedades, { raw: false });
     assert.equal(fila['Fecha De Registro'], '12/11/2026 10:00');
     assert.equal(fila['Fecha Inicial'], '10/11/2026');
+    // Fechas reales (§60): número de serie con formato, no texto.
+    const crudo = XLSX.utils.sheet_to_json(libro.Sheets.Novedades)[0];
+    assert.equal(typeof crudo['Fecha Inicial'], 'number');
     assert.equal(fila['Soportes'], 'Soportes pendientes');
     const resumen = XLSX.utils.sheet_to_json(libro.Sheets.Filtros, { header: 1 });
     assert.deepEqual(resumen.find((r) => r[0] === 'Rango'), ['Rango', 'Fecha de registro del 10/11/2026 al 20/11/2026']);

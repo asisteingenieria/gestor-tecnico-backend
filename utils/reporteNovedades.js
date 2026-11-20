@@ -8,7 +8,9 @@
  * la librería que se le pase.
  */
 
+const { fechasReales } = require('./excelFechas');
 const { fechaDMY, fechaHoraBogota } = require('./reporteEmpleados');
+const { MODALIDADES, esVacaciones, partes } = require('./vacacionesNovedad');
 
 const CAMPOS_FECHA = ['registro', 'inicial', 'final'];
 const ETIQUETA_CAMPO_FECHA = { registro: 'Fecha de registro', inicial: 'Fecha inicial', final: 'Fecha final' };
@@ -137,6 +139,9 @@ const COLUMNAS = [
     ['Fecha Final', (n) => fechaDMY(n.fecha_final)],
     ['Fecha De Retorno', (n) => fechaDMY(n.fecha_retorno)],
     ['Total Días', (n) => numero(n.total_dias)],
+    ['Modalidad Vacaciones', (n) => (esVacaciones(n.tipo_novedad_nombre) ? MODALIDADES[n.modalidad_vacaciones || 'disfrutadas'] : '')],
+    ['Días Disfrutados', (n) => (esVacaciones(n.tipo_novedad_nombre) ? numero(partes(n).disfrutados) : '')],
+    ['Días Compensados', (n) => (esVacaciones(n.tipo_novedad_nombre) ? numero(partes(n).compensados) : '')],
     ['Origen Incapacidad', (n) => texto(n.origen_incapacidad)],
     ['Accidente De Tránsito', (n) => siNo(n.accidente_transito)],
     ['Diagnóstico', (n) => texto(n.resumen_diagnostico)],
@@ -187,6 +192,7 @@ function generarLibro(filasExcel, filtros, generadoEn, XLSX = require('xlsx')) {
     const ws = XLSX.utils.json_to_sheet(filasExcel, { header: ENCABEZADOS });
     ws['!cols'] = ENCABEZADOS.map((h) => ({ wch: ANCHOS[h] || Math.max(12, h.length + 2) }));
     ws['!autofilter'] = { ref: ws['!ref'] };
+    fechasReales(ws, XLSX); // fechas reales: el filtro de Excel las agrupa por año, mes y día (§60)
     XLSX.utils.book_append_sheet(libro, ws, 'Novedades');
 
     const resumen = XLSX.utils.aoa_to_sheet([

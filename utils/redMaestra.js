@@ -9,6 +9,7 @@
  *
  * Sin base de datos: lo usa models/RedMaestra.js y lo prueban tests/rrhh/redMaestra.test.js.
  */
+const { fechasReales } = require('./excelFechas');
 
 /**
  * Listas desplegables (red_maestra_opcion.campo) con su etiqueta y la tabla donde viven.
@@ -317,6 +318,7 @@ function generarLibro(registros, requerimientos, XLSX = require('xlsx')) {
         const ws = XLSX.utils.json_to_sheet(filas, { header: encabezados });
         ws['!cols'] = encabezados.map((h) => ({ wch: ANCHOS[h] || Math.max(12, h.length + 2) }));
         ws['!autofilter'] = { ref: ws['!ref'] };
+        fechasReales(ws, XLSX); // fechas reales: el filtro de Excel las agrupa por año, mes y día (§60)
         return ws;
     };
     XLSX.utils.book_append_sheet(libro, hoja(filasExport(registros), ENCABEZADOS_EXPORT), 'Red Maestra');
