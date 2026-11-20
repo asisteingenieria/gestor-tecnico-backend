@@ -3450,6 +3450,12 @@ sin observación, porque su cálculo ya está completo con las novedades del sis
 "Saldo Inicial". La observación queda solo para los que ya trabajaban antes y no venían en el Excel. No cambia el
 cálculo ni la carga. En local: 31 ingresos recientes y 35 con observación (26 + 9 fichas de prueba).
 
+### 58.4 KPI del pasivo según los filtros (2026-11-20)
+
+Las cuatro tarjetas (empleados con su "con observación", pasivo en días y pesos, programadas y total) ya se calculaban
+sobre la lista filtrada; ahora, con filtros activos, cada una muestra debajo "Según los filtros · N en total" con el
+total general, igual que Personal de la empresa (§56.2). Solo frontend (`PasivoVacacional.jsx`, `calcularKpi`).
+
 ### 59.1 Campos del formulario según el tipo de novedad (2026-11-20, pedido del usuario)
 
 El formulario mostraba origen, diagnóstico y accidente de tránsito en cualquier tipo (p. ej. en Vacaciones compensadas).
