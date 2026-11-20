@@ -56,7 +56,8 @@ class NovedadRrhh {
 
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
         const [rows] = await db.query(
-            `${SELECT_NOVEDAD} ${whereSql} ORDER BY nr.fecha_inicial DESC`,
+            // De la registrada más reciente a la más antigua (el id desempata las del mismo instante, p. ej. el cargue masivo).
+            `${SELECT_NOVEDAD} ${whereSql} ORDER BY nr.created_at DESC, nr.idnovedad_rrhh DESC`,
             params
         );
         return rows;
