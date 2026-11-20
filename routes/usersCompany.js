@@ -77,6 +77,7 @@ router.post('/import-excel/commit',      verificarGestionRRHH, uploadEmpleados.s
 // Novedades RRHH (deben ir antes de '/:id' para no colisionar con ella). Submódulo cerrado al
 // admin: su solo lectura es sobre empleados y documentos, no sobre novedades.
 router.get('/novedades',                 verificarGestionRRHH, userCompanyController.getNovedades);
+router.get('/novedades/export',          verificarGestionRRHH, userCompanyController.exportarNovedades);
 router.post('/novedades',                verificarGestionRRHH, userCompanyController.createNovedad);
 router.get('/novedades/:novedadId',      verificarGestionRRHH, userCompanyController.getNovedadById);
 router.put('/novedades/:novedadId',      verificarGestionRRHH, userCompanyController.updateNovedad);
