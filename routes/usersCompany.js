@@ -66,6 +66,8 @@ router.get('/',                          verificarLecturaEmpleados, userCompanyC
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
 // Excel con la jefatura de cada empleado vigente y quién le sube el horario (§51). Antes de '/:id'.
 router.get('/export/jefaturas',          verificarRecursosHumanos, userCompanyController.exportarJefaturas);
+// Excel de empleados con toda su información, por estado y rango de fechas (§56): solo RRHH y financiera.
+router.get('/export/empleados',          verificarGestionRRHH, userCompanyController.exportarEmpleados);
 router.get('/gasto-total',               verificarFinanciera, userCompanyController.getGastoTotal);
 
 // Import masivo de empleados desde Excel (escritura: no admin)

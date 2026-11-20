@@ -395,6 +395,134 @@ class UserCompany {
         return rows;
     }
 
+    // Descarga de empleados con toda su información (utils/reporteEmpleados.js, §56). Una fila por empleado con
+    // su contrato más reciente. Filtros combinables: `estados` (nombres de estado_contrato) y un rango
+    // [desde, hasta] (días de Bogotá) sobre la fecha de ingreso, de retiro o de registro de la ficha.
+    // `campoFecha` ya viene validado contra la lista blanca, nunca se interpola un valor del usuario.
+    static async getParaExportar({ estados = [], campoFecha = null, desde = null, hasta = null } = {}) {
+        const seguridad = (tipo, alias) => `
+            (SELECT ess.nombre FROM seguridad_social ss
+               JOIN entidad_seguridad_social ess ON ess.identidad_seguridad_social = ss.entidad_seguridad_social_id
+              WHERE ss.users_company_id = uc.id AND ss.tipo = '${tipo}' AND ss.activa = 1
+              ORDER BY ss.idseguridad_social DESC LIMIT 1) AS ${alias},
+            (SELECT ss.fecha_afiliacion FROM seguridad_social ss
+              WHERE ss.users_company_id = uc.id AND ss.tipo = '${tipo}' AND ss.activa = 1
+              ORDER BY ss.idseguridad_social DESC LIMIT 1) AS ${alias}_fecha_afiliacion`;
+        const recurso = (nombre) => `
+            (SELECT ar.identificador FROM asignacion_recurso ar
+               JOIN tipo_recurso tr ON tr.idtipo_recurso = ar.tipo_recurso_idtipo_recurso
+              WHERE ar.users_company_id = uc.id AND ar.activa = 1 AND tr.nombre = '${nombre}'
+              ORDER BY ar.idasignacion_recurso DESC LIMIT 1)`;
+        const persona = (alias) => `CONCAT_WS(' ', ${alias}.primer_nombre, ${alias}.segundo_nombre, ${alias}.primer_apellido, ${alias}.segundo_apellido)`;
+        const COLUMNA_FECHA = {
+            ingreso: 'c.fecha_ingreso',
+            retiro: 'r.fecha_retiro',
+            registro: 'DATE(uc.created_at - INTERVAL 5 HOUR)' // created_at está en UTC; el día es el de Bogotá
+        };
+
+        const condiciones = [];
+        const params = [];
+        if (estados.length) {
+            condiciones.push(`esc.nombre IN (${estados.map(() => '?').join(', ')})`);
+            params.push(...estados);
+        }
+        if (campoFecha && COLUMNA_FECHA[campoFecha]) {
+            if (desde) { condiciones.push(`${COLUMNA_FECHA[campoFecha]} >= ?`); params.push(desde); }
+            if (hasta) { condiciones.push(`${COLUMNA_FECHA[campoFecha]} <= ?`); params.push(hasta); }
+        }
+
+        const [rows] = await db.query(
+            `SELECT
+                uc.id, uc.numero_identificacion, uc.numero_identificacion_secundaria, uc.fecha_expedicion,
+                uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido,
+                uc.fecha_nacimiento, uc.numero_hijos, uc.email, uc.telefono, uc.usuario_ssff, uc.rut,
+                uc.declarante_renta, uc.libreta_militar_numero, uc.created_at AS registrado_en,
+                ti.codigo AS tipo_identificacion_codigo, ti.nombre AS tipo_identificacion,
+                ti2.codigo AS tipo_identificacion_secundaria_codigo, ti2.nombre AS tipo_identificacion_secundaria,
+                cex.nombre AS ciudad_expedicion, cn.nombre AS ciudad_nacimiento,
+                g.nombre AS genero, gs.nombre AS grupo_sanguineo, ec.nombre AS estado_civil,
+                cli.nombre AS cliente, cam.nombre AS campania, cc.nombre AS centro_costo, cc.codigo AS centro_costo_codigo,
+                car.nombre AS cargo, ar.nombre AS area, tc.nombre AS tipo_contrato, mo.nombre AS modalidad,
+                ol.nombre AS oleada, ct.nombre AS ciudad_trabajo, esc.nombre AS estado_contrato,
+                emp.nombre AS empresa, pp.nombre AS periodo_pago, tco.nombre AS tipo_cotizante,
+                c.fecha_ingreso, c.fecha_fin_periodo_prueba, c.fecha_fin_contrato, c.observaciones,
+                c.cargo_ssff, c.piso, c.aplica_dotacion,
+                ${persona('ji')} AS jefe_inmediato, ${persona('ja')} AS jefe_area, ${persona('da')} AS director_area,
+                ${persona('ga')} AS gestor_asistencia, ${persona('ana')} AS analista_encargado,
+                hs.salario, hs.bono_no_prestacional, hs.bono_cafeteria,
+                ${seguridad('EPS', 'eps')},
+                ${seguridad('ARL', 'arl')},
+                ${seguridad('AFP', 'afp')},
+                ${seguridad('CESANTIAS', 'cesantias')},
+                ${seguridad('CAJA', 'caja')},
+                (SELECT ss.tarifa_arl FROM seguridad_social ss
+                  WHERE ss.users_company_id = uc.id AND ss.tipo = 'ARL' AND ss.activa = 1
+                  ORDER BY ss.idseguridad_social DESC LIMIT 1) AS tarifa_arl,
+                cb.numero_cuenta, ban.nombre AS banco, tcu.nombre AS tipo_cuenta,
+                dir.direccion, dir.barrio, cdir.nombre AS ciudad_residencia, zd.nombre AS zona, tv.nombre AS tipo_vivienda,
+                ce.nombre AS contacto_nombre, ce.telefono AS contacto_telefono, par.nombre AS contacto_parentesco,
+                dot.talla_camisa, dot.talla_pantalon, dot.talla_calzado,
+                ${recurso('diadema')} AS diadema,
+                ${recurso('locker')} AS locker,
+                EXISTS(SELECT 1 FROM asignacion_recurso ar
+                         JOIN tipo_recurso tr ON tr.idtipo_recurso = ar.tipo_recurso_idtipo_recurso
+                        WHERE ar.users_company_id = uc.id AND ar.activa = 1 AND tr.nombre = 'carnet') AS carnet_entregado,
+                r.fecha_retiro, r.fecha_ultima_conexion, r.equipo_entregado, r.motivo_retiro,
+                r.justificacion AS justificacion_retiro, r.created_at AS retiro_registrado_en, tret.nombre AS tipo_retiro
+             FROM users_company uc
+             JOIN tipo_identificacion ti ON ti.idtipo_identificacion = uc.tipo_identificacion_idtipo_identificacion
+             LEFT JOIN tipo_identificacion ti2 ON ti2.idtipo_identificacion = uc.tipo_identificacion_secundaria_id
+             LEFT JOIN ciudad cex ON cex.idciudad = uc.ciudad_expedicion_id
+             LEFT JOIN ciudad cn  ON cn.idciudad = uc.ciudad_nacimiento_id
+             LEFT JOIN genero g ON g.idgenero = uc.genero_idgenero
+             LEFT JOIN grupo_sanguineo gs ON gs.idgrupo_sanguineo = uc.grupo_sanguineo_idgrupo_sanguineo
+             LEFT JOIN estado_civil ec ON ec.idestado_civil = uc.estado_civil_idestado_civil
+             LEFT JOIN contrato c ON c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2 WHERE c2.users_company_id = uc.id)
+             LEFT JOIN cliente cli ON cli.idCliente = c.Cliente_idCliente
+             LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+             LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
+             LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+             LEFT JOIN area ar ON ar.idarea = c.area_idarea
+             LEFT JOIN tipo_contrato tc ON tc.idtipo_contrato = c.tipo_contrato_idtipo_contrato
+             LEFT JOIN modalidad mo ON mo.idmodalidad = c.modalidad_idmodalidad
+             LEFT JOIN oleada ol ON ol.idoleada = c.oleada_idoleada
+             LEFT JOIN ciudad ct ON ct.idciudad = c.ciudad_idciudad
+             LEFT JOIN estado_contrato esc ON esc.idestado_contrato = c.estado_contrato_idestado_contrato
+             LEFT JOIN empresa emp ON emp.idempresa = c.empresa_id
+             LEFT JOIN periodo_pago pp ON pp.idperiodo_pago = c.periodo_pago_id
+             LEFT JOIN tipo_cotizante tco ON tco.idtipo_cotizante = c.tipo_cotizante_id
+             LEFT JOIN users_company ji  ON ji.id = c.jefe_inmediato_id
+             LEFT JOIN users_company ja  ON ja.id = c.jefe_area_id
+             LEFT JOIN users_company da  ON da.id = c.director_area_id
+             LEFT JOIN users_company ga  ON ga.id = c.gestor_asistencia_id
+             LEFT JOIN users_company ana ON ana.id = c.analista_encargado_id
+             LEFT JOIN historial_salarial hs ON hs.idhistorial_salarial = (
+                 SELECT MAX(h2.idhistorial_salarial) FROM historial_salarial h2
+                  WHERE h2.contrato_idcontrato = c.idcontrato AND h2.fecha_vigencia_fin IS NULL)
+             LEFT JOIN cuenta_bancaria cb ON cb.idcuenta_bancaria = (
+                 SELECT MAX(cb2.idcuenta_bancaria) FROM cuenta_bancaria cb2 WHERE cb2.users_company_id = uc.id AND cb2.activa = 1)
+             LEFT JOIN banco ban ON ban.idbanco = cb.banco_idbanco
+             LEFT JOIN tipo_cuenta tcu ON tcu.idtipo_cuenta = cb.tipo_cuenta_idtipo_cuenta
+             LEFT JOIN direccion dir ON dir.iddireccion = (
+                 SELECT MAX(d2.iddireccion) FROM direccion d2 WHERE d2.users_company_id = uc.id AND d2.es_principal = 1)
+             LEFT JOIN ciudad cdir ON cdir.idciudad = dir.ciudad_idciudad
+             LEFT JOIN zona_direccion zd ON zd.idzona_direccion = dir.zona_direccion_id
+             LEFT JOIN tipo_vivienda tv ON tv.idtipo_vivienda = dir.tipo_vivienda_id
+             LEFT JOIN contacto_emergencia ce ON ce.idcontacto_emergencia = (
+                 SELECT MIN(ce2.idcontacto_emergencia) FROM contacto_emergencia ce2 WHERE ce2.users_company_id = uc.id)
+             LEFT JOIN parentesco par ON par.idparentesco = ce.parentesco_idparentesco
+             LEFT JOIN dotacion dot ON dot.iddotacion = (
+                 SELECT MAX(d3.iddotacion) FROM dotacion d3 WHERE d3.users_company_id = uc.id)
+             LEFT JOIN retiro r ON r.idretiro = (
+                 SELECT MAX(r2.idretiro) FROM retiro r2 WHERE r2.contrato_idcontrato = c.idcontrato)
+             LEFT JOIN tipo_retiro tret ON tret.idtipo_retiro = r.tipo_retiro_idtipo_retiro
+             ${condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : ''}
+             ORDER BY uc.primer_apellido, uc.segundo_apellido, uc.primer_nombre`,
+            params
+        );
+        return rows;
+    }
+
     static async getById(id) {
         const [rows] = await db.query(`
             ${SELECT_EMPLEADO}
