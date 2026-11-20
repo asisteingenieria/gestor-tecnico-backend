@@ -1,6 +1,26 @@
 const Activo = require('../models/Activo');
+const ActivoHistorial = require('../models/ActivoHistorial');
 const path = require('path');
 const fs = require('fs');
+
+// Campos que, si cambian desde el formulario del gestor, quedan en activos_historial
+// (traslados de puesto, estado y componentes). Antes estos cambios no dejaban rastro.
+const CAMPOS_AUDITADOS = ['puesto', 'site', 'estado', 'cpu_procesador', 'memoria_ram', 'almacenamiento', 'sistema_operativo'];
+
+async function registrarCambiosEnHistorial(anterior, nuevo, usuarioId) {
+    for (const campo of CAMPOS_AUDITADOS) {
+        if (nuevo[campo] === undefined) continue;
+        const antes = anterior[campo] ?? null;
+        const despues = (typeof nuevo[campo] === 'string' ? nuevo[campo].trim() : nuevo[campo]) || null;
+        if ((antes || null) === despues) continue;
+        try {
+            await ActivoHistorial.registrarCambio(anterior.id, campo, antes, despues ?? 'Sin valor', usuarioId);
+        } catch (err) {
+            // El activo ya se guardó: un fallo del historial no debe revertir la edición.
+            console.error(`No se pudo registrar el cambio de ${campo} del activo ${anterior.id}:`, err.message);
+        }
+    }
+}
 
 const activoController = {
     // Obtener todos los activos
@@ -249,11 +269,33 @@ const activoController = {
                 activoData.agente_id = agenteId;
             }
 
+            // Sin estado en el formulario se conserva el actual (Activo.update pondría 'funcional').
+            if (!activoData.estado) activoData.estado = activoExistente.estado;
+
             // Solo admin puede establecer estado 'dado_de_baja' vía edición directa
-            if (activoData.estado === 'dado_de_baja' && req.user.role !== 'admin') {
+            if (activoData.estado === 'dado_de_baja' && activoExistente.estado !== 'dado_de_baja' && req.user.role !== 'admin') {
                 return res.status(403).json({
                     success: false,
                     message: 'Solo el administrador puede asignar el estado "dado de baja". Use "Solicitar Baja" para que el admin lo apruebe.'
+                });
+            }
+
+            // La baja es definitiva: solo el admin puede sacar un equipo de "dado de baja".
+            if (activoExistente.estado === 'dado_de_baja' && activoData.estado !== 'dado_de_baja' && req.user.role !== 'admin') {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Este equipo está dado de baja. Solo el administrador puede cambiar su estado.'
+                });
+            }
+
+            // La solicitud de baja tiene su propio flujo (observación del técnico, aprobación del admin):
+            // el formulario no la crea ni la saca de pendiente.
+            if ((activoData.estado === 'pendiente_baja') !== (activoExistente.estado === 'pendiente_baja')) {
+                return res.status(400).json({
+                    success: false,
+                    message: activoExistente.estado === 'pendiente_baja'
+                        ? 'Este activo tiene una solicitud de baja pendiente: el administrador debe aprobarla o rechazarla desde "Historial de componentes".'
+                        : 'Para dar de baja un equipo use "Solicitar Baja" desde el panel del técnico, con la observación.'
                 });
             }
 
@@ -280,6 +322,8 @@ const activoController = {
                     message: 'No se pudo actualizar el activo' 
                 });
             }
+
+            await registrarCambiosEnHistorial(activoExistente, activoData, req.user.id);
 
             res.json({ 
                 success: true, 
