@@ -3440,6 +3440,31 @@ botón y consulta en pantalla, en días, sin valores.
 5. Verificar en la pantalla al día del corte: el pasivo de cada empleado cargado = el del Excel. En local: 323 de 325
    coincidieron; las 2 diferencias eran retirados.
 
+### 58.3 "Con observación" solo para quien ya trabajaba antes del corte (2026-11-20, desplegado y cargado)
+
+En producción, tras cargar el Excel (325 filas, todas coincidieron; 323 activos con saldo), salieron 55 "con
+observación" de 378 activos: unos 29 ingresaron en noviembre (menos de 1 día de pasivo cada uno) y unos 26 llevan
+tiempo en la empresa. Regla nueva (`calcular` → `con_observacion` / `ingreso_reciente`, con test): sin saldo del
+Excel y con ingreso **desde el primer día del mes del corte** (corte = fecha más reciente de los saldos del Excel) →
+sin observación, porque su cálculo ya está completo con las novedades del sistema; el Excel de pasivo lo dice en
+"Saldo Inicial". La observación queda solo para los que ya trabajaban antes y no venían en el Excel. No cambia el
+cálculo ni la carga. En local: 31 ingresos recientes y 35 con observación (26 + 9 fichas de prueba).
+
+### 58.4 KPI del pasivo según los filtros (2026-11-20)
+
+Las cuatro tarjetas (empleados con su "con observación", pasivo en días y pesos, programadas y total) ya se calculaban
+sobre la lista filtrada; ahora, con filtros activos, cada una muestra debajo "Según los filtros · N en total" con el
+total general, igual que Personal de la empresa (§56.2). Solo frontend (`PasivoVacacional.jsx`, `calcularKpi`).
+
+### 58.5 "Con observación" = sin saldo del Excel y un año o más al corte (2026-11-20, reemplaza la regla de §58.3)
+
+En producción la regla de §58.3 (ingreso antes del mes del corte) dejaba 24: 18 antiguos (ingresos 2023 a sept-2025),
+5 ingresos de mayo-octubre 2026 y el registro de prueba "ASISLOCK PRUEBA" (cédula 1010, debe retirarse en RRHH). El
+usuario eligió marcar solo a los 18 antiguos. Regla (`limiteAntiguedad`, con test): con observación si no tiene saldo
+del Excel y su ingreso es **hasta "corte − 1 año"** (corte = fecha más reciente de los saldos del Excel; con el corte
+20-nov-2026, ingresos hasta el 20-nov-2025). Con menos de un año no se marca: no puede tener vacaciones de años
+anteriores. Probada con las fechas de producción: 18.
+
 ### 59.1 Campos del formulario según el tipo de novedad (2026-11-20, pedido del usuario)
 
 El formulario mostraba origen, diagnóstico y accidente de tránsito en cualquier tipo (p. ej. en Vacaciones compensadas).

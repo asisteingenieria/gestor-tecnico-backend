@@ -122,9 +122,26 @@ function agruparPorEmpleado(novedades) {
     return mapa;
 }
 
+/**
+ * "Con observación" (§58.3, ajustada en §58.5): no tiene saldo inicial del Excel y a la fecha del corte ya llevaba
+ * un año o más en la empresa, así que pudo tomar vacaciones de años anteriores que el sistema no conoce. Quien
+ * llevaba menos de un año (ingreso posterior a "corte − 1 año") no la lleva: su cálculo con las novedades del sistema
+ * es suficiente. El corte general es la fecha más reciente de los saldos cargados del Excel.
+ * Devuelve la fecha límite 'AAAA-MM-DD': ingreso hasta esa fecha → con observación.
+ */
+function limiteAntiguedad(empleados) {
+    const cortes = empleados.filter((e) => e.saldo_id && (e.origen || 'excel') === 'excel').map((e) => iso(e.fecha_corte)).filter(Boolean);
+    if (!cortes.length) return null;
+    const [a, m, d] = cortes.sort().at(-1).split('-').map(Number);
+    // Un año antes; si el corte es 29-feb, el límite es 28-feb del año anterior.
+    const limite = new Date(Date.UTC(a - 1, m - 1, Math.min(d, m === 2 ? 28 : d)));
+    return limite.toISOString().slice(0, 10);
+}
+
 /** Calcula todos los empleados y los totales. */
 function calcular(empleados, novedades, fecha) {
     const porEmpleado = agruparPorEmpleado(novedades);
+    const limite = limiteAntiguedad(empleados);
     const filas = empleados.map((e) => {
         const saldo = e.saldo_id ? {
             fecha_corte: e.fecha_corte, dias_disfrutados_corte: e.dias_disfrutados_corte, dias_compensados: e.dias_compensados
@@ -146,6 +163,10 @@ function calcular(empleados, novedades, fecha) {
             nota_saldo: saldo ? e.nota || null : null,
             ajustado_en: saldo && e.ajustado_en ? e.ajustado_en : null
         };
+    }).map((f) => {
+        // Sin saldo y con menos de un año al corte: sin observación (§58.5).
+        const ingresoReciente = !f.con_corte && Boolean(limite && f.fecha_ingreso && f.fecha_ingreso > limite);
+        return { ...f, ingreso_reciente: ingresoReciente, con_observacion: !f.con_corte && !ingresoReciente };
     });
     const suma = (campo) => filas.reduce((s, f) => s + (Number(f[campo]) || 0), 0);
     return {
@@ -153,6 +174,8 @@ function calcular(empleados, novedades, fecha) {
         totales: {
             empleados: filas.length,
             con_corte: filas.filter((f) => f.con_corte).length,
+            con_observacion: filas.filter((f) => f.con_observacion).length,
+            ingreso_reciente: filas.filter((f) => f.ingreso_reciente).length,
             ajustados: filas.filter((f) => f.origen_saldo === 'financiera').length,
             pasivo_dias: redondear(suma('pasivo_dias')),
             dias_programados: redondear(suma('dias_programados')),
@@ -272,8 +295,8 @@ const COLUMNAS = [
     ['Salario', (f) => (f.salario == null ? '' : f.salario)],
     ['Valor Pasivo', (f) => (f.valor_pasivo == null ? '' : f.valor_pasivo)],
     ['Valor Total', (f) => (f.valor_total == null ? '' : f.valor_total)],
-    ['Observación', (f) => (f.con_corte ? '' : 'Con observación: no venía en el Excel de corte; pasivo = acumulado menos novedades')],
-    ['Saldo Inicial', (f) => (!f.con_corte ? ''
+    ['Observación', (f) => (f.con_observacion ? 'Con observación: no venía en el Excel de corte; pasivo = acumulado menos novedades' : '')],
+    ['Saldo Inicial', (f) => (!f.con_corte ? (f.ingreso_reciente ? 'Menos de un año al corte: cálculo con las novedades del sistema' : '')
         : f.origen_saldo === 'financiera' ? `Ajustado por financiera al ${dmy(f.fecha_corte)}${f.nota_saldo ? `: ${f.nota_saldo}` : ''}`
             : `Excel al ${dmy(f.fecha_corte)}`)]
 ];
@@ -303,7 +326,8 @@ function generarLibro(resultado, fecha, generadoEn, XLSX = require('xlsx'), { co
         ['Fecha de cálculo', dmy(fecha)],
         ['Empleados', t.empleados],
         ['Con saldo inicial del Excel', t.con_corte],
-        ['Con observación (no venían en el Excel)', t.empleados - t.con_corte],
+        ['Sin saldo del Excel y con menos de un año al corte (sin observación)', t.ingreso_reciente],
+        ['Con observación (no venían en el Excel y llevaban un año o más al corte)', t.con_observacion],
         ['Pasivo (días)', t.pasivo_dias],
         ['Vacaciones programadas (días)', t.dias_programados],
         ['Total (días)', t.total_dias],
