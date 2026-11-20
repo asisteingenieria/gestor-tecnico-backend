@@ -58,7 +58,7 @@ async function listarDelArbol({ idsArbol, raizUsersCompanyId, desde, hasta, empl
            LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
            LEFT JOIN users_company ji ON ji.id = c.jefe_inmediato_id
           WHERE ${condiciones.join(' AND ')}
-          ORDER BY nr.fecha_inicial DESC, uc.nombre_propio`,
+          ORDER BY nr.created_at DESC, nr.idnovedad_rrhh DESC`,
         [...ESTADOS_CONTRATO_ACTIVOS, ...params]
     );
     return filas;
