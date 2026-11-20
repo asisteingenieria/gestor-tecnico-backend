@@ -2,6 +2,7 @@ const Activo = require('../models/Activo');
 const ActivoHistorial = require('../models/ActivoHistorial');
 const InventarioObservacion = require('../models/InventarioObservacion');
 const db = require('../config/db');
+const { agregarAlertas } = require('./mantenimientoActivoController');
 
 // Todos los tipos de activos tecnológicos son accesibles por el técnico de inventario
 const TIPOS_EDITABLES = ['ECC-CPU', 'ECC-POR', 'ECC-SER', 'ECC-MON', 'ECC-IMP', 'ECC-TV', 'OTHER'];
@@ -16,7 +17,9 @@ const CAMPO_LABELS = {
     almacenamiento: 'Almacenamiento',
     sistema_operativo: 'Sistema Operativo',
     clasificacion: 'Clasificación',
-    estado: 'Estado'
+    estado: 'Estado',
+    puesto: 'Puesto',
+    site: 'Site'
 };
 
 /**
@@ -70,7 +73,7 @@ exports.getActivosEditables = async (req, res) => {
 
         res.json({
             success: true,
-            data: rows,
+            data: await agregarAlertas(rows),
             tiposEditables: TIPOS_EDITABLES
         });
     } catch (err) {
@@ -104,6 +107,7 @@ exports.getComponentesActivo = async (req, res) => {
                 marca_modelo,
                 ubicacion,
                 site,
+                puesto,
                 responsable,
                 asignado,
                 estado
@@ -136,6 +140,7 @@ exports.getComponentesActivo = async (req, res) => {
                 marca_modelo: activo.marca_modelo,
                 ubicacion: activo.ubicacion,
                 site: activo.site,
+                puesto: activo.puesto,
                 responsable: activo.responsable,
                 asignado: activo.asignado,
                 estado: activo.estado
@@ -584,48 +589,6 @@ exports.getActivosNoProductivos = async (req, res) => {
 };
 
 /**
- * @desc    Dar de baja un activo (cambiar estado a 'dado_de_baja')
- * @route   PUT /api/activos-tecnico/:id/dar-de-baja
- * @access  Private (gestorActivos, admin)
- */
-exports.darDeBajaActivo = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const usuarioId = req.user.id;
-
-        // Verificar que el activo existe
-        const [activos] = await db.query('SELECT id, numero_placa, tipo_activo, estado FROM activos WHERE id = ?', [id]);
-        if (activos.length === 0) {
-            return res.status(404).json({ success: false, msg: 'Activo no encontrado' });
-        }
-
-        const activo = activos[0];
-
-        // Verificar que no esté ya dado de baja
-        if (activo.estado === 'dado_de_baja') {
-            return res.status(400).json({ success: false, msg: 'Este activo ya se encuentra dado de baja' });
-        }
-
-        const estadoAnterior = activo.estado;
-
-        // Actualizar estado
-        await db.query('UPDATE activos SET estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['dado_de_baja', id]);
-
-        // Registrar en historial
-        await ActivoHistorial.registrarCambio(id, 'estado', estadoAnterior, 'dado_de_baja', usuarioId);
-
-        res.json({
-            success: true,
-            msg: `Activo ${activo.numero_placa} dado de baja correctamente`,
-            data: { id: activo.id, numeroPlaca: activo.numero_placa, estadoAnterior, estadoNuevo: 'dado_de_baja' }
-        });
-    } catch (err) {
-        console.error('Error al dar de baja activo:', err.message);
-        res.status(500).json({ success: false, msg: 'Error del servidor al dar de baja el activo' });
-    }
-};
-
-/**
  * @desc    Obtener activos que están en estado bodega
  * @route   GET /api/activos-tecnico/en-bodega
  * @access  Private (gestorActivos, admin)
@@ -694,8 +657,9 @@ exports.actualizarEstadoMantenimiento = async (req, res) => {
         const { nuevoEstado } = req.body;
         const usuarioId = req.user.id;
 
-        // pendiente_baja: solicitud de baja para que el admin apruebe
-        const estadosPermitidos = ['en_mantenimiento', 'funcional', 'bodega', 'pendiente_baja'];
+        // La baja ya no pasa por aquí: va por POST /:id/solicitar-baja (con observación) y la
+        // resuelve el admin (dar-de-baja / rechazar-baja) o el técnico la cancela (cancelar-baja).
+        const estadosPermitidos = ['en_mantenimiento', 'funcional', 'bodega'];
         if (!estadosPermitidos.includes(nuevoEstado)) {
             return res.status(400).json({
                 success: false,
@@ -717,6 +681,13 @@ exports.actualizarEstadoMantenimiento = async (req, res) => {
             return res.status(400).json({ success: false, msg: 'No se puede modificar un activo dado de baja' });
         }
 
+        if (activo.estado === 'pendiente_baja') {
+            return res.status(400).json({
+                success: false,
+                msg: 'El activo tiene una solicitud de baja pendiente: el administrador debe aprobarla o rechazarla, o el técnico cancelarla'
+            });
+        }
+
         if (activo.estado === nuevoEstado) {
             return res.status(400).json({ success: false, msg: `El activo ya se encuentra en estado "${nuevoEstado}"` });
         }
@@ -733,8 +704,7 @@ exports.actualizarEstadoMantenimiento = async (req, res) => {
         const mensajes = {
             en_mantenimiento: `Activo ${activo.numero_placa} puesto en mantenimiento`,
             funcional: `Activo ${activo.numero_placa} marcado como funcional`,
-            bodega: `Activo ${activo.numero_placa} enviado a bodega`,
-            pendiente_baja: `Solicitud de baja para ${activo.numero_placa} enviada al administrador`
+            bodega: `Activo ${activo.numero_placa} enviado a bodega`
         };
 
         res.json({
@@ -793,68 +763,6 @@ exports.crearObservacionInventario = async (req, res) => {
         res.status(500).json({
             success: false,
             msg: 'Error del servidor al registrar observación de inventario'
-        });
-    }
-};
-
-/**
- * @desc    Obtener activos con solicitud de baja pendiente de aprobación del admin
- * @route   GET /api/activos-tecnico/pendientes-baja
- * @access  Private (admin only)
- */
-exports.getPendientesBaja = async (req, res) => {
-    try {
-        const [rows] = await db.query(`
-            SELECT
-                a.id,
-                a.numero_placa,
-                a.tipo_activo,
-                a.ubicacion,
-                a.site,
-                a.marca_modelo,
-                a.estado,
-                a.clasificacion,
-                h.modificado_por_id,
-                u.full_name AS solicitado_por_nombre,
-                u.username AS solicitado_por_usuario,
-                h.fecha_modificacion AS fecha_solicitud
-            FROM activos a
-            LEFT JOIN (
-                SELECT ah1.*
-                FROM activos_historial ah1
-                INNER JOIN (
-                    SELECT activo_id, MAX(id) AS max_id
-                    FROM activos_historial
-                    WHERE campo_modificado = 'estado'
-                      AND valor_nuevo = 'pendiente_baja'
-                    GROUP BY activo_id
-                ) ah2 ON ah1.id = ah2.max_id
-            ) h ON a.id = h.activo_id
-            LEFT JOIN users u ON h.modificado_por_id = u.id
-            WHERE a.estado = 'pendiente_baja'
-            ORDER BY h.fecha_modificacion ASC
-        `);
-
-        res.json({
-            success: true,
-            data: rows.map(r => ({
-                id: r.id,
-                numeroPlaca: r.numero_placa,
-                tipoActivo: r.tipo_activo,
-                ubicacion: r.ubicacion,
-                site: r.site,
-                marcaModelo: r.marca_modelo,
-                estado: r.estado,
-                clasificacion: r.clasificacion,
-                solicitadoPor: r.solicitado_por_nombre || r.solicitado_por_usuario || null,
-                fechaSolicitud: r.fecha_solicitud || null
-            }))
-        });
-    } catch (err) {
-        console.error('Error al obtener solicitudes de baja pendientes:', err.message);
-        res.status(500).json({
-            success: false,
-            msg: 'Error del servidor al obtener solicitudes de baja'
         });
     }
 };
