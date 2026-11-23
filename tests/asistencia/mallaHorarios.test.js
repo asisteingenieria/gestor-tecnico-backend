@@ -7,7 +7,8 @@ const {
     minutosDeCelda,
     normalizarCedula,
     leerMalla,
-    planificar
+    planificar,
+    homologarPpt
 } = require('../../domain/asistencia/mallaHorarios');
 
 // Serie de Excel del 2026-11-10 y horas como fracción de día, como las trae Mallas1.xlsx.
@@ -105,6 +106,18 @@ test('sin las columnas obligatorias no lee nada y dice cuáles faltan', () => {
     const r = leerMalla([{ Cedula: '1', Fecha: SERIE_10_NOV }]);
     assert.deepEqual(r.faltantes, ['entrada', 'salida']);
     assert.equal(r.registros.length, 0);
+});
+
+test('"0" como texto es 00:00 y el PPT de 7 dígitos se homologa a su ficha con 600 (§76)', () => {
+    assert.equal(minutosDeCelda('0'), 0);
+    assert.equal(minutosDeCelda(' 00 '), 0);
+    const { registros, errores } = leerMalla([fila({ Cedula: '1402568', Entrada_Final: '0', Salida_Final: '0', Almuerzo_Final: '0' })]);
+    assert.deepEqual(errores, []);
+    assert.equal(registros[0].esDescanso, true);
+    const equipo = new Map([['6001402568', { users_company_id: 9 }]]);
+    assert.equal(homologarPpt(registros, equipo)[0].cedula, '6001402568');
+    // Una cédula que ya está en el equipo, o un PPT que no es del equipo, no cambia.
+    assert.equal(homologarPpt(registros, new Map())[0].cedula, '1402568');
 });
 
 // --- planificar ---

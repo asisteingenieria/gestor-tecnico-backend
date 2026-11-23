@@ -4039,3 +4039,31 @@ Pedido: "en el descargue de la plantilla de los horarios quiero que se listen de
   persona siguen en orden cronológico.
 - Solo cambia `filasPlantilla` (`domain/asistencia/plantillaMalla.js`). Probado con el equipo de Kevin en local:
   del 19-nov-2026 al 08-ago-2023 (448 tests).
+
+## 76. Carga retroactiva de la malla para recalcular llegadas y ausencias (2026-11-23)
+
+Pedido: subir los horarios desde el sábado 21 para recalcular el logueo y ver quién llegó tarde o no llegó. La pantalla
+de los jefes no acepta días pasados (§55) y se deja así; esto es una corrección puntual **solo por script**, con
+simulación previa.
+
+- `node scripts/cargarMallaRetroactiva.js --archivo=<malla.xlsx> --jefe=<cédula del jefe> --desde=AAAA-MM-DD --hasta=AAAA-MM-DD [--aplicar] [--reporte=<csv>]`
+- Rango: solo días que ya pasaron (antes de hoy), en orden, hasta 31 (`domain/asistencia/mallaRetroactiva.js`).
+- Usa la misma lectura y el mismo plan de la malla (`horarioService.planDeMalla` con rango): equipo directo del jefe,
+  activos, sin retiro y desde su ingreso; omitidos con su motivo (§75.2). Los horarios quedan con la nota
+  "Malla retroactiva".
+- Después de guardar cada horario recalcula el día (`horarioService.cargarMallaRetroactiva`):
+  - **con jornada** (se logueó): si está cerrada, recalcula sus totales con el horario (puntual/tarde, `minutos_tarde`
+    y `segundos_tarde`); si quedó abierta, la cierra como el cierre nocturno (`cierreService.normalizarJornada`). En
+    ambos casos la enlaza al horario (`jornadaRepository.vincularHorario`).
+  - **sin jornada y con turno:** crea la jornada `ausente` (mismo `normalizarJornada`).
+  - **descanso:** no genera ausencia; si trabajó ese día, se informa como "trabajo en descanso".
+- Todo va en **una transacción**: sin `--aplicar` se deshace al final, así que la simulación da exactamente el mismo
+  resultado que el aplicado. Repetirlo no duplica nada: los días ya cargados salen como "ya iguales".
+- Las salidas que el cierre nocturno ya puso esos días no se tocan (`jornada_evento` es append-only).
+- Arreglos de la lectura de la malla que salieron con el archivo de David Acero (sirven también para la pantalla):
+  - `"0"` escrito como texto en Entrada/Salida/Almuerzo = 00:00 (antes era error "Hora de entrada vacía").
+  - PPT: la malla trae los 7 dígitos y RRHH guarda 600 + 7 (§69). `mallaHorarios.homologarPpt` busca la ficha con el
+    prefijo cuando la de 7 dígitos no está en el equipo (antes salían "Cédula sin ficha en RRHH").
+- Probado en local con el equipo de Kevin Buitrago y `01_Mallas_David_Acero (10)` del 21 al 22-nov: 242 horarios de 121
+  personas, 0 errores; 4 puntuales, 3 tarde, 129 ausentes (la BD local tiene pocos logueos de esos días) y 106
+  descansos. Después de simular, la BD quedó igual; después de aplicar, repetir dio 0 cambios (452 tests).

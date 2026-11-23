@@ -29,6 +29,7 @@
  */
 
 const { normalizarModalidad } = require('./consultaAsislock');
+const { cedulaPptConPrefijo } = require('./asislock');
 
 const NOVEDADES_DESCANSO = ['DESCANSO', 'LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
 // Nota que queda en el horario del día: DESCANSO → "Descanso", LIBRE → "Libre", las demás tal cual (INC, VACACIONES…).
@@ -105,6 +106,8 @@ function minutosDeCelda(valor) {
         return valor.getUTCHours() * 60 + valor.getUTCMinutes();
     }
     const texto = String(valor).trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ');
+    // "0" escrito como texto (mallas de operación, §76) = 00:00.
+    if (/^0+$/.test(texto)) return 0;
     const m = texto.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm|a m|p m)?$/);
     if (!m) return null;
     let horas = Number(m[1]);
@@ -316,7 +319,22 @@ function planificar({ registros, hoy, equipo, cedulasRrhh, cedulasRetiradas = ne
     return { filas, resumen, plantillasNuevas: [...nuevas.values()] };
 }
 
+/**
+ * PPT (asistencia.md §69): la malla puede traer los 7 dígitos y RRHH guarda 600 + 7. Si la cédula no está en el
+ * equipo pero su versión con prefijo sí, se usa esa (§76).
+ * @param {Array} registros  de leerMalla
+ * @param {Map|Set} equipo   con las cédulas del equipo como clave
+ */
+function homologarPpt(registros, equipo) {
+    return registros.map((r) => {
+        if (equipo.has(r.cedula)) return r;
+        const ppt = cedulaPptConPrefijo(r.cedula);
+        return ppt && equipo.has(ppt) ? { ...r, cedula: ppt } : r;
+    });
+}
+
 module.exports = {
+    homologarPpt,
     NOVEDADES_DESCANSO,
     mapearColumnas,
     fechaDeCelda,
