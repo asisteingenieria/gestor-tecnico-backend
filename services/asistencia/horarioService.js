@@ -212,7 +212,11 @@ async function planDeMalla(directorUsersCompanyId, buffer) {
         .filter((e) => e.numero_identificacion)
         .map((e) => [String(e.numero_identificacion).trim(), e]));
     const cedulas = [...new Set(lectura.registros.map((r) => r.cedula))];
-    const cedulasRrhh = new Set(await empleadoRepo.findNumerosExistentes(cedulas));
+    const [existentesRrhh, retiradas] = await Promise.all([
+        empleadoRepo.findNumerosExistentes(cedulas), empleadoRepo.findNumerosRetirados(cedulas)
+    ]);
+    const cedulasRrhh = new Set(existentesRrhh);
+    const cedulasRetiradas = new Set(retiradas);
 
     const vigentes = lectura.registros.filter((r) => r.fecha >= hoy && equipo.has(r.cedula));
     const ids = [...new Set(vigentes.map((r) => equipo.get(r.cedula).users_company_id))];
@@ -224,15 +228,16 @@ async function planDeMalla(directorUsersCompanyId, buffer) {
         }
     }
     const plantillas = await horarioPlantillaRepo.findPorDueno(directorUsersCompanyId);
-    const plan = mallaHorarios.planificar({ registros: lectura.registros, hoy, equipo, cedulasRrhh, existentes, plantillas });
+    const plan = mallaHorarios.planificar({ registros: lectura.registros, hoy, equipo, cedulasRrhh, cedulasRetiradas, existentes, plantillas });
     return { lectura, plan, hoy };
 }
 
-// Personas omitidas (no están a cargo / no existen en RRHH), una línea por persona.
+// Personas omitidas (retiradas, antes de su ingreso, no están a cargo o no existen en RRHH), una línea por persona.
+const ESTADOS_OMITIDOS = ['retirado', 'antes_ingreso', 'no_a_cargo', 'no_encontrado'];
 function omitidosPorPersona(filas) {
     const porCedula = new Map();
     for (const f of filas) {
-        if (f.estado !== 'no_a_cargo' && f.estado !== 'no_encontrado') continue;
+        if (!ESTADOS_OMITIDOS.includes(f.estado)) continue;
         const p = porCedula.get(f.cedula) ?? { cedula: f.cedula, nombre: f.nombre, estado: f.estado, dias: 0 };
         p.dias++;
         porCedula.set(f.cedula, p);
@@ -286,7 +291,7 @@ const INSTRUCCIONES = (desde, hasta) => [
     ['Cómo llenarla'],
     ['1. Entrada y Salida en hora de 24 horas: 08:00, 17:00. Almuerzo es la duración: 00:30 = 30 minutos, 01:00 = una hora.'],
     ['2. Modelo Trabajo: elige de la lista Presencial o Trabajo en casa. Viene precargado con el del día o el del contrato; cámbialo si ese día es distinto.'],
-    ['3. Descanso: deja Entrada y Salida vacías y elige en Novedad LIBRE (o INC, VACACIONES, RETIRO, SUSPENSION, LNR, LR).'],
+    ['3. Descanso: deja Entrada y Salida vacías y elige en Novedad DESCANSO (o INC, VACACIONES, RETIRO, SUSPENSION, LNR, LR si es otra ausencia).'],
     ['4. Si la persona ya tenía horario ese día, viene precargado: cámbialo solo si hace falta.'],
     ['5. Las filas que dejes sin Entrada, Salida ni Novedad no se cargan: ese día queda como estaba.'],
     ['6. No cambies Cedula ni Fecha. Nombre, Cargo y Centro de costo son informativos.'],

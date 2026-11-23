@@ -7,7 +7,7 @@
  * Reglas (decididas con el usuario el 2026-11-03, y las de la carga de §49):
  *   - Las columnas se buscan por nombre, sin importar mayúsculas, tildes ni el orden. Para la hora se
  *     prefieren las columnas *_Final (el turno ya ajustado) y, si no están, Entrada/Salida/Tiempo_Almuerzo.
- *   - Entrada 00:00 = día libre (descanso), igual que la novedad Libre.
+ *   - Entrada 00:00 = día de descanso, igual que la novedad DESCANSO (§75.1; LIBRE se sigue aceptando).
  *   - INC, VACACIONES, RETIRO, SUSPENSION, LNR y LR = descanso con la novedad en las notas. La novedad viene
  *     en la columna Novedad (Mallas1) o escrita en la celda de Entrada (plantilla 01_Mallas_Operacion, que
  *     no tiene columna Novedad).
@@ -17,7 +17,9 @@
  *   - Una salida anterior o igual a la entrada (turno que cruza la medianoche) no se soporta: la fila
  *     se rechaza para que el jefe la corrija, en vez de adivinar.
  *   - Solo se aplica de HOY en adelante; los días pasados se informan y se omiten.
- *   - Solo se aplica al equipo directo de quien sube el archivo; el resto se informa y se omite.
+ *   - Solo se aplica al equipo directo de quien sube el archivo, con contrato activo y sin retiro; el resto se
+ *     informa y se omite. Un retirado sale como "retirado" (§75.2), no como "no está a tu cargo".
+ *   - Nunca antes de la fecha de ingreso del contrato (§75.2): esos días salen como "antes_ingreso".
  *   - Reemplaza el horario que ya tuviera la persona ese día.
  *   - Una fila sin Entrada, sin Salida y sin Novedad no es error: es un día que el jefe no diligenció en la
  *     plantilla (§75, una fila por persona y día). Se omite y se cuenta en `sinDiligenciar`.
@@ -28,7 +30,9 @@
 
 const { normalizarModalidad } = require('./consultaAsislock');
 
-const NOVEDADES_DESCANSO = ['LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
+const NOVEDADES_DESCANSO = ['DESCANSO', 'LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
+// Nota que queda en el horario del día: DESCANSO → "Descanso", LIBRE → "Libre", las demás tal cual (INC, VACACIONES…).
+const NOTA_DESCANSO = { DESCANSO: 'Descanso', LIBRE: 'Libre' };
 const MAX_FILAS = 20000;
 
 const normalizarTexto = (v) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -178,7 +182,7 @@ function leerMalla(filas) {
                 horaEntrada: '00:00:00',
                 horaSalida: '00:00:00',
                 minutosAlmuerzo: 0,
-                notas: esNovedadDescanso ? (novedad === 'LIBRE' ? 'Libre' : novedad) : 'Libre'
+                notas: esNovedadDescanso ? (NOTA_DESCANSO[novedad] ?? novedad) : 'Descanso'
             });
             return;
         }
@@ -215,6 +219,9 @@ function leerMalla(filas) {
     errores.sort((a, b) => a.fila - b.fila);
     return { faltantes: [], registros: unicos, errores, sinDiligenciar, truncado: filas.length > MAX_FILAS };
 }
+
+// Fecha de la BD (Date en UTC o texto) → 'YYYY-MM-DD'.
+const fechaIso = (f) => (!f ? null : f instanceof Date ? f.toISOString().slice(0, 10) : String(f).slice(0, 10));
 
 const igualHora = (a, b) => String(a ?? '').slice(0, 5) === String(b ?? '').slice(0, 5);
 
@@ -262,17 +269,23 @@ function turnoNuevo(r) {
  * @param {string} hoy           fecha laboral de hoy 'YYYY-MM-DD'
  * @param {Map}    equipo        cédula → { users_company_id, nombre_propio, centro_costo_id } (equipo directo)
  * @param {Set}    cedulasRrhh   cédulas que existen en RRHH (para distinguir "no está a tu cargo" de "no existe")
+ * @param {Set}    cedulasRetiradas  cédulas cuyo último contrato está retirado o inactivo (§75.2)
  * @param {Map}    existentes    `${users_company_id}|${fecha}` → horario_asignado
  * @param {Array}  plantillas    del jefe
  * @returns {{ filas: Array, resumen: Object }} cada fila con `estado`: nuevo | reemplaza | igual |
- *          pasado | no_a_cargo | no_encontrado
+ *          pasado | antes_ingreso | retirado | no_a_cargo | no_encontrado
  */
-function planificar({ registros, hoy, equipo, cedulasRrhh, existentes, plantillas = [] }) {
+function planificar({ registros, hoy, equipo, cedulasRrhh, cedulasRetiradas = new Set(), existentes, plantillas = [] }) {
     const filas = registros.map((r) => {
         const empleado = equipo.get(r.cedula);
         const comun = { ...r, users_company_id: empleado?.users_company_id ?? null, nombre_rrhh: empleado?.nombre_propio ?? null };
         if (r.fecha < hoy) return { ...comun, estado: 'pasado' };
-        if (!empleado) return { ...comun, estado: cedulasRrhh.has(r.cedula) ? 'no_a_cargo' : 'no_encontrado' };
+        if (!empleado) {
+            const estado = cedulasRetiradas.has(r.cedula) ? 'retirado' : cedulasRrhh.has(r.cedula) ? 'no_a_cargo' : 'no_encontrado';
+            return { ...comun, estado };
+        }
+        const ingreso = fechaIso(empleado.fecha_ingreso);
+        if (ingreso && r.fecha < ingreso) return { ...comun, estado: 'antes_ingreso' };
 
         const existente = existentes.get(`${empleado.users_company_id}|${r.fecha}`) ?? null;
         const plantilla = plantillaPara(r, empleado.centro_costo_id ?? null, plantillas);
@@ -289,7 +302,7 @@ function planificar({ registros, hoy, equipo, cedulasRrhh, existentes, plantilla
         };
     });
 
-    const resumen = { nuevo: 0, reemplaza: 0, igual: 0, pasado: 0, no_a_cargo: 0, no_encontrado: 0 };
+    const resumen = { nuevo: 0, reemplaza: 0, igual: 0, pasado: 0, antes_ingreso: 0, retirado: 0, no_a_cargo: 0, no_encontrado: 0 };
     for (const f of filas) resumen[f.estado]++;
     resumen.a_aplicar = resumen.nuevo + resumen.reemplaza;
     // Plantillas que se crearán: solo las de turnos que de verdad se van a aplicar.

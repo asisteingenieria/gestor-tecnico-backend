@@ -77,10 +77,12 @@ test('entrada 00:00 y las novedades de ausencia son descanso con la novedad en n
         fila({ Cedula: '1000000002', Novedad: 'Libre', Entrada_Final: 0, Salida_Final: 0 }),
         fila({ Cedula: '1000000003', Novedad: 'INC' }),
         fila({ Cedula: '1000000004', Novedad: 'VACACIONES' }),
-        fila({ Cedula: '1000000005', Novedad: 'Turno ' })
+        fila({ Cedula: '1000000005', Novedad: 'Turno ' }),
+        fila({ Cedula: '1000000006', Novedad: 'Descanso' })
     ]);
+    // 00:00 y la novedad DESCANSO quedan como "Descanso" (§75.1); LIBRE se sigue aceptando.
     assert.deepEqual(registros.map((r) => [r.esDescanso, r.notas]), [
-        [true, 'Libre'], [true, 'Libre'], [true, 'INC'], [true, 'VACACIONES'], [false, null]
+        [true, 'Descanso'], [true, 'Libre'], [true, 'INC'], [true, 'VACACIONES'], [false, null], [true, 'Descanso']
     ]);
     assert.equal(registros[2].horaEntrada, '00:00:00');
 });
@@ -137,6 +139,24 @@ test('planificar: equipo directo de hoy en adelante; pasados, ajenos e inexisten
     assert.equal(resumen.personas, 1);
 });
 
+test('planificar: retirados y días antes del ingreso se omiten con su motivo (§75.2)', () => {
+    const { registros } = leerMalla([
+        fila({ Fecha: SERIE_10_NOV }),                    // antes del ingreso (11-nov)
+        fila({ Fecha: SERIE_10_NOV + 1 }),                // el día del ingreso: nuevo
+        fila({ Cedula: '2000000000' }),                   // retirado
+        fila({ Cedula: '3000000000' })                    // en RRHH, de otro jefe
+    ]);
+    const equipo = new Map([['1000000001', { users_company_id: 7, nombre_propio: 'Uno', fecha_ingreso: new Date('2026-11-11T00:00:00Z') }]]);
+    const { filas, resumen } = planificar({
+        registros, hoy: '2026-11-03', equipo, cedulasRrhh: new Set(['2000000000', '3000000000']),
+        cedulasRetiradas: new Set(['2000000000']), existentes: new Map()
+    });
+    assert.deepEqual(filas.map((f) => f.estado), ['antes_ingreso', 'nuevo', 'retirado', 'no_a_cargo']);
+    assert.equal(resumen.a_aplicar, 1);
+    assert.equal(resumen.retirado, 1);
+    assert.equal(resumen.antes_ingreso, 1);
+});
+
 test('planificar: el día de hoy sí se aplica', () => {
     const { registros } = leerMalla([fila()]);
     const equipo = new Map([['1000000001', { users_company_id: 7 }]]);
@@ -171,7 +191,7 @@ test('plantilla de operación: la novedad escrita en Entrada es descanso; Entrad
         filaOperacion({ 'Cédulaplataforma': '1000000005', Entrada: 'turno raro' })
     ]);
     assert.deepEqual(registros.map((r) => [r.cedula, r.esDescanso, r.notas]), [
-        ['1000000001', true, 'INC'], ['1000000002', true, 'VACACIONES'], ['1000000003', true, 'Libre']
+        ['1000000001', true, 'INC'], ['1000000002', true, 'VACACIONES'], ['1000000003', true, 'Descanso']
     ]);
     assert.deepEqual(errores.map((e) => e.fila), [5, 6]);
     assert.match(errores[0].motivo, /entrada/i);

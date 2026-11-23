@@ -96,7 +96,7 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
     const [filas] = await conn.query(
         `SELECT DISTINCT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo,
                 cam.nombre AS campania, c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo,
-                moda.nombre AS modalidad_contrato
+                moda.nombre AS modalidad_contrato, c.fecha_ingreso
          FROM users_company uc
          JOIN contrato c ON c.users_company_id = uc.id
          JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
