@@ -102,4 +102,20 @@ async function findNumerosExistentes(numeros, conn = db) {
     return filas.map((f) => f.numero);
 }
 
-module.exports = { findPorNumeroIdentificacion, findPptPorNumero, findNumerosExistentes, findCampaniasConEmpleados, findActivosPorCampania, findActivo };
+// Cédulas cuyo último contrato no está activo o ya tiene retiro registrado (malla, §75.2).
+async function findNumerosRetirados(numeros, conn = db) {
+    if (numeros.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT DISTINCT TRIM(uc.numero_identificacion) AS numero
+           FROM users_company uc
+           JOIN contrato c ON c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2 WHERE c2.users_company_id = uc.id)
+           LEFT JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+          WHERE TRIM(uc.numero_identificacion) IN (?)
+            AND (ec.nombre IS NULL OR ec.nombre NOT IN ('activo', 'periodo_prueba')
+                 OR EXISTS (SELECT 1 FROM retiro r WHERE r.contrato_idcontrato = c.idcontrato))`,
+        [numeros]
+    );
+    return filas.map((f) => f.numero);
+}
+
+module.exports = { findNumerosRetirados, findPorNumeroIdentificacion, findPptPorNumero, findNumerosExistentes, findCampaniasConEmpleados, findActivosPorCampania, findActivo };

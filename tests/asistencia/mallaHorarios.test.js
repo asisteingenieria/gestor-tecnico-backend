@@ -139,6 +139,24 @@ test('planificar: equipo directo de hoy en adelante; pasados, ajenos e inexisten
     assert.equal(resumen.personas, 1);
 });
 
+test('planificar: retirados y días antes del ingreso se omiten con su motivo (§75.2)', () => {
+    const { registros } = leerMalla([
+        fila({ Fecha: SERIE_10_NOV }),                    // antes del ingreso (11-nov)
+        fila({ Fecha: SERIE_10_NOV + 1 }),                // el día del ingreso: nuevo
+        fila({ Cedula: '2000000000' }),                   // retirado
+        fila({ Cedula: '3000000000' })                    // en RRHH, de otro jefe
+    ]);
+    const equipo = new Map([['1000000001', { users_company_id: 7, nombre_propio: 'Uno', fecha_ingreso: new Date('2026-11-11T00:00:00Z') }]]);
+    const { filas, resumen } = planificar({
+        registros, hoy: '2026-11-03', equipo, cedulasRrhh: new Set(['2000000000', '3000000000']),
+        cedulasRetiradas: new Set(['2000000000']), existentes: new Map()
+    });
+    assert.deepEqual(filas.map((f) => f.estado), ['antes_ingreso', 'nuevo', 'retirado', 'no_a_cargo']);
+    assert.equal(resumen.a_aplicar, 1);
+    assert.equal(resumen.retirado, 1);
+    assert.equal(resumen.antes_ingreso, 1);
+});
+
 test('planificar: el día de hoy sí se aplica', () => {
     const { registros } = leerMalla([fila()]);
     const equipo = new Map([['1000000001', { users_company_id: 7 }]]);

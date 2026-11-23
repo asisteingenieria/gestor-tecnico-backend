@@ -6,6 +6,8 @@
  * Entrada, Salida, Almuerzo, Novedad y Modelo Trabajo; Cargo y Centro de costo son informativas. Si la persona ya
  * tiene horario ese día se precarga, para que el jefe solo cambie lo que haga falta. Modelo Trabajo se precarga con
  * la modalidad del día o, si no tiene, con la del contrato (Presencial / Trabajo en casa); híbrido queda vacío.
+ * El equipo llega ya filtrado a contratos activos y sin retiro (equipoRepository.listaEmpleadosACargo); los días antes
+ * de la fecha de ingreso no se incluyen (§75.2).
  */
 
 const { NOVEDADES_DESCANSO } = require('./mallaHorarios');
@@ -53,7 +55,9 @@ function filasPlantilla({ equipo, fechas, existentes = new Map() }) {
     const filas = [];
     for (const e of personas) {
         const modeloContrato = MODELOS[modalidadDeContrato(e.modalidad_contrato)] ?? '';
+        const ingreso = e.fecha_ingreso ? claveFecha(e.fecha_ingreso) : null;
         for (const fecha of fechas) {
+            if (ingreso && fecha < ingreso) continue;
             const h = existentes.get(`${e.users_company_id}|${fecha}`);
             const fila = {
                 Cedula: String(e.numero_identificacion).trim(),

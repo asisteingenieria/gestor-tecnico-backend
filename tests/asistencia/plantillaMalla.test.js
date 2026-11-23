@@ -40,6 +40,12 @@ test('precarga el horario que ya tiene la persona, con su modalidad del día, y 
     assert.deepEqual([martes.Entrada, martes.Novedad, martes['Modelo Trabajo']], ['', 'VACACIONES', '']);
 });
 
+test('sin días antes de la fecha de ingreso (§75.2)', () => {
+    const nuevo = { users_company_id: 9, numero_identificacion: '9000000009', nombre_propio: 'Nuevo', fecha_ingreso: new Date('2026-11-25T00:00:00Z') };
+    const filas = filasPlantilla({ equipo: [nuevo], fechas: ['2026-11-24', '2026-11-25', '2026-11-26'] });
+    assert.deepEqual(filas.map((f) => f.Fecha), ['2026-11-25', '2026-11-26']);
+});
+
 test('novedad de un descanso a partir de sus notas', () => {
     assert.equal(novedadDeDescanso('Malla: INC'), 'INC');
     assert.equal(novedadDeDescanso('Libre'), 'DESCANSO');

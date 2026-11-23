@@ -4011,3 +4011,21 @@ Pedido: "para el descanso agregar un distintivo o novedad que diga descanso".
 - Vista previa de la malla: un descanso con nota "Descanso" o "Libre" se muestra solo como "Descanso".
 - **Desplegar antes de subir una malla con DESCANSO:** el código anterior no conoce esa novedad y marcaría la fila con
   error ("Hora de entrada vacía").
+
+### 75.2 Solo activos de su equipo, retirados con su motivo y nada antes del ingreso (2026-11-23)
+
+Pedido: "solo se le cargan horarios a las personas activas; siempre que se genere la plantilla de cada jefe debe
+consultar si está activo el empleado y si corresponde a su equipo".
+
+- **Qué pasó con la plantilla de Kevin Buitrago:** se descargó a las 11:02 y RRHH registró a las 11:03-11:05 el retiro
+  (al 20-nov) de Sharon Otálvaro, Ana María Rodríguez y Jaider Apolinar. Al generarla estaban activos, por eso salieron.
+  La plantilla es una foto del momento en que se descarga.
+- **Al generar la plantilla** (ya era así desde §75): `listaEmpleadosACargo` trae solo el equipo directo (gestor = el
+  jefe), con contrato `activo`/`periodo_prueba`, el último contrato y sin retiro registrado. Desde aquí, además, no
+  incluye los días anteriores a la fecha de ingreso.
+- **Al subir la malla** se vuelve a consultar todo en ese momento (vista previa y aplicar). Lo nuevo:
+  - Un retirado (último contrato no activo o con retiro) sale como **"Retirado en RRHH"** (`retirado`), no como "No está
+    a tu cargo" (`empleadoRepository.findNumerosRetirados`).
+  - Un día anterior a la fecha de ingreso sale como **"Días antes de su ingreso"** (`antes_ingreso`) y no se carga.
+  - Ninguno de los dos se aplica; los dos aparecen en la pestaña Omitidos.
+- Pruebas: `planificar` con retirado y antes de ingreso, y la plantilla sin días antes del ingreso (447 tests).

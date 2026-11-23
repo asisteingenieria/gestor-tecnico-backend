@@ -17,7 +17,9 @@
  *   - Una salida anterior o igual a la entrada (turno que cruza la medianoche) no se soporta: la fila
  *     se rechaza para que el jefe la corrija, en vez de adivinar.
  *   - Solo se aplica de HOY en adelante; los días pasados se informan y se omiten.
- *   - Solo se aplica al equipo directo de quien sube el archivo; el resto se informa y se omite.
+ *   - Solo se aplica al equipo directo de quien sube el archivo, con contrato activo y sin retiro; el resto se
+ *     informa y se omite. Un retirado sale como "retirado" (§75.2), no como "no está a tu cargo".
+ *   - Nunca antes de la fecha de ingreso del contrato (§75.2): esos días salen como "antes_ingreso".
  *   - Reemplaza el horario que ya tuviera la persona ese día.
  *   - Una fila sin Entrada, sin Salida y sin Novedad no es error: es un día que el jefe no diligenció en la
  *     plantilla (§75, una fila por persona y día). Se omite y se cuenta en `sinDiligenciar`.
@@ -218,6 +220,9 @@ function leerMalla(filas) {
     return { faltantes: [], registros: unicos, errores, sinDiligenciar, truncado: filas.length > MAX_FILAS };
 }
 
+// Fecha de la BD (Date en UTC o texto) → 'YYYY-MM-DD'.
+const fechaIso = (f) => (!f ? null : f instanceof Date ? f.toISOString().slice(0, 10) : String(f).slice(0, 10));
+
 const igualHora = (a, b) => String(a ?? '').slice(0, 5) === String(b ?? '').slice(0, 5);
 
 /** ¿El horario que ya tiene la persona ese día es el mismo que trae la malla? */
@@ -264,17 +269,23 @@ function turnoNuevo(r) {
  * @param {string} hoy           fecha laboral de hoy 'YYYY-MM-DD'
  * @param {Map}    equipo        cédula → { users_company_id, nombre_propio, centro_costo_id } (equipo directo)
  * @param {Set}    cedulasRrhh   cédulas que existen en RRHH (para distinguir "no está a tu cargo" de "no existe")
+ * @param {Set}    cedulasRetiradas  cédulas cuyo último contrato está retirado o inactivo (§75.2)
  * @param {Map}    existentes    `${users_company_id}|${fecha}` → horario_asignado
  * @param {Array}  plantillas    del jefe
  * @returns {{ filas: Array, resumen: Object }} cada fila con `estado`: nuevo | reemplaza | igual |
- *          pasado | no_a_cargo | no_encontrado
+ *          pasado | antes_ingreso | retirado | no_a_cargo | no_encontrado
  */
-function planificar({ registros, hoy, equipo, cedulasRrhh, existentes, plantillas = [] }) {
+function planificar({ registros, hoy, equipo, cedulasRrhh, cedulasRetiradas = new Set(), existentes, plantillas = [] }) {
     const filas = registros.map((r) => {
         const empleado = equipo.get(r.cedula);
         const comun = { ...r, users_company_id: empleado?.users_company_id ?? null, nombre_rrhh: empleado?.nombre_propio ?? null };
         if (r.fecha < hoy) return { ...comun, estado: 'pasado' };
-        if (!empleado) return { ...comun, estado: cedulasRrhh.has(r.cedula) ? 'no_a_cargo' : 'no_encontrado' };
+        if (!empleado) {
+            const estado = cedulasRetiradas.has(r.cedula) ? 'retirado' : cedulasRrhh.has(r.cedula) ? 'no_a_cargo' : 'no_encontrado';
+            return { ...comun, estado };
+        }
+        const ingreso = fechaIso(empleado.fecha_ingreso);
+        if (ingreso && r.fecha < ingreso) return { ...comun, estado: 'antes_ingreso' };
 
         const existente = existentes.get(`${empleado.users_company_id}|${r.fecha}`) ?? null;
         const plantilla = plantillaPara(r, empleado.centro_costo_id ?? null, plantillas);
@@ -291,7 +302,7 @@ function planificar({ registros, hoy, equipo, cedulasRrhh, existentes, plantilla
         };
     });
 
-    const resumen = { nuevo: 0, reemplaza: 0, igual: 0, pasado: 0, no_a_cargo: 0, no_encontrado: 0 };
+    const resumen = { nuevo: 0, reemplaza: 0, igual: 0, pasado: 0, antes_ingreso: 0, retirado: 0, no_a_cargo: 0, no_encontrado: 0 };
     for (const f of filas) resumen[f.estado]++;
     resumen.a_aplicar = resumen.nuevo + resumen.reemplaza;
     // Plantillas que se crearán: solo las de turnos que de verdad se van a aplicar.
