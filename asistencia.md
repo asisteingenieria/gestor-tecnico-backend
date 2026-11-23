@@ -3965,3 +3965,35 @@ Extiende §68 a la pantalla de Horarios (`/operaciones/horarios`). Sin migració
 - Probado en local con su ficha (49), semana 26-oct a 1-nov: su equipo 15 horarios, una campaña 355, todas 1.145; un
   jefe normal con `alcance=todas` recibe 403.
 
+## 75. Plantilla de cargue de la malla con el equipo del jefe (2026-11-23)
+
+Pedido: cuando los jefes cargan la malla de horarios en Excel (§55), que puedan descargar una plantilla con los campos
+del cargue y los datos de su equipo (documento, nombre, cargo y centro de costo), para que solo pongan los horarios,
+con una casilla explícita de Presencial o Trabajo en casa.
+
+- **Dónde:** Horarios → Cargar malla (`CargarMallaModal.jsx`). Paso 1 "Descarga la plantilla de tu equipo", con Desde y
+  Hasta (por defecto hoy y los 6 días siguientes). Paso 2: subir la malla como siempre.
+- **API:** `GET /api/asistencia/horarios/malla/plantilla?desde=&hasta=` con `canDirigirEquipo`. Devuelve el .xlsx
+  (`plantilla_malla_<desde>_a_<hasta>.xlsx`) y `X-Total-Personas`. El rango empieza hoy o después, en orden, hasta 62
+  días (`ReglaAsistenciaError`); sin personal a cargo responde 422.
+- **Quién sale:** el equipo directo (`equipoRepository.listaEmpleadosACargo`, el mismo al que se aplica la malla), con la
+  modalidad del contrato (la consulta ahora trae `modalidad_contrato`).
+- **Hoja Malla** (primera, la que lee la carga): Cedula, Nombre, Cargo, Centro de costo, Fecha, Entrada, Salida,
+  Almuerzo, Novedad y Modelo Trabajo. Una fila por persona y día, ordenada por nombre. La fecha es fecha real (§60).
+  - Si la persona ya tiene horario ese día se precarga (horas, almuerzo como duración y la modalidad del día). Un
+    descanso trae su novedad en Novedad (`novedadDeDescanso`, LIBRE si las notas no dicen otra).
+  - Modelo Trabajo viene con la modalidad del día o la del contrato: "Presencial" o "Trabajo en casa"; híbrido queda
+    vacío para que lo diga el jefe.
+  - **Listas desplegables** en Novedad (LIBRE, INC, VACACIONES, RETIRO, SUSPENSION, LNR, LR) y en Modelo Trabajo
+    (Presencial, Trabajo en casa). SheetJS CE no escribe validaciones: `utils/excelListas.js` las agrega al XML de la
+    hoja dentro del zip (`XLSX.CFB`), en el orden del esquema (antes de `ignoredErrors`).
+- **Hoja Instrucciones:** cómo llenar horas, almuerzo, descansos y modalidad.
+- **Cambio en la lectura de la malla:** una fila sin Entrada, sin Salida y sin Novedad ya no es error. Es un día que el
+  jefe no llenó: se omite y se cuenta en `sinDiligenciar` (en la vista previa, `resumen.sin_diligenciar`). Una fila con
+  solo una de las horas sigue siendo error.
+- Lógica pura en `domain/asistencia/plantillaMalla.js`. Pruebas en `tests/asistencia/plantillaMalla.test.js`, incluida
+  la vuelta completa: generar la plantilla, llenarla y leerla con `leerMalla` (445 tests).
+- Probado en local con un jefe de 152 personas (1.064 filas, 125 KB): la plantilla vacía da 0 cambios y 1.064 sin
+  diligenciar. La abrí en Excel (sin reparación, listas activas), llené un turno de 8:00 a 17:00 con 30 min y "Trabajo
+  en casa" y un LIBRE, la guardé desde Excel y la vista previa dio 2 nuevos: el turno virtual y el descanso.
+- Sin migración.

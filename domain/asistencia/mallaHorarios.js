@@ -19,6 +19,8 @@
  *   - Solo se aplica de HOY en adelante; los días pasados se informan y se omiten.
  *   - Solo se aplica al equipo directo de quien sube el archivo; el resto se informa y se omite.
  *   - Reemplaza el horario que ya tuviera la persona ese día.
+ *   - Una fila sin Entrada, sin Salida y sin Novedad no es error: es un día que el jefe no diligenció en la
+ *     plantilla (§75, una fila por persona y día). Se omite y se cuenta en `sinDiligenciar`.
  *   - "Modelo Trabajo" (opcional) da la modalidad del día para AsisLock (§58): Presencial → presencial;
  *     Teletrabajo, Remoto, Virtual o Trabajo en casa → virtual. Vacío, Híbrido o desconocido = sin dato
  *     (se conserva lo que tuviera el día y, si nada, AsisLock recibe la del contrato).
@@ -138,6 +140,8 @@ function leerMalla(filas) {
 
     const registros = [];
     const errores = [];
+    let sinDiligenciar = 0;
+    const vacia = (v) => v === null || v === undefined || String(v).trim() === '';
     filas.slice(0, MAX_FILAS).forEach((f, i) => {
         const fila = i + 2;
         const crudoCedula = f[mapa.cedula];
@@ -152,6 +156,11 @@ function leerMalla(filas) {
         if (!fecha) return error('Fecha vacía o inválida');
 
         const crudoEntrada = f[mapa.entrada];
+        // Día de la plantilla sin diligenciar (§75): no se toca el horario de ese día.
+        if (vacia(crudoEntrada) && vacia(f[mapa.salida]) && (!mapa.novedad || vacia(f[mapa.novedad]))) {
+            sinDiligenciar++;
+            return;
+        }
         const textoEntrada = typeof crudoEntrada === 'string' ? crudoEntrada.trim().toUpperCase() : '';
         const novedad = (mapa.novedad ? String(f[mapa.novedad] ?? '').trim().toUpperCase() || null : null)
             ?? (NOVEDADES_DESCANSO.includes(textoEntrada) ? textoEntrada : null);
@@ -204,7 +213,7 @@ function leerMalla(filas) {
         }
     }
     errores.sort((a, b) => a.fila - b.fila);
-    return { faltantes: [], registros: unicos, errores, truncado: filas.length > MAX_FILAS };
+    return { faltantes: [], registros: unicos, errores, sinDiligenciar, truncado: filas.length > MAX_FILAS };
 }
 
 const igualHora = (a, b) => String(a ?? '').slice(0, 5) === String(b ?? '').slice(0, 5);

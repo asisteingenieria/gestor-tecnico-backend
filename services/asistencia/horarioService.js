@@ -6,7 +6,9 @@ const empleadoRepo = require('../../repositories/asistencia/empleadoRepository')
 const equipoService = require('./equipoService');
 const notificacionService = require('./notificacionService');
 const mallaHorarios = require('../../domain/asistencia/mallaHorarios');
-const { fechaLaboral } = require('../../utils/fechaBogota');
+const plantillaMalla = require('../../domain/asistencia/plantillaMalla');
+const { agregarListas } = require('../../utils/excelListas');
+const { fechaLaboral, sumarDias } = require('../../utils/fechaBogota');
 const { alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const XLSX = require('xlsx');
 const { NoAutorizadoError, NoEncontradoError, ReglaAsistenciaError, ValidacionError } = require('../../errors/AppError');
@@ -248,7 +250,7 @@ async function previsualizarMalla({ directorUsersCompanyId, buffer }) {
         success: true,
         hoja: lectura.hoja,
         hoy,
-        resumen: { ...plan.resumen, errores: lectura.errores.length },
+        resumen: { ...plan.resumen, errores: lectura.errores.length, sin_diligenciar: lectura.sinDiligenciar ?? 0 },
         horarios: delEquipo.map((f) => ({
             fila: f.fila,
             users_company_id: f.users_company_id,
@@ -272,6 +274,92 @@ async function previsualizarMalla({ directorUsersCompanyId, buffer }) {
         omitidos: omitidosPorPersona(plan.filas),
         errores: lectura.errores.slice(0, MAX_ERRORES_RESPUESTA),
         truncado: Boolean(lectura.truncado)
+    };
+}
+
+// --- Plantilla de cargue de la malla (§75) -------------------------------------------------------
+
+const INSTRUCCIONES = (desde, hasta) => [
+    ['Plantilla de la malla de horarios de tu equipo'],
+    [`Del ${desde.split('-').reverse().join('/')} al ${hasta.split('-').reverse().join('/')}. Una fila por persona y día.`],
+    [],
+    ['Cómo llenarla'],
+    ['1. Entrada y Salida en hora de 24 horas: 08:00, 17:00. Almuerzo es la duración: 00:30 = 30 minutos, 01:00 = una hora.'],
+    ['2. Modelo Trabajo: elige de la lista Presencial o Trabajo en casa. Viene precargado con el del día o el del contrato; cámbialo si ese día es distinto.'],
+    ['3. Descanso: deja Entrada y Salida vacías y elige en Novedad LIBRE (o INC, VACACIONES, RETIRO, SUSPENSION, LNR, LR).'],
+    ['4. Si la persona ya tenía horario ese día, viene precargado: cámbialo solo si hace falta.'],
+    ['5. Las filas que dejes sin Entrada, Salida ni Novedad no se cargan: ese día queda como estaba.'],
+    ['6. No cambies Cedula ni Fecha. Nombre, Cargo y Centro de costo son informativos.'],
+    ['7. Los turnos que cruzan la medianoche (salida antes de la entrada) no se pueden cargar.'],
+    [],
+    ['Cuando termines, súbela en Horarios → Cargar malla. Primero verás una vista previa y después la aplicas.']
+];
+
+/** Libro de la plantilla: hoja Malla (primera, la que se lee al subirla) e Instrucciones. */
+function libroPlantillaMalla(filas, desde, hasta) {
+    const { ENCABEZADOS } = plantillaMalla;
+    const ws = XLSX.utils.json_to_sheet(filas, { header: ENCABEZADOS });
+    // Fecha real (número de serie con formato), para que Excel la filtre por año/mes/día.
+    const colFecha = ENCABEZADOS.indexOf('Fecha');
+    filas.forEach((f, i) => {
+        const celda = ws[XLSX.utils.encode_cell({ r: i + 1, c: colFecha })];
+        const [a, m, d] = f.Fecha.split('-').map(Number);
+        Object.assign(celda, { t: 'n', v: Date.UTC(a, m - 1, d) / 86400000 + 25569, z: 'dd/mm/yyyy' });
+    });
+    ws['!cols'] = [14, 34, 28, 26, 12, 10, 10, 10, 14, 18].map((wch) => ({ wch }));
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(filas.length, 1), c: ENCABEZADOS.length - 1 } }) };
+
+    const instrucciones = XLSX.utils.aoa_to_sheet(INSTRUCCIONES(desde, hasta));
+    instrucciones['!cols'] = [{ wch: 130 }];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, ws, 'Malla');
+    XLSX.utils.book_append_sheet(libro, instrucciones, 'Instrucciones');
+    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx', compression: true });
+
+    const ultima = Math.max(filas.length + 1, 2);
+    const col = (nombre) => XLSX.utils.encode_col(ENCABEZADOS.indexOf(nombre));
+    return agregarListas(buffer, 1, [
+        {
+            rango: `${col('Novedad')}2:${col('Novedad')}${ultima}`,
+            opciones: mallaHorarios.NOVEDADES_DESCANSO,
+            titulo: 'Novedad',
+            mensaje: 'Solo para días de descanso: deja Entrada y Salida vacías.'
+        },
+        {
+            rango: `${col('Modelo Trabajo')}2:${col('Modelo Trabajo')}${ultima}`,
+            opciones: Object.values(plantillaMalla.MODELOS),
+            titulo: 'Modelo de trabajo',
+            mensaje: 'Presencial o Trabajo en casa ese día.'
+        }
+    ]);
+}
+
+/**
+ * Plantilla de cargue de la malla con el equipo directo del jefe (§75): cédula, nombre, cargo y centro de costo de
+ * cada persona, una fila por día del rango (por defecto, hoy y los 6 días siguientes), con lo que ya tenga asignado.
+ */
+async function plantillaMallaExcel({ directorUsersCompanyId, desde, hasta }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    const hoy = fechaLaboral(new Date());
+    const inicio = desde || hoy;
+    const fin = hasta || sumarDias(inicio, 6);
+    const fechas = [];
+    for (let f = inicio; f <= fin && fechas.length <= plantillaMalla.MAX_DIAS; f = sumarDias(f, 1)) fechas.push(f);
+    const error = plantillaMalla.errorDeRango(inicio, fin, hoy, fechas.length);
+    if (error) throw new ReglaAsistenciaError(error);
+
+    const equipo = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
+    if (equipo.length === 0) throw new ReglaAsistenciaError('No tienes personal a cargo para armar la plantilla');
+    const existentes = new Map();
+    for (const h of await horarioAsignadoRepo.findRangoPorEmpleados(equipo.map((e) => e.users_company_id), inicio, fin)) {
+        existentes.set(`${h.users_company_id}|${claveFecha(h.fecha)}`, h);
+    }
+    const filas = plantillaMalla.filasPlantilla({ equipo, fechas, existentes });
+    return {
+        nombre: `plantilla_malla_${inicio}_a_${fin}.xlsx`,
+        buffer: libroPlantillaMalla(filas, inicio, fin),
+        personas: new Set(filas.map((f) => f.Cedula)).size
     };
 }
 
@@ -340,6 +428,7 @@ async function aplicarMalla({ directorUsersCompanyId, buffer, creadoPor }) {
 module.exports = {
     previsualizarMalla,
     aplicarMalla,
+    plantillaMallaExcel,
     listarPlantillas,
     crearPlantilla,
     actualizarPlantilla,
