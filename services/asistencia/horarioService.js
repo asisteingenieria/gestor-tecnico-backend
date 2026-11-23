@@ -475,7 +475,8 @@ async function cargarMallaRetroactiva({ directorUsersCompanyId, buffer, desde, h
             const horario = await horarioAsignadoRepo.findByEmpleadoYFecha(f.users_company_id, f.fecha, conn);
             if (antes && ['en_curso', 'en_pausa'].includes(antes.estado)) {
                 await cierreService.normalizarJornada(f.users_company_id, f.fecha, ahora, conn);
-            } else if (antes) {
+            } else if (antes && antes.estado !== 'ausente') {
+                // Una ausencia no tiene eventos: recalcularla la dejaría en "pendiente"; se queda como está (§77).
                 const { estadoCalculado, eventos } = await calcularEstadoConDatos(f.users_company_id, f.fecha, antes.idjornada, ahora, conn);
                 await jornadaRepo.actualizarTotales(antes.idjornada, construirTotales(estadoCalculado, eventos), conn);
             } else {

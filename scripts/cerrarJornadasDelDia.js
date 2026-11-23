@@ -5,6 +5,10 @@
  * hora Bogotá (04:30 UTC). No reimplementa nada: delega todo en cierreService.
  *
  *   node scripts/cerrarJornadasDelDia.js
+ *
+ * Un día que ya pasó (p. ej. después de cargar tarde su malla, asistencia.md §77): crea las ausencias de quien tenía
+ * turno y no se logueó, y cierra a la hora de salida programada las que quedaron abiertas. Solo días anteriores a hoy.
+ *   node scripts/cerrarJornadasDelDia.js --fecha=2026-11-21
  */
 const db = require('../config/db');
 const cierreService = require('../services/asistencia/cierreService');
@@ -24,7 +28,12 @@ async function empleadosActivos() {
 (async () => {
     try {
         const ahora = new Date();
-        const fecha = fechaLaboral(ahora);
+        const hoy = fechaLaboral(ahora);
+        const argFecha = process.argv.find((a) => a.startsWith('--fecha='));
+        const fecha = argFecha ? argFecha.slice('--fecha='.length) : hoy;
+        if (argFecha && !(/^\d{4}-\d{2}-\d{2}$/.test(fecha) && fecha < hoy)) {
+            throw new Error(`--fecha debe ser un día anterior a hoy (${hoy}) con formato AAAA-MM-DD`);
+        }
         const empleados = await empleadosActivos();
 
         console.log(`Cerrando jornadas de ${fecha} para ${empleados.length} empleados activos...`);
