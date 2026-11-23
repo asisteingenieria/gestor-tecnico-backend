@@ -20,10 +20,10 @@ const hhmm = (hora) => String(hora ?? '').slice(0, 5);
 const duracion = (minutos) => `${dos(Math.floor((Number(minutos) || 0) / 60))}:${dos((Number(minutos) || 0) % 60)}`;
 const claveFecha = (fecha) => (fecha instanceof Date ? fecha.toISOString().slice(0, 10) : String(fecha).slice(0, 10));
 
-/** Novedad de un día de descanso a partir de sus notas ('Malla: INC' → INC); si no dice, LIBRE. */
+/** Novedad de un día de descanso a partir de sus notas ('Malla: INC' → INC); si no dice otra, DESCANSO (§75.1). */
 function novedadDeDescanso(notas) {
     const texto = String(notas ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
-    return NOVEDADES_DESCANSO.find((n) => n !== 'LIBRE' && new RegExp(`\\b${n}\\b`).test(texto)) ?? 'LIBRE';
+    return NOVEDADES_DESCANSO.find((n) => n !== 'DESCANSO' && n !== 'LIBRE' && new RegExp(`\\b${n}\\b`).test(texto)) ?? 'DESCANSO';
 }
 
 /**

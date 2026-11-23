@@ -7,7 +7,7 @@
  * Reglas (decididas con el usuario el 2026-11-03, y las de la carga de §49):
  *   - Las columnas se buscan por nombre, sin importar mayúsculas, tildes ni el orden. Para la hora se
  *     prefieren las columnas *_Final (el turno ya ajustado) y, si no están, Entrada/Salida/Tiempo_Almuerzo.
- *   - Entrada 00:00 = día libre (descanso), igual que la novedad Libre.
+ *   - Entrada 00:00 = día de descanso, igual que la novedad DESCANSO (§75.1; LIBRE se sigue aceptando).
  *   - INC, VACACIONES, RETIRO, SUSPENSION, LNR y LR = descanso con la novedad en las notas. La novedad viene
  *     en la columna Novedad (Mallas1) o escrita en la celda de Entrada (plantilla 01_Mallas_Operacion, que
  *     no tiene columna Novedad).
@@ -28,7 +28,9 @@
 
 const { normalizarModalidad } = require('./consultaAsislock');
 
-const NOVEDADES_DESCANSO = ['LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
+const NOVEDADES_DESCANSO = ['DESCANSO', 'LIBRE', 'INC', 'VACACIONES', 'RETIRO', 'SUSPENSION', 'LNR', 'LR'];
+// Nota que queda en el horario del día: DESCANSO → "Descanso", LIBRE → "Libre", las demás tal cual (INC, VACACIONES…).
+const NOTA_DESCANSO = { DESCANSO: 'Descanso', LIBRE: 'Libre' };
 const MAX_FILAS = 20000;
 
 const normalizarTexto = (v) => String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -178,7 +180,7 @@ function leerMalla(filas) {
                 horaEntrada: '00:00:00',
                 horaSalida: '00:00:00',
                 minutosAlmuerzo: 0,
-                notas: esNovedadDescanso ? (novedad === 'LIBRE' ? 'Libre' : novedad) : 'Libre'
+                notas: esNovedadDescanso ? (NOTA_DESCANSO[novedad] ?? novedad) : 'Descanso'
             });
             return;
         }

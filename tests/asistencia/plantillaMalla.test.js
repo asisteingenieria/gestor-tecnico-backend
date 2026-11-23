@@ -42,8 +42,9 @@ test('precarga el horario que ya tiene la persona, con su modalidad del día, y 
 
 test('novedad de un descanso a partir de sus notas', () => {
     assert.equal(novedadDeDescanso('Malla: INC'), 'INC');
-    assert.equal(novedadDeDescanso('Libre'), 'LIBRE');
-    assert.equal(novedadDeDescanso(null), 'LIBRE');
+    assert.equal(novedadDeDescanso('Libre'), 'DESCANSO');
+    assert.equal(novedadDeDescanso('Malla: Descanso'), 'DESCANSO');
+    assert.equal(novedadDeDescanso(null), 'DESCANSO');
     assert.equal(novedadDeDescanso('Suspensión'), 'SUSPENSION');
 });
 
@@ -58,7 +59,7 @@ test('la plantilla se vuelve a leer con la malla: lo diligenciado se carga y lo 
     const filas = filasPlantilla({ equipo: equipo.slice(0, 2), fechas });
     // El jefe llena tres días (uno de descanso) y deja uno vacío; Excel guarda las horas como fracción de día.
     filas[0].Entrada = 8 / 24; filas[0].Salida = 17 / 24; filas[0].Almuerzo = 0.5 / 24;
-    filas[1].Novedad = 'LIBRE';
+    filas[1].Novedad = 'DESCANSO';
     filas[2].Entrada = '09:00'; filas[2].Salida = '18:00'; filas[2]['Modelo Trabajo'] = 'Trabajo en casa';
     const ws = XLSX.utils.json_to_sheet(filas, { header: ENCABEZADOS });
     const leidas = XLSX.utils.sheet_to_json(ws, { raw: true, defval: null });

@@ -77,10 +77,12 @@ test('entrada 00:00 y las novedades de ausencia son descanso con la novedad en n
         fila({ Cedula: '1000000002', Novedad: 'Libre', Entrada_Final: 0, Salida_Final: 0 }),
         fila({ Cedula: '1000000003', Novedad: 'INC' }),
         fila({ Cedula: '1000000004', Novedad: 'VACACIONES' }),
-        fila({ Cedula: '1000000005', Novedad: 'Turno ' })
+        fila({ Cedula: '1000000005', Novedad: 'Turno ' }),
+        fila({ Cedula: '1000000006', Novedad: 'Descanso' })
     ]);
+    // 00:00 y la novedad DESCANSO quedan como "Descanso" (§75.1); LIBRE se sigue aceptando.
     assert.deepEqual(registros.map((r) => [r.esDescanso, r.notas]), [
-        [true, 'Libre'], [true, 'Libre'], [true, 'INC'], [true, 'VACACIONES'], [false, null]
+        [true, 'Descanso'], [true, 'Libre'], [true, 'INC'], [true, 'VACACIONES'], [false, null], [true, 'Descanso']
     ]);
     assert.equal(registros[2].horaEntrada, '00:00:00');
 });
@@ -171,7 +173,7 @@ test('plantilla de operación: la novedad escrita en Entrada es descanso; Entrad
         filaOperacion({ 'Cédulaplataforma': '1000000005', Entrada: 'turno raro' })
     ]);
     assert.deepEqual(registros.map((r) => [r.cedula, r.esDescanso, r.notas]), [
-        ['1000000001', true, 'INC'], ['1000000002', true, 'VACACIONES'], ['1000000003', true, 'Libre']
+        ['1000000001', true, 'INC'], ['1000000002', true, 'VACACIONES'], ['1000000003', true, 'Descanso']
     ]);
     assert.deepEqual(errores.map((e) => e.fila), [5, 6]);
     assert.match(errores[0].motivo, /entrada/i);

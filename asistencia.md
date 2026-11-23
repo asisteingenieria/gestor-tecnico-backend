@@ -3997,3 +3997,17 @@ con una casilla explícita de Presencial o Trabajo en casa.
   diligenciar. La abrí en Excel (sin reparación, listas activas), llené un turno de 8:00 a 17:00 con 30 min y "Trabajo
   en casa" y un LIBRE, la guardé desde Excel y la vista previa dio 2 nuevos: el turno virtual y el descanso.
 - Sin migración.
+
+### 75.1 Novedad DESCANSO (2026-11-23)
+
+Pedido: "para el descanso agregar un distintivo o novedad que diga descanso".
+
+- `NOVEDADES_DESCANSO` empieza ahora por **DESCANSO** y la lista desplegable de Novedad de la plantilla la ofrece primero.
+  LIBRE se sigue aceptando, para las mallas que ya lo traen.
+- Nota del horario: DESCANSO → "Descanso", LIBRE → "Libre". Entrada 00:00 sin novedad ahora queda "Descanso" (antes
+  "Libre").
+- La plantilla precarga DESCANSO en los descansos que ya existían, incluidos los guardados como "Libre"
+  (`novedadDeDescanso`). INC, VACACIONES y las demás se conservan.
+- Vista previa de la malla: un descanso con nota "Descanso" o "Libre" se muestra solo como "Descanso".
+- **Desplegar antes de subir una malla con DESCANSO:** el código anterior no conoce esa novedad y marcaría la fila con
+  error ("Hora de entrada vacía").
