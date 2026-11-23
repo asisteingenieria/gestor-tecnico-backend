@@ -160,6 +160,11 @@ const novedadesEquipoQuerySchema = {
     }
 };
 
+// Pasivo vacacional del equipo (claude/modulo recursoshumanos.md §58.6): fecha de cálculo, por defecto hoy.
+const pasivoEquipoQuerySchema = {
+    query: { fecha: { tipo: 'fecha' } }
+};
+
 // Retiros del equipo para la Red Maestra (§59): la fecha vacía o null borra la fecha registrada.
 const retirosEquipoQuerySchema = {
     query: { pendientes: { enum: ['true', 'false'] } }
@@ -254,6 +259,7 @@ module.exports = {
     rechazarCambioTurnoSchema,
     periodoQuerySchema,
     novedadesEquipoQuerySchema,
+    pasivoEquipoQuerySchema,
     retirosEquipoQuerySchema,
     retiroRmSchema,
     reporteFinancieraQuerySchema,
