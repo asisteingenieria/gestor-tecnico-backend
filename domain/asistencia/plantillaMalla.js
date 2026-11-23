@@ -2,7 +2,7 @@
  * Plantilla de cargue de la malla de horarios para un jefe (asistencia.md §75). Puro: recibe el equipo directo,
  * los días y los horarios que ya tienen, y devuelve las filas de la plantilla. Sin E/S.
  *
- * Una fila por persona y día, con las columnas que lee la malla (§55, mallaHorarios.js): Cedula, Nombre, Fecha,
+ * Una fila por persona y día (personas del ingreso más reciente al más antiguo, §75.3), con las columnas que lee la malla (§55, mallaHorarios.js): Cedula, Nombre, Fecha,
  * Entrada, Salida, Almuerzo, Novedad y Modelo Trabajo; Cargo y Centro de costo son informativas. Si la persona ya
  * tiene horario ese día se precarga, para que el jefe solo cambie lo que haga falta. Modelo Trabajo se precarga con
  * la modalidad del día o, si no tiene, con la del contrato (Presencial / Trabajo en casa); híbrido queda vacío.
@@ -48,10 +48,15 @@ function errorDeRango(desde, hasta, hoy, dias) {
  * @param {Map}      existentes  `${users_company_id}|${fecha}` → horario_asignado
  * @returns {Array<Object>} una fila por persona y día, con las claves de ENCABEZADOS (Fecha en 'YYYY-MM-DD')
  */
+// Fecha de ingreso 'YYYY-MM-DD' o '' (sin fecha: queda al final del orden descendente).
+const ingresoDe = (e) => (e.fecha_ingreso ? claveFecha(e.fecha_ingreso) : '');
+
 function filasPlantilla({ equipo, fechas, existentes = new Map() }) {
     const personas = equipo
         .filter((e) => e.numero_identificacion)
-        .sort((a, b) => String(a.nombre_propio ?? '').localeCompare(String(b.nombre_propio ?? ''), 'es'));
+        // Del ingreso más reciente al más antiguo (§75.3); sin fecha de ingreso al final; empate por nombre.
+        .sort((a, b) => ingresoDe(b).localeCompare(ingresoDe(a))
+            || String(a.nombre_propio ?? '').localeCompare(String(b.nombre_propio ?? ''), 'es'));
     const filas = [];
     for (const e of personas) {
         const modeloContrato = MODELOS[modalidadDeContrato(e.modalidad_contrato)] ?? '';

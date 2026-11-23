@@ -40,6 +40,18 @@ test('precarga el horario que ya tiene la persona, con su modalidad del día, y 
     assert.deepEqual([martes.Entrada, martes.Novedad, martes['Modelo Trabajo']], ['', 'VACACIONES', '']);
 });
 
+test('personas del ingreso más reciente al más antiguo; sin fecha al final (§75.3)', () => {
+    const conIngreso = [
+        { users_company_id: 1, numero_identificacion: '1', nombre_propio: 'Antigua', fecha_ingreso: new Date('2023-11-01T00:00:00Z') },
+        { users_company_id: 2, numero_identificacion: '2', nombre_propio: 'Sin fecha' },
+        { users_company_id: 3, numero_identificacion: '3', nombre_propio: 'Reciente', fecha_ingreso: '2026-11-04' },
+        { users_company_id: 4, numero_identificacion: '4', nombre_propio: 'Media', fecha_ingreso: new Date('2026-05-05T00:00:00Z') }
+    ];
+    const filas = filasPlantilla({ equipo: conIngreso, fechas: ['2026-11-24', '2026-11-25'] });
+    assert.deepEqual(filas.map((f) => f.Nombre), ['Reciente', 'Reciente', 'Media', 'Media', 'Antigua', 'Antigua', 'Sin fecha', 'Sin fecha']);
+    assert.deepEqual(filas.slice(0, 2).map((f) => f.Fecha), ['2026-11-24', '2026-11-25']);
+});
+
 test('sin días antes de la fecha de ingreso (§75.2)', () => {
     const nuevo = { users_company_id: 9, numero_identificacion: '9000000009', nombre_propio: 'Nuevo', fecha_ingreso: new Date('2026-11-25T00:00:00Z') };
     const filas = filasPlantilla({ equipo: [nuevo], fechas: ['2026-11-24', '2026-11-25', '2026-11-26'] });

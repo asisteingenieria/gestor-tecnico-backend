@@ -4029,3 +4029,13 @@ consultar si está activo el empleado y si corresponde a su equipo".
   - Un día anterior a la fecha de ingreso sale como **"Días antes de su ingreso"** (`antes_ingreso`) y no se carga.
   - Ninguno de los dos se aplica; los dos aparecen en la pestaña Omitidos.
 - Pruebas: `planificar` con retirado y antes de ingreso, y la plantilla sin días antes del ingreso (447 tests).
+
+### 75.3 Plantilla ordenada del ingreso más reciente al más antiguo (2026-11-23)
+
+Pedido: "en el descargue de la plantilla de los horarios quiero que se listen del más reciente al más antiguo".
+
+- Las personas de la plantilla van por fecha de ingreso, de la más reciente a la más antigua (los recién ingresados
+  arriba), como en el pasivo vacacional (§58.x). Empate por nombre; sin fecha de ingreso, al final. Los días de cada
+  persona siguen en orden cronológico.
+- Solo cambia `filasPlantilla` (`domain/asistencia/plantillaMalla.js`). Probado con el equipo de Kevin en local:
+  del 19-nov-2026 al 08-ago-2023 (448 tests).
