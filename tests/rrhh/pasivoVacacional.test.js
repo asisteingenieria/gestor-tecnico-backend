@@ -179,3 +179,24 @@ test('sin saldo del Excel: con observación solo quien llevaba un año o más al
     // Sin ningún saldo cargado no hay corte: todo el que no tiene saldo queda con observación.
     assert.equal(P.calcular([deMayo], [], '2026-11-20').filas[0].con_observacion, true);
 });
+
+test('equipo de un jefe: el corte general viene de afuera y la respuesta va solo en días (§58.6)', () => {
+    const deMayo = { users_company_id: 4, nombre: 'D', fecha_ingreso: '2026-05-05', salario: 3000000 };
+    const ajustado = {
+        users_company_id: 5, nombre: 'E', fecha_ingreso: '2024-01-10', salario: 3000000, saldo_id: 9,
+        fecha_corte: '2026-11-19', dias_disfrutados_corte: 3, dias_compensados: 0, origen: 'financiera', nota: 'interna'
+    };
+    // Sin saldos del Excel en el equipo, el corte general evita que quien lleva menos de un año salga con observación.
+    const r = P.calcular([deMayo, ajustado], [], '2026-11-20', { corteExcel: '2026-11-19' });
+    const por = Object.fromEntries(r.filas.map((f) => [f.nombre, f]));
+    assert.equal(por.D.con_observacion, false);
+    assert.equal(por.D.ingreso_reciente, true);
+
+    const eq = P.paraEquipo(r);
+    for (const campo of ['salario', 'valor_pasivo', 'valor_total', 'nota_saldo', 'origen_saldo', 'saldo_disfrutados_corte', 'ajustado_en']) {
+        assert.equal(campo in eq.filas[1], false, campo);
+    }
+    for (const campo of ['valor_pasivo', 'valor_total', 'sin_salario', 'ajustados']) assert.equal(campo in eq.totales, false, campo);
+    assert.equal(eq.filas[1].pasivo_dias, r.filas[1].pasivo_dias);
+    assert.equal(eq.totales.pasivo_dias, r.totales.pasivo_dias);
+});

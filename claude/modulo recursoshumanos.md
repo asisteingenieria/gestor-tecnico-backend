@@ -3478,6 +3478,17 @@ Regla, igual en `utils/camposNovedad.js` (backend, con tests) y `src/utils/campo
 El servidor (`prepararNovedad` → `limpiarPorTipo`) quita lo que no aplica aunque llegue. Verificado en el navegador
 (compensadas e incapacidad de tránsito, sin guardar) y por la API. 425 tests OK.
 
+### 58.6 Pasivo vacacional del equipo para jefes, coordinadores y directores (2026-11-23)
+
+Pedido: "el pasivo vacacional lo pueden ver los jefes y directores pero solo la de su equipo".
+
+- **Dónde:** pestaña **Vacaciones** del Equipo (`SelectorVistaEquipo`), en `/operaciones/equipo/vacaciones` (jefes y directores) y `/asistencia/equipo/vacaciones` (coordinadores). Es la misma pantalla `PasivoVacacional.jsx` con `vistaEquipo`.
+- **API:** `GET /api/asistencia/pasivo-vacacional-equipo?fecha=AAAA-MM-DD` (por defecto hoy en Bogotá), con `canVerEquipo`. Va por las cuatro capas de asistencia: `pasivoEquipoController` → `pasivoEquipoService` → `pasivoEquipoRepository`, que reutiliza las consultas de `models/PasivoVacacional.js` con el filtro por ids (no duplica el SQL).
+- **A quién ve:** su árbol de consulta (`equipoRepository.idsDelArbol`, las tres líneas de mando de `asistencia.md` §57); un director ve todo su árbol. No se incluye a sí mismo.
+- **Qué ve:** solo días (trabajados, acumulados, disfrutados, compensados, pasivo, programadas, total). `pasivoVacacional.paraEquipo` quita salario, valores en pesos, la nota y el origen del saldo de financiera. Tampoco ve la marca "con observación", que es de RRHH y financiera. No hay descarga ni ajuste.
+- **Mismo cálculo que RRHH:** `calcular(..., { corteExcel })` recibe la fecha de corte general del Excel (`PasivoVacacional.fechaCorteExcel`), para que la regla de §58.5 no dependa de quién esté en el equipo.
+- Sin migración. Prueba en `tests/rrhh/pasivoVacacional.test.js` (439 tests). Probado contra la BD local: un jefe con 156 personas, otro con 128, un coordinador con 1 y una ficha sin equipo (0).
+
 ## 60. Fechas reales en los Excel descargables (2026-11-20, pedido del usuario, imagen AjusteExcel)
 
 Las fechas salían como texto 'dd/mm/aaaa' y el filtro de Excel las mostraba como una lista plana. Ahora son fechas de

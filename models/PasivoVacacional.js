@@ -6,8 +6,10 @@ class PasivoVacacional {
     /**
      * Empleados vigentes en `fecha`: contrato más reciente con ingreso hasta esa fecha y sin retiro a esa fecha
      * (un retirado después de `fecha` sí cuenta, para poder calcular el cierre de un mes pasado).
+     * `ids` (opcional): solo esas fichas, para el pasivo del equipo de un jefe (§58.6).
      */
-    static async getEmpleados(fecha) {
+    static async getEmpleados(fecha, ids = null) {
+        if (ids && ids.length === 0) return [];
         const [rows] = await db.query(
             `SELECT uc.id AS users_company_id, uc.numero_identificacion,
                     ti.codigo AS tipo_identificacion,
@@ -30,23 +32,34 @@ class PasivoVacacional {
              LEFT JOIN vacaciones_saldo vs ON vs.users_company_id = uc.id
              WHERE c.fecha_ingreso IS NOT NULL AND c.fecha_ingreso <= ?
                AND (esc.nombre IS NULL OR esc.nombre NOT IN ('retirado', 'inactivo') OR r.fecha_retiro > ?)
+               ${ids ? 'AND uc.id IN (?)' : ''}
              ORDER BY c.fecha_ingreso DESC, uc.primer_apellido, uc.segundo_apellido, uc.primer_nombre`,
-            [fecha, fecha]
+            ids ? [fecha, fecha, ids] : [fecha, fecha]
         );
         return rows;
     }
 
-    /** Novedades de tipo Vacaciones de todos los empleados. */
-    static async getNovedadesVacaciones() {
+    /** Novedades de tipo Vacaciones de todos los empleados, o solo de `ids`. */
+    static async getNovedadesVacaciones(ids = null) {
+        if (ids && ids.length === 0) return [];
         const [rows] = await db.query(
             `SELECT c.users_company_id, nr.fecha_inicial, nr.total_dias,
                     nr.modalidad_vacaciones, nr.dias_disfrutados, nr.dias_compensados
              FROM novedad_rrhh nr
              JOIN tipo_novedad tn ON tn.idtipo_novedad = nr.tipo_novedad_idtipo_novedad
              JOIN contrato c ON c.idcontrato = nr.contrato_idcontrato
-             WHERE tn.nombre = 'Vacaciones'`
+             WHERE tn.nombre = 'Vacaciones'${ids ? ' AND c.users_company_id IN (?)' : ''}`,
+            ids ? [ids] : []
         );
         return rows;
+    }
+
+    /** Fecha de corte más reciente de los saldos cargados del Excel (la general, para "con observación"). */
+    static async fechaCorteExcel() {
+        const [[fila]] = await db.query(
+            `SELECT DATE_FORMAT(MAX(fecha_corte), '%Y-%m-%d') AS corte FROM vacaciones_saldo WHERE origen = 'excel'`
+        );
+        return fila ? fila.corte : null;
     }
 }
 

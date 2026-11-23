@@ -22,6 +22,7 @@ const reporteHorasExtraController = require('../controllers/asistencia/reporteHo
 const financieraController = require('../controllers/asistencia/financieraController');
 const cambioTurnoController = require('../controllers/asistencia/cambioTurnoController');
 const novedadEquipoController = require('../controllers/asistencia/novedadEquipoController');
+const pasivoEquipoController = require('../controllers/asistencia/pasivoEquipoController');
 const retiroEquipoController = require('../controllers/asistencia/retiroEquipoController');
 
 const {
@@ -56,6 +57,7 @@ const {
     aprobarCambioTurnoSchema,
     rechazarCambioTurnoSchema,
     novedadesEquipoQuerySchema,
+    pasivoEquipoQuerySchema,
     retirosEquipoQuerySchema,
     retiroRmSchema
 } = require('../validators/asistenciaSchemas');
@@ -99,6 +101,8 @@ router.put('/cambios-turno/:id/rechazar', canDirigirEquipo, validar(rechazarCamb
 router.get('/equipo/permisos', asyncHandler(equipoController.permisos));
 // Historial de novedades de RRHH del equipo (§56).
 router.get('/novedades-equipo', canVerEquipo, validar(novedadesEquipoQuerySchema), asyncHandler(novedadEquipoController.historial));
+// Pasivo vacacional de su gente, solo en días (claude/modulo recursoshumanos.md §58.6).
+router.get('/pasivo-vacacional-equipo', canVerEquipo, validar(pasivoEquipoQuerySchema), asyncHandler(pasivoEquipoController.pasivo));
 // Retiros de Claro del equipo y su fecha de retiro en la Red Maestra (§59). Solo quien gestiona
 // un equipo (jefe como Kevin Buitrago); el coordinador no la ve ni la registra (§61).
 router.get('/retiros-equipo', canDirigirEquipo, validar(retirosEquipoQuerySchema), asyncHandler(retiroEquipoController.listar));

@@ -129,19 +129,23 @@ function agruparPorEmpleado(novedades) {
  * es suficiente. El corte general es la fecha más reciente de los saldos cargados del Excel.
  * Devuelve la fecha límite 'AAAA-MM-DD': ingreso hasta esa fecha → con observación.
  */
-function limiteAntiguedad(empleados) {
-    const cortes = empleados.filter((e) => e.saldo_id && (e.origen || 'excel') === 'excel').map((e) => iso(e.fecha_corte)).filter(Boolean);
-    if (!cortes.length) return null;
+function limiteAntiguedad(empleados, corteExcel = null) {
+    const cortes = corteExcel ? [iso(corteExcel)]
+        : empleados.filter((e) => e.saldo_id && (e.origen || 'excel') === 'excel').map((e) => iso(e.fecha_corte)).filter(Boolean);
+    if (!cortes.length || !cortes[0]) return null;
     const [a, m, d] = cortes.sort().at(-1).split('-').map(Number);
     // Un año antes; si el corte es 29-feb, el límite es 28-feb del año anterior.
     const limite = new Date(Date.UTC(a - 1, m - 1, Math.min(d, m === 2 ? 28 : d)));
     return limite.toISOString().slice(0, 10);
 }
 
-/** Calcula todos los empleados y los totales. */
-function calcular(empleados, novedades, fecha) {
+/**
+ * Calcula todos los empleados y los totales. `corteExcel` (opcional): la fecha de corte general del Excel, cuando
+ * `empleados` es solo una parte (el equipo de un jefe, §58.6); si no viene, se toma de los saldos de la lista.
+ */
+function calcular(empleados, novedades, fecha, { corteExcel = null } = {}) {
     const porEmpleado = agruparPorEmpleado(novedades);
-    const limite = limiteAntiguedad(empleados);
+    const limite = limiteAntiguedad(empleados, corteExcel);
     const filas = empleados.map((e) => {
         const saldo = e.saldo_id ? {
             fecha_corte: e.fecha_corte, dias_disfrutados_corte: e.dias_disfrutados_corte, dias_compensados: e.dias_compensados
@@ -198,6 +202,19 @@ function sinValores(resultado) {
         ...resultado,
         filas: resultado.filas.map((f) => quitar(f, CAMPOS_VALOR)),
         totales: quitar(resultado.totales, TOTALES_VALOR)
+    };
+}
+
+// Lo que no ve un jefe en el pasivo de su equipo (§58.6): los pesos y las notas internas del saldo.
+const CAMPOS_INTERNOS_EQUIPO = ['nota_saldo', 'ajustado_en', 'origen_saldo', 'saldo_disfrutados_corte', 'saldo_compensados_corte'];
+
+/** Pasivo para el jefe: solo días, sin salario, valores ni notas de financiera. */
+function paraEquipo(resultado) {
+    const r = sinValores(resultado);
+    return {
+        ...r,
+        filas: r.filas.map((f) => Object.fromEntries(Object.entries(f).filter(([k]) => !CAMPOS_INTERNOS_EQUIPO.includes(k)))),
+        totales: Object.fromEntries(Object.entries(r.totales).filter(([k]) => k !== 'ajustados'))
     };
 }
 
@@ -345,6 +362,7 @@ function generarLibro(resultado, fecha, generadoEn, XLSX = require('xlsx'), { co
 }
 
 module.exports = {
+    paraEquipo,
     fechaValida, iso, desdeSerialExcel, days360, calcularEmpleado, calcular, sinValores, veValores, esFinanciera, validarAjuste,
     leerExcelCorte, generarLibro, redondear
 };
