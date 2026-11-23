@@ -20,11 +20,12 @@ function comoFecha(valor) {
 }
 
 async function jornadasARecalcular(desde, hasta) {
-    const condiciones = [];
+    // Las ausencias no tienen eventos: recalcularlas las dejaba en 'pendiente' y se perdía la ausencia (§77).
+    const condiciones = ["estado <> 'ausente'"];
     const parametros = [];
     if (desde) { condiciones.push('fecha >= ?'); parametros.push(desde); }
     if (hasta) { condiciones.push('fecha <= ?'); parametros.push(hasta); }
-    const where = condiciones.length > 0 ? `WHERE ${condiciones.join(' AND ')}` : '';
+    const where = `WHERE ${condiciones.join(' AND ')}`;
 
     const [filas] = await db.query(`SELECT idjornada, users_company_id, fecha FROM jornada ${where}`, parametros);
     return filas;

@@ -4039,3 +4039,59 @@ Pedido: "en el descargue de la plantilla de los horarios quiero que se listen de
   persona siguen en orden cronológico.
 - Solo cambia `filasPlantilla` (`domain/asistencia/plantillaMalla.js`). Probado con el equipo de Kevin en local:
   del 19-nov-2026 al 08-ago-2023 (448 tests).
+
+## 76. Carga retroactiva de la malla para recalcular llegadas y ausencias (2026-11-23)
+
+Pedido: subir los horarios desde el sábado 21 para recalcular el logueo y ver quién llegó tarde o no llegó. La pantalla
+de los jefes no acepta días pasados (§55) y se deja así; esto es una corrección puntual **solo por script**, con
+simulación previa.
+
+- `node scripts/cargarMallaRetroactiva.js --archivo=<malla.xlsx> --jefe=<cédula del jefe> --desde=AAAA-MM-DD --hasta=AAAA-MM-DD [--aplicar] [--reporte=<csv>]`
+- Rango: solo días que ya pasaron (antes de hoy), en orden, hasta 31 (`domain/asistencia/mallaRetroactiva.js`).
+- Usa la misma lectura y el mismo plan de la malla (`horarioService.planDeMalla` con rango): equipo directo del jefe,
+  activos, sin retiro y desde su ingreso; omitidos con su motivo (§75.2). Los horarios quedan con la nota
+  "Malla retroactiva".
+- Después de guardar cada horario recalcula el día (`horarioService.cargarMallaRetroactiva`):
+  - **con jornada** (se logueó): si está cerrada, recalcula sus totales con el horario (puntual/tarde, `minutos_tarde`
+    y `segundos_tarde`); si quedó abierta, la cierra como el cierre nocturno (`cierreService.normalizarJornada`). En
+    ambos casos la enlaza al horario (`jornadaRepository.vincularHorario`).
+  - **sin jornada y con turno:** crea la jornada `ausente` (mismo `normalizarJornada`).
+  - **descanso:** no genera ausencia; si trabajó ese día, se informa como "trabajo en descanso".
+- Todo va en **una transacción**: sin `--aplicar` se deshace al final, así que la simulación da exactamente el mismo
+  resultado que el aplicado. Repetirlo no duplica nada: los días ya cargados salen como "ya iguales".
+- Las salidas que el cierre nocturno ya puso esos días no se tocan (`jornada_evento` es append-only).
+- Arreglos de la lectura de la malla que salieron con el archivo de David Acero (sirven también para la pantalla):
+  - `"0"` escrito como texto en Entrada/Salida/Almuerzo = 00:00 (antes era error "Hora de entrada vacía").
+  - PPT: la malla trae los 7 dígitos y RRHH guarda 600 + 7 (§69). `mallaHorarios.homologarPpt` busca la ficha con el
+    prefijo cuando la de 7 dígitos no está en el equipo (antes salían "Cédula sin ficha en RRHH").
+- Probado en local con el equipo de Kevin Buitrago y `01_Mallas_David_Acero (10)` del 21 al 22-nov: 242 horarios de 121
+  personas, 0 errores; 4 puntuales, 3 tarde, 129 ausentes (la BD local tiene pocos logueos de esos días) y 106
+  descansos. Después de simular, la BD quedó igual; después de aplicar, repetir dio 0 cambios (452 tests).
+
+## 77. Mallas del 21 al 27 de noviembre por SQL y recálculo de llegadas y ausencias (2026-11-23)
+
+Operación de datos como §67: `01_Mallas_David_Acero (10)` (T&T, 125 personas) y `01_Mallas_Nuncira_Santiago 20_11`
+(201 personas) en un solo SQL, `Descargas/horarios_mallas_TyT_Nuncira_21_27_nov.sql` (lleva cédulas, **no se versiona**).
+Leídas con `leerMalla` vigente: 0 errores; 2.275 días (1.934 turnos —102 en casa— y 341 descansos).
+
+- Mismo esquema que §67 (tabla temporal, upsert por persona y día, tolerancia 0, modalidad `modalidad_dia`), con tres
+  mejoras: solo fichas **vigentes** (último contrato activo/periodo de prueba **y sin retiro**, como `CONTRATO_VIGENTE`),
+  nunca antes de la fecha de ingreso, y PPT de 7 dígitos cruzado con la ficha `600` + 7 (§69).
+- Al final enlaza las jornadas ya creadas del 21 al 23 con su horario (`jornada.horario_asignado_id`).
+- Lina Páez vuelve a estar en las dos mallas con horas distintas de lunes a viernes: queda con la de T&T, como en §67.
+
+**Recálculo después del SQL** (21 y 22 ya pasaron; el 23 está en curso):
+
+```
+node scripts/cerrarJornadasDelDia.js --fecha=2026-11-21   # ausente a quien tenía turno y no se logueó
+node scripts/cerrarJornadasDelDia.js --fecha=2026-11-22
+node scripts/recalcularJornadas.js --desde=2026-11-21 --hasta=2026-11-23   # puntual / tarde con el horario
+```
+
+- `cerrarJornadasDelDia.js` acepta `--fecha=` (solo días anteriores a hoy); sin ella cierra hoy, como el cron.
+- **Corrección:** `recalcularJornadas.js` recalculaba también las jornadas `ausente`, que no tienen eventos, y las dejaba
+  en `pendiente`: se perdían las ausencias del rango. Ahora las salta. Lo mismo en `cargarMallaRetroactiva` (§76).
+- Las salidas que el cierre nocturno ya puso a las 23:59:59 (días sin horario) se quedan (`jornada_evento` es
+  append-only): inflan el tiempo trabajado de ese día, no la llegada ni el tiempo extra (solo cuenta el aprobado).
+- Probado en local: 316 personas por día (9 cédulas sin ficha vigente en local); 21-nov 40 logueados (12 tarde) y 225
+  ausentes; 22-nov 4 logueados (2 tarde) y 65 ausentes; 23-nov 67 en curso (7 tarde).

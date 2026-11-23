@@ -7,6 +7,10 @@ const equipoService = require('./equipoService');
 const notificacionService = require('./notificacionService');
 const mallaHorarios = require('../../domain/asistencia/mallaHorarios');
 const plantillaMalla = require('../../domain/asistencia/plantillaMalla');
+const mallaRetroactiva = require('../../domain/asistencia/mallaRetroactiva');
+const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
+const cierreService = require('./cierreService');
+const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const { agregarListas } = require('../../utils/excelListas');
 const { fechaLaboral, sumarDias } = require('../../utils/fechaBogota');
 const { alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
@@ -202,15 +206,22 @@ function leerArchivoMalla(buffer) {
 
 const claveFecha = (fecha) => (fecha instanceof Date ? fecha.toISOString().slice(0, 10) : String(fecha).slice(0, 10));
 
-async function planDeMalla(directorUsersCompanyId, buffer) {
+async function planDeMalla(directorUsersCompanyId, buffer, rango = null) {
     requireUsersCompanyId(directorUsersCompanyId);
-    const lectura = leerArchivoMalla(buffer);
-    const hoy = fechaLaboral(new Date());
+    const leida = leerArchivoMalla(buffer);
+    // Carga retroactiva (§76): solo los días del rango (registros y errores), y el rango cuenta como "de hoy en adelante".
+    const enRango = (f) => !rango || (f && f >= rango.desde && f <= rango.hasta);
+    const lectura = rango
+        ? { ...leida, registros: leida.registros.filter((r) => enRango(r.fecha)), errores: leida.errores.filter((e) => !e.fecha || enRango(e.fecha)) }
+        : leida;
+    const hoy = rango ? rango.desde : fechaLaboral(new Date());
 
     const equipoLista = await equipoRepo.listaEmpleadosACargo(directorUsersCompanyId);
     const equipo = new Map(equipoLista
         .filter((e) => e.numero_identificacion)
         .map((e) => [String(e.numero_identificacion).trim(), e]));
+    // PPT con los 7 dígitos en la malla → la ficha con 600 (§69, §76).
+    lectura.registros = mallaHorarios.homologarPpt(lectura.registros, equipo);
     const cedulas = [...new Set(lectura.registros.map((r) => r.cedula))];
     const [existentesRrhh, retiradas] = await Promise.all([
         empleadoRepo.findNumerosExistentes(cedulas), empleadoRepo.findNumerosRetirados(cedulas)
@@ -382,34 +393,7 @@ async function aplicarMalla({ directorUsersCompanyId, buffer, creadoPor }) {
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const idsNuevas = new Map();
-        for (const p of plan.plantillasNuevas) {
-            idsNuevas.set(p.clave, await horarioPlantillaRepo.crear({
-                nombre: p.nombre,
-                horaEntrada: p.horaEntrada,
-                horaSalida: p.horaSalida,
-                minutosAlmuerzo: p.minutosAlmuerzo,
-                horaAlmuerzoInicio: null,
-                toleranciaEntradaMin: 0,
-                centroCostoId: null,
-                duenoUsersCompanyId: directorUsersCompanyId,
-                creadoPor
-            }, conn));
-        }
-        await horarioAsignadoRepo.insertarVarios(aAplicar.map((f) => ({
-            usersCompanyId: f.users_company_id,
-            fecha: f.fecha,
-            horarioPlantillaId: f.horarioPlantillaId ?? idsNuevas.get(f.plantillaNueva) ?? null,
-            horaEntrada: f.horaEntrada,
-            horaSalida: f.horaSalida,
-            minutosAlmuerzo: f.minutosAlmuerzo,
-            horaAlmuerzoInicio: null,
-            toleranciaEntradaMin: 0,
-            esDescanso: f.esDescanso,
-            modalidad: f.modalidad ?? null,
-            creadoPor,
-            notas: f.notas ? `Malla: ${f.notas}` : 'Malla'
-        })), conn);
+        await guardarPlan({ plan, aAplicar, directorUsersCompanyId, creadoPor, nota: 'Malla' }, conn);
         await conn.commit();
     } catch (error) {
         await conn.rollback();
@@ -430,10 +414,111 @@ async function aplicarMalla({ directorUsersCompanyId, buffer, creadoPor }) {
     };
 }
 
+/** Plantillas nuevas + horarios del plan, dentro de la transacción de quien llama. */
+async function guardarPlan({ plan, aAplicar, directorUsersCompanyId, creadoPor, nota }, conn) {
+    const idsNuevas = new Map();
+    for (const p of plan.plantillasNuevas) {
+        idsNuevas.set(p.clave, await horarioPlantillaRepo.crear({
+            nombre: p.nombre,
+            horaEntrada: p.horaEntrada,
+            horaSalida: p.horaSalida,
+            minutosAlmuerzo: p.minutosAlmuerzo,
+            horaAlmuerzoInicio: null,
+            toleranciaEntradaMin: 0,
+            centroCostoId: null,
+            duenoUsersCompanyId: directorUsersCompanyId,
+            creadoPor
+        }, conn));
+    }
+    await horarioAsignadoRepo.insertarVarios(aAplicar.map((f) => ({
+        usersCompanyId: f.users_company_id,
+        fecha: f.fecha,
+        horarioPlantillaId: f.horarioPlantillaId ?? idsNuevas.get(f.plantillaNueva) ?? null,
+        horaEntrada: f.horaEntrada,
+        horaSalida: f.horaSalida,
+        minutosAlmuerzo: f.minutosAlmuerzo,
+        horaAlmuerzoInicio: null,
+        toleranciaEntradaMin: 0,
+        esDescanso: f.esDescanso,
+        modalidad: f.modalidad ?? null,
+        creadoPor,
+        notas: f.notas ? `${nota}: ${f.notas}` : nota
+    })), conn);
+}
+
+/**
+ * Carga retroactiva de la malla (asistencia.md §76), solo por script: guarda los horarios de días que ya pasaron
+ * del equipo directo del jefe (activos, sin retiro, desde su ingreso) y recalcula cada día:
+ *   - con jornada (se logueó): se enlaza al horario y se recalculan los totales → puntual o tarde;
+ *   - sin jornada y con turno: se crea la jornada 'ausente' (cierreService.normalizarJornada);
+ *   - descanso: no genera ausencia.
+ * Todo en una transacción. Sin `aplicar` se deshace al final: la simulación da exactamente el mismo resultado.
+ */
+async function cargarMallaRetroactiva({ directorUsersCompanyId, buffer, desde, hasta, aplicar = false, ahora = new Date() }) {
+    const hoy = fechaLaboral(ahora);
+    let dias = 0;
+    for (let f = desde; f && hasta && f <= hasta && dias <= mallaRetroactiva.MAX_DIAS; f = sumarDias(f, 1)) dias++;
+    const error = mallaRetroactiva.errorDeRango(desde, hasta, hoy, dias);
+    if (error) throw new ReglaAsistenciaError(error);
+
+    const { lectura, plan } = await planDeMalla(directorUsersCompanyId, buffer, { desde, hasta });
+    const aAplicar = plan.filas.filter((f) => f.estado === 'nuevo' || f.estado === 'reemplaza');
+    const creadoPor = { userId: null, cuentaId: null };
+
+    const conn = await db.getConnection();
+    const detalle = [];
+    try {
+        await conn.beginTransaction();
+        await guardarPlan({ plan, aAplicar, directorUsersCompanyId, creadoPor, nota: 'Malla retroactiva' }, conn);
+        for (const f of aAplicar) {
+            const antes = await jornadaRepo.findPorFecha(f.users_company_id, f.fecha, conn);
+            const horario = await horarioAsignadoRepo.findByEmpleadoYFecha(f.users_company_id, f.fecha, conn);
+            if (antes && ['en_curso', 'en_pausa'].includes(antes.estado)) {
+                await cierreService.normalizarJornada(f.users_company_id, f.fecha, ahora, conn);
+            } else if (antes && antes.estado !== 'ausente') {
+                // Una ausencia no tiene eventos: recalcularla la dejaría en "pendiente"; se queda como está (§77).
+                const { estadoCalculado, eventos } = await calcularEstadoConDatos(f.users_company_id, f.fecha, antes.idjornada, ahora, conn);
+                await jornadaRepo.actualizarTotales(antes.idjornada, construirTotales(estadoCalculado, eventos), conn);
+            } else {
+                await cierreService.normalizarJornada(f.users_company_id, f.fecha, ahora, conn);
+            }
+            const despues = await jornadaRepo.findPorFecha(f.users_company_id, f.fecha, conn);
+            if (despues && horario) await jornadaRepo.vincularHorario(despues.idjornada, horario.idhorario_asignado, conn);
+            detalle.push({
+                users_company_id: f.users_company_id,
+                cedula: f.cedula,
+                nombre: f.nombre_rrhh ?? f.nombre,
+                fecha: f.fecha,
+                horario: f.esDescanso ? 'Descanso' : `${f.horaEntrada.slice(0, 5)}-${f.horaSalida.slice(0, 5)}`,
+                antes: antes ? `${antes.estado}${Number(antes.minutos_tarde) > 0 ? ` (${antes.minutos_tarde} min tarde)` : ''}` : 'sin jornada',
+                resultado: mallaRetroactiva.resultadoDelDia(f, despues),
+                minutos_tarde: despues ? Number(despues.minutos_tarde) || 0 : 0,
+                entrada_real: despues?.hora_entrada_real ?? null
+            });
+        }
+        if (aplicar) await conn.commit(); else await conn.rollback();
+    } catch (err) {
+        await conn.rollback();
+        throw err;
+    } finally {
+        conn.release();
+    }
+    return {
+        aplicado: aplicar,
+        hoja: lectura.hoja,
+        plan: { ...plan.resumen, errores: lectura.errores.length },
+        errores: lectura.errores,
+        omitidos: omitidosPorPersona(plan.filas),
+        resultado: mallaRetroactiva.resumir(detalle),
+        detalle
+    };
+}
+
 module.exports = {
     previsualizarMalla,
     aplicarMalla,
     plantillaMallaExcel,
+    cargarMallaRetroactiva,
     listarPlantillas,
     crearPlantilla,
     actualizarPlantilla,

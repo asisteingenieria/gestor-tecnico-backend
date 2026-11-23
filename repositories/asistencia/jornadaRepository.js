@@ -91,7 +91,13 @@ async function marcarCerradaAutomaticamente(idjornada, conn = db) {
     await conn.query('UPDATE jornada SET cerrada_automaticamente = 1 WHERE idjornada = ?', [idjornada]);
 }
 
+// Enlaza la jornada con el horario del día (carga retroactiva de la malla, §76: la jornada se creó sin horario).
+async function vincularHorario(idjornada, horarioAsignadoId, conn = db) {
+    await conn.query('UPDATE jornada SET horario_asignado_id = ? WHERE idjornada = ?', [horarioAsignadoId, idjornada]);
+}
+
 module.exports = {
+    vincularHorario,
     findHoyParaActualizar,
     findByIdParaActualizar,
     findPorFecha,
