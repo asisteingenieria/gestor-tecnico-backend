@@ -124,6 +124,8 @@ router.put('/horarios/plantillas/:id', canDirigirEquipo, validar(actualizarPlant
 router.delete('/horarios/plantillas/:id', canDirigirEquipo, validar(idParamSchema), asyncHandler(horarioController.eliminarPlantilla));
 
 // Malla de horarios en Excel (§55). Van antes de /horarios/:id para no confundirse con un id.
+// Plantilla de cargue con el equipo directo, una fila por persona y día (§75).
+router.get('/horarios/malla/plantilla', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(horarioController.plantillaMalla));
 router.post('/horarios/malla/previsualizar', canDirigirEquipo, subirMalla, asyncHandler(horarioController.previsualizarMalla));
 router.post('/horarios/malla/aplicar', canDirigirEquipo, subirMalla, asyncHandler(horarioController.aplicarMalla));
 router.get('/horarios', canDirigirEquipo, validar(consultarHorariosQuerySchema), asyncHandler(horarioController.consultarHorarios));

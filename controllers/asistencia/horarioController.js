@@ -115,7 +115,22 @@ async function aplicarMalla(req, res) {
     }));
 }
 
+// Plantilla de cargue de la malla con el equipo del jefe (§75).
+async function plantillaMalla(req, res) {
+    const r = await horarioService.plantillaMallaExcel({
+        directorUsersCompanyId: req.user.users_company_id,
+        desde: req.query.desde,
+        hasta: req.query.hasta
+    });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.nombre}"`);
+    res.setHeader('X-Total-Personas', String(r.personas));
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Personas');
+    res.send(r.buffer);
+}
+
 module.exports = {
+    plantillaMalla,
     previsualizarMalla,
     aplicarMalla,
     listarPlantillas,
