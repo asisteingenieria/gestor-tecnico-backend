@@ -12,6 +12,10 @@ const { asislock, molinete } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
 const { fechaLaboral, combinarFechaHora, textoBogotaAInstante, instanteATextoBogota } = require('../../utils/fechaBogota');
+const integracion = require('../../config/integracionMolinete');
+const { crearVigilancia } = require('./molineteVigilancia');
+
+const vigilancia = crearVigilancia({ alertaMin: integracion.alertaSinContactoMin });
 
 // Molinete (ZKBioSecurity) → asistencia del staff (asistencia.md §54). El backend lee la base del
 // molinete cada pocos segundos (no hay forma de que el molinete avise: la base es de un tercero y
@@ -170,8 +174,9 @@ async function sincronizar(ahora = new Date()) {
             const clave = accion ? `${resultado}:${accion}` : resultado;
             resultados[clave] = (resultados[clave] || 0) + 1;
         } catch (error) {
-            // Una marcación con problemas no frena a las demás; se reintenta en la siguiente pasada
-            // porque no quedó copiada.
+            // Una marcación con problemas no frena a las demás. No quedó copiada, así que se relee
+            // mientras siga dentro del solape; si las siguientes empujan el "desde" más allá, se
+            // pierde (la lectura directa está apagada desde §80; el intermediario sí reintenta).
             console.error(`[molinete] Error procesando ${fila.unique_key}:`, error.message);
             resultados.error = (resultados.error || 0) + 1;
         }
@@ -185,13 +190,19 @@ async function sincronizar(ahora = new Date()) {
  * intermediario no guarda estado: si se reinicia, pregunta y sigue donde iba.
  */
 async function estadoLectura(ahora = new Date()) {
+    vigilancia.contacto();
     const params = await parametros();
     return {
         desde: instanteATextoBogota(await inicioDeLectura(params, ahora)),
         departamentos: molinete.departamentosDe(params.molinete_departamentos),
         intervalo_seg: params.molinete_intervalo_seg,
-        lote: LOTE
+        lote: integracion.lotePorEnvio
     };
+}
+
+/** Revisa cada minuto que el intermediario siga reportando (solo log; ver molineteVigilancia). */
+function iniciarVigilancia() {
+    setInterval(() => vigilancia.revisar(), 60000).unref();
 }
 
 const texto = (v) => (v === undefined || v === null ? null : String(v));
@@ -230,10 +241,12 @@ async function recibirLote(marcaciones, ahora = new Date()) {
             const { resultado, accion } = await procesar(fila, ahora);
             contar(accion ? `${resultado}:${accion}` : resultado);
         } catch (error) {
-            // No quedó copiada: el intermediario la reenvía en la siguiente pasada (el "desde" no avanza).
+            // No quedó copiada, pero el "desde" puede avanzar por las demás del lote: el intermediario
+            // la guarda en su cola de reintentos y la reenvía aparte. Al cliente solo va un código; el
+            // detalle (que puede traer SQL) queda en el log.
             console.error(`[molinete] Error procesando ${fila.unique_key}:`, error.message);
             contar('error');
-            errores.push({ unique_key: fila.unique_key, error: error.message });
+            errores.push({ unique_key: fila.unique_key, error: 'error_interno' });
         }
     }
     const { duplicado = 0, fuera_de_area = 0 } = resultados;
@@ -285,4 +298,4 @@ async function verificar() {
     return { configurado: true, ...(await origenRepo.probar()) };
 }
 
-module.exports = { sincronizar, iniciar, detener, verificar, estadoLectura, recibirLote, configurado };
+module.exports = { sincronizar, iniciar, detener, verificar, estadoLectura, recibirLote, iniciarVigilancia, configurado };

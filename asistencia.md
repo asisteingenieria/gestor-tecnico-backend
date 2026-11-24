@@ -4215,3 +4215,85 @@ Resuelve §54.1 con la opción 1 (intermediario que empuja). Sin migración: usa
    - aviso a financiera si el molinete deja de reportar;
    - recalcular un día con marcaciones que llegaron después del cierre;
    - que los jefes del staff asignen horario: sin horario no hay llegada tarde ni salida en vivo (§54).
+
+### 80.1 Revisión de seguridad y arquitectura del intermediario (2026-11-24)
+
+Revisión del intermediario y de su endpoint antes de desplegarlo. Sin migración.
+
+**Gestor:**
+- `app.set('trust proxy', 'loopback')` en `index.js`: detrás de nginx, `req.ip` y `req.secure` salen de
+  `X-Forwarded-For` y `X-Forwarded-Proto`. Solo se confía en el proxy local, así que una conexión directa al
+  puerto no puede falsearlas. Sin esto, detrás de nginx toda petición tenía IP `127.0.0.1` y
+  `MOLINETE_IPS_PERMITIDAS` no servía. Con la conexión directa de hoy al 5001 nada cambia.
+- `MOLINETE_SOLO_HTTPS=1` (opcional): rechaza con 401 lo que no llegue por HTTPS. Se activa cuando el
+  intermediario ya use la URL https.
+- `errores[]` de `POST /marcaciones` devuelve `error_interno`. El detalle, que puede traer SQL, solo va al log.
+- `GET /estado` pide lotes de 200 (`lotePorEnvio`, antes 500): un envío lleno se procesa en segundos.
+- Vigilancia (`services/asistencia/molineteVigilancia.js`): si el intermediario ya reportó y pasan
+  `MOLINETE_ALERTA_MIN` minutos (10 por defecto) sin `GET /estado`, el log registra una vez
+  `[molinete] ALERTA: el intermediario no reporta…` y otra línea cuando vuelve. **Sigue pendiente el aviso a
+  financiera en el portal.**
+- Tests: `tests/asistencia/molineteSeguridad.test.js` (backend 460).
+
+**Intermediario (`gestor-molinete`):**
+- **Cursor paginado.** Antes, con más de un lote de marcaciones dentro del solape de 2 min (un equipo que se
+  reconecta y entrega horas de golpe), cada pasada releía la misma página, la descartaba por la memoria y,
+  como venía llena, seguía con espera 0: quedaba en un ciclo cerrado sin avanzar. Ahora recorre en páginas por
+  `(create_time, unique_key)`, hasta 25 por pasada. Si quedan más, espera 1 s, nunca 0.
+- **Cola de reintentos** en `datos/reintentos.json`. El "desde" es el máximo copiado menos el solape: una
+  marcación que el Gestor devolvió con error podía quedar atrás para siempre, porque las demás del lote sí se
+  copiaban. Ahora se reenvía aparte, con espera creciente (10 s → 10 min). A las 24 h se descarta con un error
+  en el log.
+- **HTTPS obligatorio.** Con `http://` no arranca, salvo con `GESTOR_PERMITIR_HTTP=1`, que se usa para pruebas
+  o de forma temporal y deja un aviso al arrancar. El tiempo de espera de cada llamada sube de 15 a 60 s.
+- **Tarea como SERVICIO LOCAL** y no como SYSTEM con privilegios máximos:
+  - `instalar-tarea.ps1` cierra la carpeta con `icacls`, por SID para que sirva en Windows en español. La
+    carpeta queda para Administradores y SYSTEM, con lectura para el servicio y escritura solo en `logs\` y
+    `datos\`.
+  - Sin límite de 72 h: el `schtasks` anterior dejaba el límite por defecto y Windows detenía la tarea a los
+    3 días.
+  - `iniciar.cmd` solo usa `node\node.exe`, sin buscar `node` en el PATH.
+  - La pausa entre reinicios usa `ping`, porque `timeout` falla sin consola.
+  - `errores-proceso.log` se rota al pasar de 10 MB y ya no recibe una copia de cada error.
+- `--leer [--desde=FECHA]`: lee la base y muestra un resumen por área, sin enviar nada ni necesitar la clave.
+  Es la prueba de acceso a la base en HADES.
+- `npm ci --omit=dev` en la instalación.
+- Prueba local de punta a punta con un molinete simulado en Postgres: `prueba-local/LEEME.md`.
+- Tests: 14.
+
+**HTTPS en el Gestor (preparado, falta hacerlo en el servidor):**
+1. Un dominio (o subdominio) con registro A a `31.97.138.23`.
+2. En nginx, un `server` para ese dominio:
+   ```nginx
+   location /api/integraciones/molinete/ {
+       proxy_pass http://127.0.0.1:5001;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-For $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       client_max_body_size 1m;
+   }
+   ```
+   Se usa `$remote_addr` y no `$proxy_add_x_forwarded_for` para que el cliente no pueda anteponer una IP falsa.
+3. `certbot --nginx -d <dominio>`. Agrega el `listen 443 ssl` y la redirección de 80.
+4. En el `.env` del Gestor: `MOLINETE_SOLO_HTTPS=1` y `MOLINETE_IPS_PERMITIDAS=<IP pública de la oficina>`.
+   Luego `pm2 restart gestor-backend`.
+5. En HADES: `GESTOR_URL=https://<dominio>/api/integraciones/molinete/v1`, quitar `GESTOR_PERMITIR_HTTP` y
+   reiniciar la tarea.
+6. Cerrar el puerto 5001 a internet (`ufw`) queda para cuando AsisLock y el frontend también usen el dominio:
+   hoy AsisLock entra por `http://31.97.138.23:5001` (`docs/asislock/API_AsisLock.md`).
+
+Mientras no haya dominio, se despliega con `GESTOR_PERMITIR_HTTP=1` y la URL http, igual que AsisLock hoy, más
+`MOLINETE_IPS_PERMITIDAS` con la IP de la oficina para que la clave sola no baste.
+- **Usuario nuevo de solo lectura del molinete (2026-11-24):** `asiste_consulta` en la misma base
+  (`biosecurity-boot`, PostgreSQL, puerto 5442, `10.255.255.18`). Reemplaza a `consulta_biometrico` en el `.env`
+  del intermediario en HADES; la clave va solo en ese `.env`. Desde el PC de desarrollo el puerto 5442 sigue
+  sin responder: se usa desde HADES (`127.0.0.1`).
+- **IP pública de la oficina (2026-11-24):** `200.91.204.53`, la salida a internet de HADES según el usuario
+  (no responde como servidor en 5001/80/443). Va en `MOLINETE_IPS_PERMITIDAS` del `.env` de producción;
+  se confirma en `pm2 logs` con la línea `petición rechazada … desde 200.91.204.53` de la prueba de AsisLock hecha desde HADES.
+- **Primera lectura real en HADES (2026-11-24 12:22):** `--leer` con `asiste_consulta` funcionó. El motor es
+  **PostgreSQL 9.6.24** (no 9.2.9 como en §54), con zona `America/Bogota`; la última marcación tenía 11 s. Del día:
+  STAFF 510 marcaciones / 45 personas, ADMINISTRATIVO 298 / 23, TECNOLOGIA 625 / 11. Otras áreas no se envían:
+  AGENTES CLARO, FORMACION, SERVGENERALES, AGENTE OBAMA, CAFETERIA, ASISTE, CLIENTESCLARO, PUSHER y VISITANTES.
+  Instalado en `C:\gestor-molinete` con Node v22.23.5 y `npm ci` (0 vulnerabilidades). Falta desplegar el backend
+  para `--verificar` e `instalar-tarea.cmd`.
