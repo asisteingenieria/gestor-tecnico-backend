@@ -4312,3 +4312,28 @@ local). Huellas nuevas aparecieron en 2-3 s. Dos correcciones salieron de la pru
 - **Cruces en vivo.** Un cruce intermedio se guardaba en `molinete_marcacion` sin avisar por socket, así que el
   "Detalle de hoy" (trazabilidad) solo lo mostraba al recargar. Ahora `molineteService` avisa
   `notificarCambioJornada(..., 'cruce_molinete')` también en los cruces. El frontend no cambia.
+
+### 80.3 En producción (2026-11-24) y HTTPS pendiente
+
+**Despliegue.** `main` con `733a883` + `5ca4d8a` (merge #89), sin migración (la 091 ya estaba). En el `.env` del
+Gestor: `MOLINETE_API_KEY` (clave nueva, generada en el servidor) y `MOLINETE_IPS_PERMITIDAS=201.217.215.162`.
+**Ojo:** la IP pública con la que sale la oficina es `201.217.215.162` (la misma de AsisLock), no `200.91.204.53`; se
+supo por la línea `[molinete] petición rechazada (...) desde <ip>` del log. Se usó `MOLINETE_API_KEY_ANTERIOR` para
+cambiar de clave sin cortar y después se borró. Sin `MOLINETE_PG_*`: la lectura directa de §54 sigue apagada.
+
+En HADES: `GESTOR_URL=http://31.97.138.23:5001/api/integraciones/molinete/v1` con `GESTOR_PERMITIR_HTTP=1`,
+`--verificar` OK e `instalar-tarea.cmd` (tarea "Gestor Molinete" como SERVICIO LOCAL, un solo `node.exe`). El primer
+envío trajo el día completo: 1.818 marcaciones, 1.351 registradas (78 personas), 463 `empleado_no_encontrado` y 8
+`jornada_finalizada`. De los rechazos, 450 son `Targeta1`/`Targeta2` (tarjetas, área TECNOLOGIA, no personas), 3 de un
+usuario de ADMINISTRATIVO sin cédula en el molinete y 11 de dos cédulas de STAFF sin ficha en RRHH. Ninguna era PPT.
+
+**Pendientes.**
+- **HTTPS** (aplazado; no hay dominio todavía). Opciones: (1) subdominio tipo `gestor.asisteing.com` → `31.97.138.23`
+  y certbot (lo definitivo); (2) mientras, certificado de Let's Encrypt para la IP (válido en navegadores, dura ~6 días,
+  exige cliente ACME reciente y renovación automática; confirmar versión en el servidor); (3) certificado autofirmado
+  solo para las integraciones (en HADES con `NODE_EXTRA_CA_CERTS` en `iniciar.cmd`; los navegadores lo rechazan).
+  Migración gradual: HTTPS junto al HTTP actual, primero el molinete (`MOLINETE_SOLO_HTTPS=1`, quitar
+  `GESTOR_PERMITIR_HTTP`), luego frontend, AsisLock e Hydra, y al final cerrar el HTTP.
+- Rotar la clave del molinete (quedó en el chat de la sesión) con `MOLINETE_API_KEY_ANTERIOR`.
+- RRHH: fichas de las dos cédulas de STAFF. Administrador del molinete: sacar las tarjetas del área TECNOLOGIA y poner
+  la cédula al usuario de ADMINISTRATIVO.
