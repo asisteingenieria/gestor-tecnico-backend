@@ -12,6 +12,12 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// Detrás de nginx (en el mismo servidor), req.ip y req.secure salen de X-Forwarded-For y
+// X-Forwarded-Proto. Solo se confía en el proxy local: una conexión directa al puerto desde
+// internet no puede falsear esas cabeceras. Lo usan las listas blancas de IPs y la exigencia de
+// HTTPS de las integraciones (asistencia.md §80.1).
+app.set('trust proxy', 'loopback');
+
 // Configurar CORS dinámicamente según el ambiente
 const corsOrigins = process.env.NODE_ENV === 'production'
     ? [process.env.FRONTEND_URL, 'http://31.97.138.23:5173', 'http://31.97.138.23:5174']
@@ -43,6 +49,9 @@ app.use('/api/integraciones/hydra/v1', require('./routes/integracionHydra'));
 // Integración con AsisLock (login biométrico → asistencia). También antes de express.json():
 // autentica primero y parsea con su propio límite de tamaño. Ver asistencia.md §18.
 app.use('/api/integraciones/asislock/v1', require('./routes/integracionAsislock'));
+// Marcaciones del molinete que empuja el intermediario del servidor del molinete (HADES), porque
+// este servidor no alcanza la red de la oficina (asistencia.md §54.1 y §80). También antes de express.json().
+app.use('/api/integraciones/molinete/v1', require('./routes/integracionMolinete'));
 
 app.use(express.json()); // Para parsear el body de las peticiones como JSON
 
@@ -151,5 +160,9 @@ server.listen(PORT, () => {
     if (process.env.MOLINETE_PG_HOST && process.env.MOLINETE_SINCRONIZAR !== '0'
         && require('./services/asistencia/molineteService').iniciar()) {
         console.log('[molinete] Lectura de marcaciones activa');
+    }
+    // Intermediario del molinete (§80): alerta en el log si deja de reportar.
+    if (require('./config/integracionMolinete').configurada) {
+        require('./services/asistencia/molineteService').iniciarVigilancia();
     }
 });

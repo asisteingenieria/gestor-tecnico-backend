@@ -12,6 +12,10 @@ const { asislock, molinete } = require('../../domain/asistencia');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const notificacionService = require('./notificacionService');
 const { fechaLaboral, combinarFechaHora, textoBogotaAInstante, instanteATextoBogota } = require('../../utils/fechaBogota');
+const integracion = require('../../config/integracionMolinete');
+const { crearVigilancia } = require('./molineteVigilancia');
+
+const vigilancia = crearVigilancia({ alertaMin: integracion.alertaSinContactoMin });
 
 // Molinete (ZKBioSecurity) → asistencia del staff (asistencia.md §54). El backend lee la base del
 // molinete cada pocos segundos (no hay forma de que el molinete avise: la base es de un tercero y
@@ -143,18 +147,25 @@ async function procesar(fila, ahora) {
  * de hoy: el histórico del molinete no se importa.
  * @returns {{ leidas: number, resultados: Object }}
  */
+// Desde dónde leer: la última marcación copiada menos el solape o, sin nada copiado, el inicio de hoy.
+async function inicioDeLectura(params, ahora) {
+    const ultimo = await marcacionRepo.ultimoRegistradoEnOrigen();
+    return ultimo
+        ? new Date(new Date(ultimo).getTime() - params.molinete_solape_seg * 1000)
+        : combinarFechaHora(fechaLaboral(ahora), '00:00:00');
+}
+
+// Un mismo lote puede traer marcaciones de un equipo que entregó tarde: se aplican por la hora de la
+// marcación, no por la de llegada.
+const porHoraDeMarcacion = (a, b) => a.event_time.localeCompare(b.event_time) || a.create_time.localeCompare(b.create_time);
+
 async function sincronizar(ahora = new Date()) {
     if (!configurado) return { leidas: 0, resultados: {}, apagado: true };
     const params = await parametros();
-    const ultimo = await marcacionRepo.ultimoRegistradoEnOrigen();
-    const desde = ultimo
-        ? new Date(new Date(ultimo).getTime() - params.molinete_solape_seg * 1000)
-        : combinarFechaHora(fechaLaboral(ahora), '00:00:00');
+    const desde = await inicioDeLectura(params, ahora);
 
     const filas = await origenRepo.findDesde(instanteATextoBogota(desde), molinete.departamentosDe(params.molinete_departamentos), LOTE);
-    // Un mismo envío puede traer marcaciones de un equipo que entregó tarde: se aplican por la hora
-    // de la marcación, no por la de llegada.
-    filas.sort((a, b) => a.event_time.localeCompare(b.event_time) || a.create_time.localeCompare(b.create_time));
+    filas.sort(porHoraDeMarcacion);
 
     const resultados = {};
     for (const fila of filas) {
@@ -163,13 +174,84 @@ async function sincronizar(ahora = new Date()) {
             const clave = accion ? `${resultado}:${accion}` : resultado;
             resultados[clave] = (resultados[clave] || 0) + 1;
         } catch (error) {
-            // Una marcación con problemas no frena a las demás; se reintenta en la siguiente pasada
-            // porque no quedó copiada.
+            // Una marcación con problemas no frena a las demás. No quedó copiada, así que se relee
+            // mientras siga dentro del solape; si las siguientes empujan el "desde" más allá, se
+            // pierde (la lectura directa está apagada desde §80; el intermediario sí reintenta).
             console.error(`[molinete] Error procesando ${fila.unique_key}:`, error.message);
             resultados.error = (resultados.error || 0) + 1;
         }
     }
     return { leidas: filas.length, resultados };
+}
+
+/**
+ * Para el intermediario del servidor del molinete (asistencia.md §80): desde dónde leer
+ * (create_time en hora de Bogotá, sin zona), qué áreas, cada cuánto y cuántas por envío. Así el
+ * intermediario no guarda estado: si se reinicia, pregunta y sigue donde iba.
+ */
+async function estadoLectura(ahora = new Date()) {
+    vigilancia.contacto();
+    const params = await parametros();
+    return {
+        desde: instanteATextoBogota(await inicioDeLectura(params, ahora)),
+        departamentos: molinete.departamentosDe(params.molinete_departamentos),
+        intervalo_seg: params.molinete_intervalo_seg,
+        lote: integracion.lotePorEnvio
+    };
+}
+
+/** Revisa cada minuto que el intermediario siga reportando (solo log; ver molineteVigilancia). */
+function iniciarVigilancia() {
+    setInterval(() => vigilancia.revisar(), 60000).unref();
+}
+
+const texto = (v) => (v === undefined || v === null ? null : String(v));
+
+/**
+ * Marcaciones que empuja el intermediario (asistencia.md §80): las mismas filas de
+ * molineteOrigenRepository.findDesde y el mismo procesar() que la lectura directa, así que un
+ * reenvío no duplica nada (llave unique_key). Una marcación de un área que no marca por molinete se
+ * descarta sin guardar.
+ * @returns {{ recibidas: number, resultados: Object, errores: Array }}
+ */
+async function recibirLote(marcaciones, ahora = new Date()) {
+    const params = await parametros();
+    const areas = new Set(molinete.departamentosDe(params.molinete_departamentos));
+    const filas = marcaciones
+        .map((m) => ({
+            unique_key: texto(m.unique_key),
+            pin: texto(m.pin),
+            cedula: texto(m.cedula),
+            departamento: texto(m.departamento),
+            lector: texto(m.lector),
+            event_time: m.event_time,
+            create_time: m.create_time
+        }))
+        .sort(porHoraDeMarcacion);
+
+    const resultados = {};
+    const errores = [];
+    const contar = (clave) => { resultados[clave] = (resultados[clave] || 0) + 1; };
+    for (const fila of filas) {
+        if (!areas.has(String(fila.departamento ?? '').trim().toUpperCase())) {
+            contar('fuera_de_area');
+            continue;
+        }
+        try {
+            const { resultado, accion } = await procesar(fila, ahora);
+            contar(accion ? `${resultado}:${accion}` : resultado);
+        } catch (error) {
+            // No quedó copiada, pero el "desde" puede avanzar por las demás del lote: el intermediario
+            // la guarda en su cola de reintentos y la reenvía aparte. Al cliente solo va un código; el
+            // detalle (que puede traer SQL) queda en el log.
+            console.error(`[molinete] Error procesando ${fila.unique_key}:`, error.message);
+            contar('error');
+            errores.push({ unique_key: fila.unique_key, error: 'error_interno' });
+        }
+    }
+    const { duplicado = 0, fuera_de_area = 0 } = resultados;
+    if (filas.length > duplicado + fuera_de_area) console.log('[molinete] intermediario', JSON.stringify(resultados));
+    return { recibidas: filas.length, resultados, errores };
 }
 
 let temporizador = null;
@@ -216,4 +298,4 @@ async function verificar() {
     return { configurado: true, ...(await origenRepo.probar()) };
 }
 
-module.exports = { sincronizar, iniciar, detener, verificar, configurado };
+module.exports = { sincronizar, iniciar, detener, verificar, estadoLectura, recibirLote, iniciarVigilancia, configurado };
