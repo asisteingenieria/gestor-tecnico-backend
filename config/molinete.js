@@ -1,4 +1,3 @@
-const { Pool, types } = require('pg');
 require('dotenv').config({ quiet: true });
 
 // Conexión de SOLO LECTURA a la base del molinete (ZKBioSecurity, PostgreSQL 9.2), para la
@@ -8,9 +7,12 @@ require('dotenv').config({ quiet: true });
 // Las fechas del molinete son `timestamp without time zone` en hora de Bogotá. pg las convertiría
 // con la zona del proceso Node (UTC en producción): se piden como texto y las convierte
 // utils/fechaBogota.textoBogotaAInstante.
-types.setTypeParser(1114, (texto) => texto); // timestamp without time zone
-
+//
+// El paquete `pg` solo se carga si la conexión directa está configurada: con el intermediario
+// (§80) el servicio del molinete se usa sin conexión directa y sin necesitar `pg`.
 const configurado = Boolean(process.env.MOLINETE_PG_HOST);
+const { Pool, types } = configurado ? require('pg') : {};
+types?.setTypeParser(1114, (texto) => texto); // timestamp without time zone
 
 const pool = configurado
     ? new Pool({

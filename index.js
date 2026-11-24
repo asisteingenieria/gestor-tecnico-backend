@@ -43,6 +43,9 @@ app.use('/api/integraciones/hydra/v1', require('./routes/integracionHydra'));
 // Integración con AsisLock (login biométrico → asistencia). También antes de express.json():
 // autentica primero y parsea con su propio límite de tamaño. Ver asistencia.md §18.
 app.use('/api/integraciones/asislock/v1', require('./routes/integracionAsislock'));
+// Marcaciones del molinete que empuja el intermediario del servidor del molinete (HADES), porque
+// este servidor no alcanza la red de la oficina (asistencia.md §54.1 y §80). También antes de express.json().
+app.use('/api/integraciones/molinete/v1', require('./routes/integracionMolinete'));
 
 app.use(express.json()); // Para parsear el body de las peticiones como JSON
 

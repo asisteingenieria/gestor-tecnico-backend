@@ -4095,3 +4095,123 @@ node scripts/recalcularJornadas.js --desde=2026-11-21 --hasta=2026-11-23   # pun
   append-only): inflan el tiempo trabajado de ese día, no la llegada ni el tiempo extra (solo cuenta el aprobado).
 - Probado en local: 316 personas por día (9 cédulas sin ficha vigente en local); 21-nov 40 logueados (12 tarde) y 225
   ausentes; 22-nov 4 logueados (2 tarde) y 65 ausentes; 23-nov 67 en curso (7 tarde).
+
+**Producción (2026-11-23):** SQL corrido y recálculo hecho. Cierre del 21-nov: 87 jornadas cerradas y 71 ausentes; del
+22-nov: 24 cerradas y 12 ausentes; `recalcularJornadas` recalculó 461. Conteo por día (ausentes / tarde / puntual / sin
+horario): 21 → 71 / 107 / 73 / 1; 22 → 12 / 24 / 35 / 0; 23 → 0 / 107 / 113 / 1.
+
+- **Producción no tenía crontab** (`no crontab for root`): el cierre nocturno nunca había corrido solo. Se indicó
+  instalar `30 4 * * *` (23:30 Bogotá) `cerrarJornadasDelDia.js` y `* * * * *` `despacharEnviosHydra.js`, con logs en
+  `/root/logs/`. Instalación sin confirmar; si el 23-nov no quedó cerrado: `cerrarJornadasDelDia.js --fecha=2026-11-23`.
+- `despacharEnviosAsislock.js` responde "Canal hacia AsisLock sin configurar": faltan `ASISLOCK_CALLBACK_URL` y
+  `ASISLOCK_CALLBACK_API_KEY`, que entrega AsisLock (son su endpoint y su clave, distinta de la `x-api-key` con la que
+  ellos nos envían los logins). Se les pidieron el 2026-11-23. Al recibirlas: `.env`, `pm2 restart gestor-backend` y
+  cron cada minuto de ese despachador. Los avisos esperan en `asislock_envio_saliente`, no se pierden.
+- Pendientes: decidir el horario de Lina Páez del 23 al 27 (T&T 09:00-17:00 o Nuncira 08:30-17:30) y borrar el `.sql`
+  con cédulas de Descargas.
+
+## 78. Asistencia en vivo: tarjetas que suman el total, y menú de financiera en dos filas (2026-11-23)
+
+Solo frontend, sin migración. Desplegado el 2026-11-23 (frontend `b8e43a0`, `1c375cd`, `d580ba9`).
+
+**Menú de financiera** (`RecursosHumanosLayout.jsx`): con más de 7 opciones el menú superior no alcanzaba y se perdían
+"Cambios de turno" y "Mi asistencia". Ahora, si hay más de 7, los enlaces pasan a una segunda fila (`.ai-subnav`)
+debajo de la barra, que se acomoda en varias líneas. Cada enlace lleva `title` con su nombre.
+
+**Asistencia en vivo** (`EquipoAsistencia.jsx`, la usan financiera y los jefes en Equipo → Hoy). Antes las tarjetas
+no sumaban el total: faltaba "Terminaron", "En pausa" dejaba fuera a los desconectados de AsisLock (su jornada está
+`en_pausa`), la modalidad contaba a todos los del día y "Llegaron tarde" parecía un estado más.
+
+- `ESTADOS_DIA`: siete estados excluyentes, cada persona en uno solo. Son En turno, En pausa (baño, break, almuerzo,
+  capacitación y desconectados), Sin iniciar, Terminaron, Ausentes, Con novedad y Descanso. Sus tarjetas suman el total
+  y también las pestañas.
+- Franja de arriba: "N personas hoy · cada una está en un solo estado". Debajo, "De los X que llegaron hoy (en turno, en
+  pausa y terminaron): A a tiempo · T tarde · S sin horario". **La llegada tarde es un desglose de quienes llegaron,
+  no un estado:** quien llegó tarde ya está contado en su estado actual. "Tarde" filtra la tabla (pestaña aparte
+  "Llegaron tarde"). Al lado va una barra apilada con los siete colores.
+- Pie de cada tarjeta con su detalle. En turno muestra presencial/teletrabajo **solo de quienes están en turno**; En
+  pausa muestra el desglose por tipo. Las tarjetas son clicables y filtran.
+- El badge `finalizada` dice "Terminó".
+
+## 79. AsisLock reporta "Teletrabajo" a todos, también a los presenciales (2026-11-24)
+
+En vivo salía "0 presencial · 54 teletrabajo". La etiqueta no la calcula Gestor: es `conectado_biometrico` del último
+login que manda AsisLock (`asislock.modalidadIngreso`, §29). `Presencial` significa huella en el biométrico + molinete y
+`Teletrabajo` significa solo el login de AsisLock. No se usan ni la malla ni el contrato.
+
+Verificado en producción el 2026-11-24: los 57 logins del día (56 personas) llegaron con `Teletrabajo`, y 54 de ellas
+tienen `presencial` en su malla de hoy (`horario_asignado.modalidad`).
+
+- **No lo causó la carga de horarios por SQL (§77):** ese dato lo envía AsisLock en el login, y el SQL solo escribió
+  `horario_asignado`. La malla quedó bien, y la consulta de AsisLock a Gestor (`GET /empleados/:cedula/horario`, §58)
+  les devuelve `presencial` con `modalidad_origen: 'horario'`.
+- Falla del lado de AsisLock: su login no detecta, o no envía, el paso por el biométrico. Hay que reportárselo.
+- Para ver desde cuándo pasa:
+  `SELECT fecha_reportada, SUM(conectado_biometrico='Presencial'), SUM(conectado_biometrico='Teletrabajo') FROM asislock_registro WHERE evento='login' AND fecha_reportada >= '2026-11-01' GROUP BY fecha_reportada;`
+- Pendiente de decisión del usuario:
+  - el mensaje a AsisLock;
+  - mostrar en la pantalla la modalidad de la malla cuando AsisLock no confirma el biométrico ("Presencial (según
+    malla) · AsisLock: teletrabajo"). Sin hacer, porque ocultaría el dato real del ingreso.
+
+## 80. Molinete por intermediario: el servidor del molinete empuja las marcaciones al Gestor (2026-11-24)
+
+Resuelve §54.1 con la opción 1 (intermediario que empuja). Sin migración: usa la 091 (`molinete_marcacion`).
+
+**Servidor del molinete, verificado con el usuario el 2026-11-24:**
+- `HADES`, IP `10.255.255.18`, Windows Server 2016 (`10.0.14393`), ZKBio CVSecurity 6.9.0. Postgres en
+  `127.0.0.1:5442`; `psql.exe` en `C:\Program Files\ZKBioCVSecurity\service\zkpostgre\bin`.
+- **El Postgres ya solo escucha en localhost.** Desde el PC de desarrollo da `ECONNREFUSED`, y la última marcación
+  copiada en local es del 23-nov a las 12:37. La lectura directa de §54 ya no sirve ni desde la oficina: el
+  intermediario tiene que correr en HADES.
+- HADES llega al Gestor: `/asislock/v1/salud` respondió 401, así que hay salida y solo falta la clave. No tiene `curl`
+  ni Node.
+- El módulo "API" de la licencia de ZKBio no está activado (es la API REST del fabricante y se licencia aparte). No
+  se necesita, porque se lee la base.
+
+**Gestor** (`/api/integraciones/molinete/v1`, montado antes de `express.json()`, como AsisLock):
+- `x-api-key` = `MOLINETE_API_KEY` (opcionales `MOLINETE_API_KEY_ANTERIOR` y `MOLINETE_IPS_PERMITIDAS`). Sin ella,
+  responde 503. Archivos: `config/integracionMolinete.js` y `middleware/autenticarMolinete.js`.
+- `GET /salud`.
+- `GET /estado` → `{ desde, departamentos, intervalo_seg, lote }`. `desde` es la última marcación copiada menos el
+  solape, o el inicio de hoy; es el mismo cálculo de la lectura directa (`molineteService.inicioDeLectura`). El
+  intermediario no guarda estado.
+- `POST /marcaciones` `{ marcaciones: [...] }`, hasta 500. Cada fila tiene las columnas de
+  `molineteOrigenRepository.findDesde` (`unique_key`, `pin`, `cedula`, `departamento`, `lector`, `event_time`,
+  `create_time` como texto en hora de Bogotá).
+  - Validación estructural: `validators/molineteSchemas.js`.
+  - `molineteService.recibirLote` ordena por hora de marcación y aplica cada fila con el mismo `procesar()` de §54.
+    Por eso las reglas son idénticas, y un reenvío da `duplicado`.
+  - Un área que no marca por molinete da `fuera_de_area` y no se guarda.
+  - Responde los conteos y `errores` por `unique_key`. Esas filas no quedan copiadas y se reenvían.
+- `config/molinete.js` ya solo carga `pg` si está `MOLINETE_PG_HOST`.
+
+**Intermediario: repo aparte `gestor-molinete`** (local en `Desktop\MolineteGestor\gestor-molinete`).
+- Node 22 portable, `pg` y `dotenv`.
+- Cada `intervalo_seg` hace `GET /estado`, lee el Postgres local con la misma consulta y envía solo lo nuevo. Tiene
+  una memoria corta de llaves ya confirmadas para no reenviar el solape.
+- Si el lote viene lleno, sigue sin esperar. Si falla, espera más entre intentos, hasta 60 s.
+- Logs diarios en `logs/`.
+- Comandos: `--verificar` y `--una-vez`.
+- Se instala como tarea programada "Gestor Molinete" (`instalar-tarea.cmd`, al encender, como SYSTEM; `iniciar.cmd`
+  lo relanza si se cae). Pasos en su README.
+
+**Probado en local** (backend en el puerto 5099 contra la BD local, empleado de prueba del seed):
+- entrada → `registrado:entrada`;
+- segundo paso → `registrado:cruce`;
+- área AGENTES → `fuera_de_area`;
+- reenvío → `duplicado` ×2;
+- `/estado` avanzó a la última marcación menos 2 min;
+- sin clave → 401;
+- lote vacío → 400.
+- La lectura real no se pudo probar desde aquí por lo del localhost: se prueba en HADES con `--verificar`.
+- Tests: backend 455, intermediario 2.
+
+**Para producción:**
+1. Backend: pull, `MOLINETE_API_KEY` en el `.env` (una cadena aleatoria de 32+ caracteres) y `pm2 restart`. No poner
+   `MOLINETE_PG_*` en producción.
+2. HADES: seguir el README de `gestor-molinete`, con `GESTOR_URL=http://31.97.138.23:5001/api/integraciones/molinete/v1`
+   y la misma clave. Después `--verificar` e `instalar-tarea.cmd`.
+3. Lo que quedó pendiente de §54.1:
+   - aviso a financiera si el molinete deja de reportar;
+   - recalcular un día con marcaciones que llegaron después del cierre;
+   - que los jefes del staff asignen horario: sin horario no hay llegada tarde ni salida en vivo (§54).

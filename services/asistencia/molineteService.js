@@ -143,18 +143,25 @@ async function procesar(fila, ahora) {
  * de hoy: el histórico del molinete no se importa.
  * @returns {{ leidas: number, resultados: Object }}
  */
+// Desde dónde leer: la última marcación copiada menos el solape o, sin nada copiado, el inicio de hoy.
+async function inicioDeLectura(params, ahora) {
+    const ultimo = await marcacionRepo.ultimoRegistradoEnOrigen();
+    return ultimo
+        ? new Date(new Date(ultimo).getTime() - params.molinete_solape_seg * 1000)
+        : combinarFechaHora(fechaLaboral(ahora), '00:00:00');
+}
+
+// Un mismo lote puede traer marcaciones de un equipo que entregó tarde: se aplican por la hora de la
+// marcación, no por la de llegada.
+const porHoraDeMarcacion = (a, b) => a.event_time.localeCompare(b.event_time) || a.create_time.localeCompare(b.create_time);
+
 async function sincronizar(ahora = new Date()) {
     if (!configurado) return { leidas: 0, resultados: {}, apagado: true };
     const params = await parametros();
-    const ultimo = await marcacionRepo.ultimoRegistradoEnOrigen();
-    const desde = ultimo
-        ? new Date(new Date(ultimo).getTime() - params.molinete_solape_seg * 1000)
-        : combinarFechaHora(fechaLaboral(ahora), '00:00:00');
+    const desde = await inicioDeLectura(params, ahora);
 
     const filas = await origenRepo.findDesde(instanteATextoBogota(desde), molinete.departamentosDe(params.molinete_departamentos), LOTE);
-    // Un mismo envío puede traer marcaciones de un equipo que entregó tarde: se aplican por la hora
-    // de la marcación, no por la de llegada.
-    filas.sort((a, b) => a.event_time.localeCompare(b.event_time) || a.create_time.localeCompare(b.create_time));
+    filas.sort(porHoraDeMarcacion);
 
     const resultados = {};
     for (const fila of filas) {
@@ -170,6 +177,68 @@ async function sincronizar(ahora = new Date()) {
         }
     }
     return { leidas: filas.length, resultados };
+}
+
+/**
+ * Para el intermediario del servidor del molinete (asistencia.md §80): desde dónde leer
+ * (create_time en hora de Bogotá, sin zona), qué áreas, cada cuánto y cuántas por envío. Así el
+ * intermediario no guarda estado: si se reinicia, pregunta y sigue donde iba.
+ */
+async function estadoLectura(ahora = new Date()) {
+    const params = await parametros();
+    return {
+        desde: instanteATextoBogota(await inicioDeLectura(params, ahora)),
+        departamentos: molinete.departamentosDe(params.molinete_departamentos),
+        intervalo_seg: params.molinete_intervalo_seg,
+        lote: LOTE
+    };
+}
+
+const texto = (v) => (v === undefined || v === null ? null : String(v));
+
+/**
+ * Marcaciones que empuja el intermediario (asistencia.md §80): las mismas filas de
+ * molineteOrigenRepository.findDesde y el mismo procesar() que la lectura directa, así que un
+ * reenvío no duplica nada (llave unique_key). Una marcación de un área que no marca por molinete se
+ * descarta sin guardar.
+ * @returns {{ recibidas: number, resultados: Object, errores: Array }}
+ */
+async function recibirLote(marcaciones, ahora = new Date()) {
+    const params = await parametros();
+    const areas = new Set(molinete.departamentosDe(params.molinete_departamentos));
+    const filas = marcaciones
+        .map((m) => ({
+            unique_key: texto(m.unique_key),
+            pin: texto(m.pin),
+            cedula: texto(m.cedula),
+            departamento: texto(m.departamento),
+            lector: texto(m.lector),
+            event_time: m.event_time,
+            create_time: m.create_time
+        }))
+        .sort(porHoraDeMarcacion);
+
+    const resultados = {};
+    const errores = [];
+    const contar = (clave) => { resultados[clave] = (resultados[clave] || 0) + 1; };
+    for (const fila of filas) {
+        if (!areas.has(String(fila.departamento ?? '').trim().toUpperCase())) {
+            contar('fuera_de_area');
+            continue;
+        }
+        try {
+            const { resultado, accion } = await procesar(fila, ahora);
+            contar(accion ? `${resultado}:${accion}` : resultado);
+        } catch (error) {
+            // No quedó copiada: el intermediario la reenvía en la siguiente pasada (el "desde" no avanza).
+            console.error(`[molinete] Error procesando ${fila.unique_key}:`, error.message);
+            contar('error');
+            errores.push({ unique_key: fila.unique_key, error: error.message });
+        }
+    }
+    const { duplicado = 0, fuera_de_area = 0 } = resultados;
+    if (filas.length > duplicado + fuera_de_area) console.log('[molinete] intermediario', JSON.stringify(resultados));
+    return { recibidas: filas.length, resultados, errores };
 }
 
 let temporizador = null;
@@ -216,4 +285,4 @@ async function verificar() {
     return { configurado: true, ...(await origenRepo.probar()) };
 }
 
-module.exports = { sincronizar, iniciar, detener, verificar, configurado };
+module.exports = { sincronizar, iniciar, detener, verificar, estadoLectura, recibirLote, configurado };
