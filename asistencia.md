@@ -4297,3 +4297,18 @@ Mientras no haya dominio, se despliega con `GESTOR_PERMITIR_HTTP=1` y la URL htt
   AGENTES CLARO, FORMACION, SERVGENERALES, AGENTE OBAMA, CAFETERIA, ASISTE, CLIENTESCLARO, PUSHER y VISITANTES.
   Instalado en `C:\gestor-molinete` con Node v22.23.5 y `npm ci` (0 vulnerabilidades). Falta desplegar el backend
   para `--verificar` e `instalar-tarea.cmd`.
+
+### 80.2 Prueba de punta a punta con HADES real (2026-11-24)
+
+HADES (intermediario en consola, `GESTOR_URL` apuntando temporalmente a un Gestor local en
+`10.206.241.39:5099`, regla de firewall solo para `10.255.255.18`) envió las marcaciones del día: 478 en tres
+lotes de 200, 378 registradas (54 personas) y 102 `empleado_no_encontrado` (3 cédulas sin ficha en la base
+local). Huellas nuevas aparecieron en 2-3 s. Dos correcciones salieron de la prueba:
+
+- **Lectores en español.** HADES nombra los lectores `10.255.255.249-1-Entrada` / `…-2-Salida`, no `-In` /
+  `-Out` como suponía §54: todo quedaba `sentido = 'desconocido'` y la salida por lector de salida nunca se
+  habría detectado. `sentidoDeLector` (`domain/asistencia/molinete.js`) acepta ambos. Las marcaciones ya
+  guardadas con `desconocido` no se corrigen (en producción no había ninguna: la lectura estaba apagada).
+- **Cruces en vivo.** Un cruce intermedio se guardaba en `molinete_marcacion` sin avisar por socket, así que el
+  "Detalle de hoy" (trazabilidad) solo lo mostraba al recargar. Ahora `molineteService` avisa
+  `notificarCambioJornada(..., 'cruce_molinete')` también en los cruces. El frontend no cambia.

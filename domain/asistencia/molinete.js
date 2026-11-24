@@ -11,7 +11,7 @@ const { extraAbierto, dentroDeHoraExtra } = require('./asislock');
  *   - Primera marcación del día, por cualquier lector = entrada. El contador arranca ahí.
  *   - Las marcaciones intermedias son "cruces": NO cuentan como tiempo no laborado. Se guardan
  *     y se cuentan para la trazabilidad, pero no producen eventos de jornada.
- *   - Salida: una marcación por un lector de salida (…-Out) desde la ventana de salida del horario
+ *   - Salida: una marcación por un lector de salida (…-Salida u …-Out) desde la ventana de salida del horario
  *     (hora de salida − minutos_habilitar_salida). Si no la hay, el cierre del día pone la salida en
  *     la última marcación del molinete (cierreService).
  *   - Tras la salida, si hay hora extra aprobada, una marcación en su franja la abre (inicio_extra)
@@ -20,11 +20,14 @@ const { extraAbierto, dentroDeHoraExtra } = require('./asislock');
 
 const DEPARTAMENTOS_DEFECTO = ['STAFF', 'ADMINISTRATIVO', 'TECNOLOGIA'];
 
-/** reader_name '10.255.255.249-1-In' → 'entrada'; '…-Out' → 'salida'; otro → 'desconocido'. */
+/**
+ * reader_name → sentido. HADES nombra los lectores en español ('10.255.255.249-1-Entrada',
+ * '10.255.255.252-2-Salida'); se aceptan también '-In' / '-Out'. Otro → 'desconocido'.
+ */
 function sentidoDeLector(lector) {
     const t = String(lector ?? '').trim().toLowerCase();
-    if (t.endsWith('-in')) return 'entrada';
-    if (t.endsWith('-out')) return 'salida';
+    if (t.endsWith('-in') || t.endsWith('-entrada')) return 'entrada';
+    if (t.endsWith('-out') || t.endsWith('-salida')) return 'salida';
     return 'desconocido';
 }
 

@@ -30,9 +30,11 @@ const decidir = (eventos, hora, sentido, extra = {}) =>
 
 // --- Lectura de los datos del molinete ---
 
-test('sentidoDeLector toma el sufijo -In / -Out del reader_name', () => {
+test('sentidoDeLector toma el sufijo -In / -Out o -Entrada / -Salida del reader_name', () => {
     assert.equal(sentidoDeLector('10.255.255.249-1-In'), 'entrada');
     assert.equal(sentidoDeLector('10.255.255.252-2-Out'), 'salida');
+    assert.equal(sentidoDeLector('10.255.255.249-1-Entrada'), 'entrada');
+    assert.equal(sentidoDeLector('10.255.255.252-2-Salida'), 'salida');
     assert.equal(sentidoDeLector('Other'), 'desconocido');
     assert.equal(sentidoDeLector(null), 'desconocido');
 });
