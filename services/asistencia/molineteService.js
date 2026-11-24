@@ -88,7 +88,10 @@ async function procesarEnTransaccion(fila, ahora) {
         }
         if (decision.eventos.length === 0) {
             // Cruce intermedio: queda en la copia (cuenta para la trazabilidad), sin tocar la jornada.
-            return finalizar('registrado', { usersCompanyId, jornadaId: jornada?.idjornada ?? null, accion: decision.accion, motivo: decision.motivo });
+            // Igual se avisa: el detalle del día lista los cruces y debe mostrarlo sin recargar.
+            const respuesta = await finalizar('registrado', { usersCompanyId, jornadaId: jornada?.idjornada ?? null, accion: decision.accion, motivo: decision.motivo });
+            notificacionService.notificarCambioJornada(usersCompanyId, 'cruce_molinete', { origen: 'molinete' });
+            return respuesta;
         }
 
         if (!jornada) {
