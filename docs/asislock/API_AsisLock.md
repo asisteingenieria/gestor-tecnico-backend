@@ -28,7 +28,10 @@ Gestor. Gestor lo convierte en eventos de la jornada del empleado:
 
 - La hora que vale es la que reporta AsisLock (`fecha` + `hora_login` / `hora_logout`), en **hora
   de Colombia**.
-- El empleado se identifica por su **cédula** (campo `usuario`).
+- El empleado se identifica por su **cédula** (campo `usuario`). Para el **Permiso por Protección Temporal (PPT)**,
+  AsisLock puede enviar el número de 7 dígitos (`6776237`) aunque Gestor lo tenga con el prefijo `600`
+  (`6006776237`): si la cédula exacta no existe, Gestor la busca con el prefijo, solo entre fichas tipo PPT. Aplica
+  a `/registros` y a la consulta por cédula del §9 (desde el 2026-11-17, `asistencia.md` §69).
 - Los cambios de estado (`Break`, `Baño`, `Almuerzo`, `Capacitación`, `Conectado`) se envían como
   login con el estado en `estado_conexion` y abren o cierran la pausa en Gestor. Las pausas también
   se pueden marcar en el portal de Gestor. Gestor guarda todos y AsisLock los consulta de vuelta (§9).
@@ -168,7 +171,7 @@ mismo orden del envío. Cada registro trae el resultado de su login y de su logo
 
 | `motivo` | Resultado | Qué significa / qué hacer |
 |---|---|---|
-| `empleado_no_encontrado` | rechazado | La cédula no existe en Gestor. RRHH debe crear o corregir la ficha; después el reenvío funciona |
+| `empleado_no_encontrado` | rechazado | La cédula no existe en Gestor (ni como PPT con prefijo `600`). RRHH debe crear o corregir la ficha; después el reenvío funciona, y los avisos ya rechazados los puede recuperar Gestor con `scripts/recuperarRechazadosAsislock.js` |
 | `cedula_ambigua` | rechazado | La cédula aparece en más de una ficha. Avisar a RRHH |
 | `fecha_invalida` | rechazado | `fecha` no tiene un formato reconocible |
 | `hora_invalida` | rechazado | La hora no tiene formato `HH:MM[:SS]` |

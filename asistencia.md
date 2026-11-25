@@ -3758,6 +3758,11 @@ todas 390, 18 campañas, BACK 19 en vivo y 19 en el histórico, `alcance=otra` d
 recibe 403 en `alcance=todas`, `/equipo/campanias` y en la trazabilidad de alguien ajeno, y sigue viendo sus 5.
 Lint y build del frontend sin errores. En el navegador como David: entra con "11 personas a tu cargo" y "Mi equipo"; "Todas las campañas" muestra 390 · solo consulta; BACK pasa a Histórico con 19 personas; el detalle de un agente de BACK abre su trazabilidad y "Volver al equipo" regresa a BACK. Sin errores en consola.
 
+**Estado (2026-11-17):** en `main`, backend `156f6a2` (PR #68) y frontend `53fbb37`. El merge del backend chocó solo en
+la línea del conteo de pruebas de `CLAUDE.md` (la §68 contra el cruce con Aware del PR #64) y se resolvió en `3381ed0`.
+El backend está desplegado: `9d3e272` en el servidor, pm2 reiniciado. El despliegue del frontend (pull + `npm run build`)
+queda por confirmar. Despliegue conjunto: el frontend llama `GET /equipo/campanias`, que no existe sin el backend.
+
 ## 69. AsisLock y los PPT: Gestor acepta el número sin el prefijo 600 (2026-11-17)
 
 **Problema:** Edgar David Gamez Mendoza tiene en Gestor la ficha **6006776237** (tipo PPT) y en AsisLock aparece como
@@ -3819,6 +3824,36 @@ finalizada con 540 min. Una segunda corrida encontró 0. Los datos de prueba se 
 
 **Producción:** correr primero la simulación, después de desplegar el arreglo del §69 (sin él, `fichasPorCedula` no
 encuentra la ficha y todo sale `sigue_sin_ficha`).
+
+**Corrección (`44768de`):** la primera corrida con `--aplicar` en producción guardó todo, pero terminó con
+`TypeError: Cannot read properties of undefined (reading 'once')` en `mysql2/lib/base/pool.js`. Cada evento registrado
+lanza `notificarCambioJornada` sin `await`, y sus consultas (`ancestrosDe`, `directorUserIdDe`) llegaban después de
+`db.end()`. Ahora el script sale con `process.exit`, como `recalcularJornadas.js` y `cerrarJornadasDelDia.js`. Fuera del
+servidor ese aviso no tiene destinatario, así que no se pierde nada. Además, "Días pasados normalizados" ya no lista
+el día de hoy, que antes salía como "sin cambios".
+
+### 69.2 Estado en producción (2026-11-17)
+
+- **Desplegado:** `66aedee` (arreglo), `ada971f` (script) y `44768de` (corrección), en el servidor como `9d3e272`, con pm2
+  reiniciado. Desde ahí, AsisLock encuentra a los PPT con el número corto, les trae el horario y sus logins entran.
+- **Fichas en producción:** Edgar = **169**, Adriannys = **151** (en local son 180 y 162).
+- **Simulación completa (23-oct → 17-nov):** 63 avisos rechazados entre los dos, todos con ficha, pero muchos días solo
+  tienen login, sin logout. Esos días el cierre pone la salida a la hora de salida del horario y, **si no hay horario, a
+  las 23:59**, con lo que la jornada quedaría inflada (p. ej. 23-oct, login 8:27 → ~15 h).
+- **Decisión:** **no** recuperar el histórico del 23-oct al 16-nov, solo hoy. Esos días quedan como estaban: `ausente` si
+  tenían horario, sin jornada si no. Los avisos siguen en `asislock_registro`; si RRHH o financiera piden corregirlos,
+  revisar primero `horario_asignado` de esos días y correr el script con `--desde/--hasta` solo en los que tengan horario.
+- **Recuperado hoy (Edgar, `--desde=2026-11-17 --hasta=2026-11-17 --aplicar`):** #8923 login 7:57 → `registrado
+  (entrada)`; #8926 login 7:57 → `ignorado [ya_conectado]`; #9049 logout 8:37 → `registrado (desconexion)`;
+  #9053 login 8:39 → `registrado (reconexion)`.
+- **Adriannys hoy:** la simulación dio 0 rechazados, no hubo nada que recuperar.
+- **Otras 13 cédulas con rechazos hoy** (`empleado_no_encontrado`, 1–4 avisos cada una, entre las 9:07 y las 10:34):
+  1001047557, 1003033501, 1006424143, 1007629736, 1007934532, 1010034519, 1011093528, 1012317550, 1012319327,
+  1019605166, 1030594604, 1032480465 y 1141314707. Son CC de 10 dígitos **sin ficha en Gestor**; no es el caso PPT.
+  Parecen ingresos que empezaron a usar AsisLock antes de que RRHH los registrara. **Pendiente de RRHH:** crear sus
+  fichas. Después se recuperan con
+  `node scripts/recuperarRechazadosAsislock.js --cedulas=<las 13> --desde=2026-11-17 [--aplicar]` (sin `--hasta`, para
+  incluir los días que pasen mientras tanto).
 
 
 ## 70. Rediseño de Equipo (Hoy e Histórico): tiempo total, acumulado y veces por estado, gráficas (2026-11-18)
@@ -4312,3 +4347,74 @@ local). Huellas nuevas aparecieron en 2-3 s. Dos correcciones salieron de la pru
 - **Cruces en vivo.** Un cruce intermedio se guardaba en `molinete_marcacion` sin avisar por socket, así que el
   "Detalle de hoy" (trazabilidad) solo lo mostraba al recargar. Ahora `molineteService` avisa
   `notificarCambioJornada(..., 'cruce_molinete')` también en los cruces. El frontend no cambia.
+
+### 80.3 En producción (2026-11-24) y HTTPS pendiente
+
+**Despliegue.** `main` con `733a883` + `5ca4d8a` (merge #89), sin migración (la 091 ya estaba). En el `.env` del
+Gestor: `MOLINETE_API_KEY` (clave nueva, generada en el servidor) y `MOLINETE_IPS_PERMITIDAS=201.217.215.162`.
+**Ojo:** la IP pública con la que sale la oficina es `201.217.215.162` (la misma de AsisLock), no `200.91.204.53`; se
+supo por la línea `[molinete] petición rechazada (...) desde <ip>` del log. Se usó `MOLINETE_API_KEY_ANTERIOR` para
+cambiar de clave sin cortar y después se borró. Sin `MOLINETE_PG_*`: la lectura directa de §54 sigue apagada.
+
+En HADES: `GESTOR_URL=http://31.97.138.23:5001/api/integraciones/molinete/v1` con `GESTOR_PERMITIR_HTTP=1`,
+`--verificar` OK e `instalar-tarea.cmd` (tarea "Gestor Molinete" como SERVICIO LOCAL, un solo `node.exe`). El primer
+envío trajo el día completo: 1.818 marcaciones, 1.351 registradas (78 personas), 463 `empleado_no_encontrado` y 8
+`jornada_finalizada`. De los rechazos, 450 son `Targeta1`/`Targeta2` (tarjetas, área TECNOLOGIA, no personas), 3 de un
+usuario de ADMINISTRATIVO sin cédula en el molinete y 11 de dos cédulas de STAFF sin ficha en RRHH. Ninguna era PPT.
+
+**Pendientes.**
+- **HTTPS** (aplazado; no hay dominio todavía). Opciones: (1) subdominio tipo `gestor.asisteing.com` → `31.97.138.23`
+  y certbot (lo definitivo); (2) mientras, certificado de Let's Encrypt para la IP (válido en navegadores, dura ~6 días,
+  exige cliente ACME reciente y renovación automática; confirmar versión en el servidor); (3) certificado autofirmado
+  solo para las integraciones (en HADES con `NODE_EXTRA_CA_CERTS` en `iniciar.cmd`; los navegadores lo rechazan).
+  Migración gradual: HTTPS junto al HTTP actual, primero el molinete (`MOLINETE_SOLO_HTTPS=1`, quitar
+  `GESTOR_PERMITIR_HTTP`), luego frontend, AsisLock e Hydra, y al final cerrar el HTTP.
+- Rotar la clave del molinete (quedó en el chat de la sesión) con `MOLINETE_API_KEY_ANTERIOR`.
+- RRHH: fichas de las dos cédulas de STAFF. Administrador del molinete: sacar las tarjetas del área TECNOLOGIA y poner
+  la cédula al usuario de ADMINISTRATIVO.
+
+## 81. Sesión de 10 horas, aviso 10 minutos antes y salida inmediata al login (2026-11-25)
+
+**Problema (RRHH, Angie Franco):** registró novedades una por una y no quedaron guardadas. En la consola salía
+`401 /api/auth/me` y "Token inválido". La sesión duraba 5 h. Al vencer, el siguiente "Guardar" respondía 401 y el
+interceptor de `api.js` la mandaba al login sin avisar. La novedad no se guardaba y lo escrito se perdía. Los demás
+errores (validación, 500, soportes) sí salen en el formulario.
+
+**Cambio:**
+- **Backend** (`controllers/authController.js`, `duracionSesion` + `sesionPara`):
+  - **10 h** para las cuentas de `users` (RRHH, financiera, SST, admin…), que cubren la jornada completa;
+  - **10 h** también para quien tiene personal a cargo aunque entre con su cédula (`puedeVerEquipo`, §57: jefes de
+    área y gestores que cargan las mallas, coordinadores con el monitor del equipo y los cargos que ven todas las
+    campañas, §68). Se calcula al iniciar sesión, así que sigue a RRHH si cambia la jerarquía;
+  - **5 h** solo para las demás cuentas de empleado (agentes, `tipo_cuenta: 'empleado'`, §24), que suelen usar
+    equipos compartidos.
+
+  Sin migración. Aplica a las sesiones que se abran después del `pm2 restart`; las abiertas conservan sus 5 h.
+- **Frontend:**
+  - `src/utils/sesion.js` guarda el vencimiento en hora local del navegador: `Date.now() + (exp − iat)`, en
+    `localStorage.token_vence`. Así no importa si el reloj del PC está corrido respecto al servidor.
+  - `src/components/AvisoSesion.jsx` va montado en `AuthContext` y revisa cada segundo, y también al volver a la
+    pestaña o al despertar el PC:
+    - **faltando 10 min** muestra un aviso abajo a la derecha con la cuenta regresiva y la hora en que vence. Se puede
+      cerrar;
+    - **al vencer** borra la sesión y manda en el acto a `/login?sesion=vencida`, que muestra "Tu sesión venció".
+      No espera a la siguiente petición ni a que recarguen;
+    - si otra pestaña cierra sesión, esta también va al login.
+  - Una sesión ya vencida al abrir la app (pestaña abierta desde ayer) se descarta al cargar.
+  - El 401 de `api.js` también usa `irAlLoginPorVencimiento()`.
+- **Riesgo aceptado:** el token no se revisa contra la BD en cada petición. Un usuario desactivado o con el rol
+  cambiado sigue entrando con lo anterior hasta que vence, ahora hasta 10 h.
+- **No incluido:** renovar la sesión sin volver a entrar (necesitaría un endpoint de refresco) ni guardar el
+  borrador del formulario.
+
+**Verificado:** 460 tests del backend. El `login` real, con la BD simulada, da 10 h a RRHH, 10 h a un jefe por cédula
+y 5 h a un agente por cédula. El
+vencimiento local da 10 h aunque el servidor esté 7 min adelantado. Una sesión vencida redirige a
+`/login?sesion=vencida` y borra el token. Lint de los archivos nuevos y `npm run build` del frontend sin errores.
+**Falta:** la prueba en el navegador.
+
+**Nota:** en Windows, `npm test` corre 0 tests, porque el script usa comillas simples que cmd no quita. Con
+`node --test "tests/**/*.test.js"` corren todos.
+
+**Despliegue:** backend (pull + `pm2 restart gestor-backend`) y frontend (pull + `npm install && npm run build`).
+Pueden ir en cualquier orden.

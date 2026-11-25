@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const CuentaEmpleado = require('../models/CuentaEmpleado');
 const jwt = require('jsonwebtoken');
-const { esJefeDeEquipo, cargoDe } = require('../services/asistencia/equipoService');
+const { esJefeDeEquipo, puedeVerEquipo, cargoDe } = require('../services/asistencia/equipoService');
 
 // Arma y firma el JWT de la sesión. `debe_cambiar_password` viaja en el token para que
 // middleware/auth.js bloquee el resto de la API hasta que se cambie (asistencia.md §19).
@@ -10,7 +10,22 @@ const { esJefeDeEquipo, cargoDe } = require('../services/asistencia/equipoServic
 // `tipo_cuenta: 'empleado'` marca una sesión de cuenta_empleado (§24): su `id` es el de esa
 // tabla, no un users.id, y middleware/auth.js la limita a /api/auth y /api/asistencia.
 // `cargo` (del contrato activo) tampoco va en el token: es lo que la barra del portal muestra bajo el nombre.
-function firmarSesion(user, esJefeEquipo, cargo = null) {
+// Duración de la sesión (asistencia.md §81): 10 h para las cuentas de `users` y para quien tiene personal a cargo
+// aunque entre con su cédula (jefes que cargan mallas, coordinadores con el monitor del equipo); 5 h solo para las
+// demás cuentas de empleado (agentes), que suelen usar equipos compartidos.
+const DURACION_SESION = '10h';
+const DURACION_SESION_AGENTE = '5h';
+const duracionSesion = (user, conPersonalACargo) =>
+    (user.tipo_cuenta === 'empleado' && !conPersonalACargo ? DURACION_SESION_AGENTE : DURACION_SESION);
+
+/** Arma la sesión consultando lo que depende de la ficha (jefe de equipo, personal a cargo, cargo). */
+async function sesionPara(user) {
+    const ficha = user.users_company_id;
+    const [esJefe, conPersonal, cargo] = await Promise.all([esJefeDeEquipo(ficha), puedeVerEquipo(ficha), cargoDe(ficha)]);
+    return firmarSesion(user, esJefe, cargo, conPersonal);
+}
+
+function firmarSesion(user, esJefeEquipo, cargo = null, conPersonalACargo = false) {
     const payload = {
         user: {
             id: user.id,
@@ -27,7 +42,8 @@ function firmarSesion(user, esJefeEquipo, cargo = null) {
             debe_cambiar_password: Boolean(user.debe_cambiar_password)
         }
     };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '5h' }); // expira en 5 horas
+    // El frontend avisa 10 min antes y saca al login en el momento en que vence (asistencia.md §81).
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: duracionSesion(user, conPersonalACargo) });
     return {
         token,
         user: {
@@ -109,7 +125,7 @@ exports.login = async (req, res) => {
         }
 
         if (cuenta) await CuentaEmpleado.registrarIngreso(cuenta.idcuenta_empleado);
-        res.json(firmarSesion(user, await esJefeDeEquipo(user.users_company_id), await cargoDe(user.users_company_id)));
+        res.json(await sesionPara(user));
 
     } catch (err) {
         console.error(err.message);
@@ -168,7 +184,7 @@ exports.changePassword = async (req, res) => {
             }
             await CuentaEmpleado.cambiarPassword(cuenta.idcuenta_empleado, newPassword);
             const actualizada = comoUsuario(await CuentaEmpleado.getById(cuenta.idcuenta_empleado));
-            return res.json({ msg: 'Contraseña actualizada exitosamente', ...firmarSesion(actualizada, await esJefeDeEquipo(actualizada.users_company_id), await cargoDe(actualizada.users_company_id)) });
+            return res.json({ msg: 'Contraseña actualizada exitosamente', ...(await sesionPara(actualizada)) });
         }
 
         const user = await User.getByUsername(req.user.username);
@@ -184,7 +200,7 @@ exports.changePassword = async (req, res) => {
         await User.updatePassword(req.user.id, newPassword);
         await User.marcarPasswordCambiada(req.user.id);
         const actualizado = await User.getByUsername(req.user.username);
-        res.json({ msg: 'Contraseña actualizada exitosamente', ...firmarSesion(actualizado, await esJefeDeEquipo(actualizado.users_company_id), await cargoDe(actualizado.users_company_id)) });
+        res.json({ msg: 'Contraseña actualizada exitosamente', ...(await sesionPara(actualizado)) });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Error del servidor');
