@@ -3531,7 +3531,8 @@ error) salió "No se encontraron como empleados (jefe/analista sin vincular, se 
   de referencia** (`salario_referencia`). Un cliente puede tener varios sueldos. Esa lista no es decorativa:
   - el formulario de empleados filtra el cargo por cliente con ella (`AgentForm.jsx`, `catalogosRRHH.js`);
   - un cargo sin el cliente no aparece al elegir ese cliente, salvo que el cliente no tenga ninguna referencia;
-  - por eso la tabla marca "Sin clientes".
+  - la tabla no lo muestra: por pedido del usuario solo lista cargo, salario (los sueldos distintos de sus clientes, "—" si no tiene), editar y eliminar, con
+    búsqueda por nombre y sin los filtros "Sin clientes"/"Sin empleados"; los clientes se ven al editar.
 - **Nombre repetido** (igual sin tildes ni mayúsculas): 409 `CARGO_REPETIDO`. **Muy parecido** (similitud ≥ 0,8, la
   misma de la homologación del cargue): 409 `CARGO_PARECIDO` y la pantalla pide confirmar con "Es distinto,
   guardar de todos modos" (`confirmar_parecido`).
