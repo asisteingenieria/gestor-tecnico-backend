@@ -7,7 +7,7 @@ Villavicencio.
 ## Stack
 
 Node.js 24 · **Express 5** · MySQL vía `mysql2` (pool de 10, **sin ORM**) · JWT en header
-`x-auth-token` (expira 5 h) · Socket.IO 4 · multer · bcryptjs.
+`x-auth-token` (expira 10 h; 5 h los agentes que entran con cédula sin personal a cargo, `asistencia.md` §81) · Socket.IO 4 · multer · bcryptjs.
 Puerto **5001**. Base de datos **`call_center_support`**.
 
 ```bash

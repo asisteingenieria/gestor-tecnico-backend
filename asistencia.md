@@ -4372,3 +4372,49 @@ usuario de ADMINISTRATIVO sin cédula en el molinete y 11 de dos cédulas de STA
 - Rotar la clave del molinete (quedó en el chat de la sesión) con `MOLINETE_API_KEY_ANTERIOR`.
 - RRHH: fichas de las dos cédulas de STAFF. Administrador del molinete: sacar las tarjetas del área TECNOLOGIA y poner
   la cédula al usuario de ADMINISTRATIVO.
+
+## 81. Sesión de 10 horas, aviso 10 minutos antes y salida inmediata al login (2026-11-25)
+
+**Problema (RRHH, Angie Franco):** registró novedades una por una y no quedaron guardadas. En la consola salía
+`401 /api/auth/me` y "Token inválido". La sesión duraba 5 h. Al vencer, el siguiente "Guardar" respondía 401 y el
+interceptor de `api.js` la mandaba al login sin avisar. La novedad no se guardaba y lo escrito se perdía. Los demás
+errores (validación, 500, soportes) sí salen en el formulario.
+
+**Cambio:**
+- **Backend** (`controllers/authController.js`, `duracionSesion` + `sesionPara`):
+  - **10 h** para las cuentas de `users` (RRHH, financiera, SST, admin…), que cubren la jornada completa;
+  - **10 h** también para quien tiene personal a cargo aunque entre con su cédula (`puedeVerEquipo`, §57: jefes de
+    área y gestores que cargan las mallas, coordinadores con el monitor del equipo y los cargos que ven todas las
+    campañas, §68). Se calcula al iniciar sesión, así que sigue a RRHH si cambia la jerarquía;
+  - **5 h** solo para las demás cuentas de empleado (agentes, `tipo_cuenta: 'empleado'`, §24), que suelen usar
+    equipos compartidos.
+
+  Sin migración. Aplica a las sesiones que se abran después del `pm2 restart`; las abiertas conservan sus 5 h.
+- **Frontend:**
+  - `src/utils/sesion.js` guarda el vencimiento en hora local del navegador: `Date.now() + (exp − iat)`, en
+    `localStorage.token_vence`. Así no importa si el reloj del PC está corrido respecto al servidor.
+  - `src/components/AvisoSesion.jsx` va montado en `AuthContext` y revisa cada segundo, y también al volver a la
+    pestaña o al despertar el PC:
+    - **faltando 10 min** muestra un aviso abajo a la derecha con la cuenta regresiva y la hora en que vence. Se puede
+      cerrar;
+    - **al vencer** borra la sesión y manda en el acto a `/login?sesion=vencida`, que muestra "Tu sesión venció".
+      No espera a la siguiente petición ni a que recarguen;
+    - si otra pestaña cierra sesión, esta también va al login.
+  - Una sesión ya vencida al abrir la app (pestaña abierta desde ayer) se descarta al cargar.
+  - El 401 de `api.js` también usa `irAlLoginPorVencimiento()`.
+- **Riesgo aceptado:** el token no se revisa contra la BD en cada petición. Un usuario desactivado o con el rol
+  cambiado sigue entrando con lo anterior hasta que vence, ahora hasta 10 h.
+- **No incluido:** renovar la sesión sin volver a entrar (necesitaría un endpoint de refresco) ni guardar el
+  borrador del formulario.
+
+**Verificado:** 460 tests del backend. El `login` real, con la BD simulada, da 10 h a RRHH, 10 h a un jefe por cédula
+y 5 h a un agente por cédula. El
+vencimiento local da 10 h aunque el servidor esté 7 min adelantado. Una sesión vencida redirige a
+`/login?sesion=vencida` y borra el token. Lint de los archivos nuevos y `npm run build` del frontend sin errores.
+**Falta:** la prueba en el navegador.
+
+**Nota:** en Windows, `npm test` corre 0 tests, porque el script usa comillas simples que cmd no quita. Con
+`node --test "tests/**/*.test.js"` corren todos.
+
+**Despliegue:** backend (pull + `pm2 restart gestor-backend`) y frontend (pull + `npm install && npm run build`).
+Pueden ir en cualquier orden.
