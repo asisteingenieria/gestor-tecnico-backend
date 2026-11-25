@@ -556,6 +556,19 @@ class UserCompany {
         return mapa;
     }
 
+    // Para buscar jefes/analistas del cargue por nombre o cédula (utils/personaPorNombre.js, §61): con la
+    // cédula y si su último contrato está activo, para preferir a la ficha activa cuando hay homónimos.
+    static async getEmpleadosParaBuscarPorNombre() {
+        const [rows] = await db.query(`
+            SELECT uc.id, uc.numero_identificacion AS cedula,
+                   CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido) AS nombre_completo,
+                   (SELECT ec.nombre FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+                     WHERE c.users_company_id = uc.id ORDER BY c.idcontrato DESC LIMIT 1) = 'activo' AS activo
+            FROM users_company uc
+        `);
+        return rows;
+    }
+
     // Empleado con todos sus registros relacionados (para el formulario de edición)
     static async getByIdCompleto(id) {
         const empleado = await this.getById(id);

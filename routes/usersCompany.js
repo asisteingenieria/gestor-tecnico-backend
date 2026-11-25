@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userCompanyController = require('../controllers/userCompanyController');
+const cargoController = require('../controllers/cargoController');
 const { verifyToken } = require('../middleware/auth');
 const asyncHandler = require('../middleware/asyncHandler');
 const uploadEmpleados = require('../middleware/uploadEmpleados');
@@ -72,6 +73,11 @@ router.use(verifyToken);
 
 router.get('/',                          verificarLecturaEmpleados, userCompanyController.getAll);
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
+// Catálogo de cargos para RRHH y financiera (§61): antes de las rutas '/:id'.
+router.get('/cargos',                    verificarGestionRRHH, cargoController.listar);
+router.post('/cargos',                   verificarGestionRRHH, cargoController.crear);
+router.put('/cargos/:cargoId',           verificarGestionRRHH, cargoController.actualizar);
+router.delete('/cargos/:cargoId',        verificarGestionRRHH, cargoController.eliminar);
 // Excel con la jefatura de cada empleado vigente y quién le sube el horario (§51). Antes de '/:id'.
 router.get('/export/jefaturas',          verificarRecursosHumanos, userCompanyController.exportarJefaturas);
 // Excel de empleados con toda su información, por estado y rango de fechas (§56): solo RRHH y financiera.
