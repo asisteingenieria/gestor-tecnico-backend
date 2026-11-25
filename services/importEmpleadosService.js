@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const UserCompany = require('../models/UserCompany');
 const { sugerencias, homologar } = require('../utils/homologacionCatalogos');
+const { crearBuscador } = require('../utils/personaPorNombre');
 const { claveGrupoSanguineo } = require('../utils/grupoSanguineo');
 
 const CAMPOS_CONTRATO_OBLIGATORIOS = {
@@ -687,11 +688,15 @@ async function guardarRecursos(ucId, fila, resolver) {
 }
 
 async function resolverJefesYAnalistas(resultadosExitosos, filasPorNumero, advertencias) {
-    const mapaNombres = await UserCompany.getMapaIdsPorNombre();
+    // Nombre completo sin tildes, nombre incompleto si es una sola ficha (prefiere la activa) o cédula
+    // (utils/personaPorNombre.js, §61). Antes solo el nombre completo exacto.
+    const buscar = crearBuscador(await UserCompany.getEmpleadosParaBuscarPorNombre());
+    const ambiguos = new Map();
     const buscarPorNombre = (nombre) => {
         if (!nombre) return null;
-        const norm = nombre.trim().toUpperCase().replace(/\s+/g, ' ');
-        return mapaNombres.get(norm) ?? null;
+        const r = buscar(nombre);
+        if (r?.ambiguos) { ambiguos.set(nombre, r.ambiguos); return null; }
+        return r?.id ?? null;
     };
 
     const noResueltos = new Set();
@@ -720,8 +725,12 @@ async function resolverJefesYAnalistas(resultadosExitosos, filasPorNumero, adver
         );
     }
 
+    for (const nombre of ambiguos.keys()) noResueltos.delete(nombre);
     if (noResueltos.size > 0) {
         advertencias.push(`No se encontraron como empleados (jefe/analista sin vincular, se dejó NULL): ${[...noResueltos].join(', ')}`);
+    }
+    for (const [nombre, candidatos] of ambiguos) {
+        advertencias.push(`"${nombre}" coincide con varias fichas (${candidatos.join(' · ')}); se dejó sin vincular: escribe el nombre completo o la cédula`);
     }
 }
 

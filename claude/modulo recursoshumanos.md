@@ -3513,3 +3513,55 @@ agrupa por año → mes → día y permite "Ordenar de más antiguo a más recie
 - Aplicado en los Excel del backend: empleados (§56), novedades (§57), pasivo vacacional (§58), jefaturas y Red Maestra
   (§52). Verificado contra el servidor local: las 25 columnas de fecha de empleados, novedades y pasivo salen como fecha.
 - Fuera de alcance: los Excel que arma el frontend en otros módulos (inventario, incidentes aprobados).
+
+## 61. Catálogo de cargos para RRHH y jefes del cargue por nombre incompleto (2026-11-25)
+
+**Pedido (RRHH, Angie Franco):** el cargue masivo rechazaba el archivo cuando el cargo no estaba en el catálogo
+(regla de §45), y RRHH no tenía cómo agregarlo: los cargos solo entraban por SQL. En otro cargue (8 creados, 0 con
+error) salió "No se encontraron como empleados (jefe/analista sin vincular, se dejó NULL): ANGIE GISETHE RODRIGUEZ".
+
+### 61.1 Pantalla "Cargos" (RRHH y financiera)
+
+- **Menú de RRHH → Cargos** (`/recursos-humanos/cargos`, `CatalogoCargos.jsx`). SST no la ve. El admin tampoco:
+  la ruta es de `verificarGestionRRHH`.
+- **API:** `GET/POST /api/users-company/cargos` y `PUT/DELETE /api/users-company/cargos/:cargoId`. Están en
+  `routes/usersCompany.js` antes de las rutas `/:id`; lógica en `controllers/cargoController.js` y
+  `models/Cargo.js`; validación pura en `utils/cargosCatalogo.js`, con tests.
+- **El formulario pide solo el nombre** (se guarda en mayúsculas, máx. 80) y los **clientes con el sueldo
+  de referencia** (`salario_referencia`). Un cliente puede tener varios sueldos. Esa lista no es decorativa:
+  - el formulario de empleados filtra el cargo por cliente con ella (`AgentForm.jsx`, `catalogosRRHH.js`);
+  - un cargo sin el cliente no aparece al elegir ese cliente, salvo que el cliente no tenga ninguna referencia;
+  - por eso la tabla marca "Sin clientes".
+- **Nombre repetido** (igual sin tildes ni mayúsculas): 409 `CARGO_REPETIDO`. **Muy parecido** (similitud ≥ 0,8, la
+  misma de la homologación del cargue): 409 `CARGO_PARECIDO` y la pantalla pide confirmar con "Es distinto,
+  guardar de todos modos" (`confirmar_parecido`).
+- **Eliminar:** solo si no lo usa ningún contrato ni traspaso (409 `CARGO_EN_USO` con cuántos). Se borra con sus
+  referencias. Uno en uso se puede renombrar, y el nombre cambia en las fichas, porque guardan el id.
+- El formulario no se cierra al hacer clic fuera, para no perder lo escrito; se cierra con Cancelar o la X.
+- **Código SSFF:** no se muestra ni se edita en la pantalla, por pedido del usuario. Al editar, si el cuerpo no
+  trae `codigo_ssff`, se conserva el que tenga el cargo; un cargo nuevo queda sin código.
+- **Sin migración:** usa `cargo` y `salario_referencia`, que ya existen.
+- El cargue masivo lee el catálogo en cada carga: un cargo creado aquí ya sirve en el siguiente Excel.
+
+### 61.2 Jefes y analistas del cargue por nombre incompleto o cédula
+
+**Causa del aviso:** `resolverJefesYAnalistas` solo aceptaba el **nombre completo exacto**, con las mismas tildes. En
+el Excel venía "ANGIE GISETHE RODRIGUEZ" y la ficha es "Angie Gisethe Rodriguez Franco", así que no la encontró y
+los 8 contratos quedaron sin esa jefatura o analista.
+
+**Ahora** (`utils/personaPorNombre.js`, con tests; datos de `UserCompany.getEmpleadosParaBuscarPorNombre`):
+1. nombre completo igual, sin tildes ni mayúsculas;
+2. nombre incompleto: todas sus palabras, al menos dos y en el mismo orden, dentro del nombre de una sola ficha. Si
+   hay varias, se prefiere la activa. Si aun así hay más de una, no se adivina: queda sin vincular con el aviso
+   "coincide con varias fichas (…): escribe el nombre completo o la cédula";
+3. la cédula en la columna.
+
+En la base local, 40 de 40 activos de cuatro palabras se encuentran sin el segundo apellido.
+
+**Los 8 empleados del cargue de la imagen** quedaron sin esa jefatura o analista. Para corregirlos hay dos caminos:
+editar cada ficha, o volver a cargar el mismo Excel después de desplegar. Los existentes salen como "actualizados" y
+se les llena el campo que quedó vacío (`COALESCE`).
+
+**Verificado:** 466 tests. La API probada con todos los casos (crear, repetido, parecido, validación, editar,
+eliminar en uso, eliminar y 403 para un jefe por cédula). En el navegador como RRHH: lista, aviso de parecido,
+crear con cliente y sueldo y eliminar, sin errores en consola. `npm run build` sin errores.
