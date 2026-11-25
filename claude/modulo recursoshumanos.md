@@ -3210,6 +3210,20 @@ corrido el 2026-11-12** — 458 fichas corregidas, verificación en "ya correcto
 advertencias 1287 son solo el aviso de que `BINARY expr` está obsoleto). **Falta desplegar el backend `74cf513`**
 para que los próximos cargues no vuelvan a guardar negativos.
 
+## 55. Sesión 2026-11-17 — El PPT con prefijo 600 y AsisLock (ver `asistencia.md` §69)
+
+Para RRHH, dos cosas:
+
+- **Formato del PPT.** Las fichas tipo PPT (`tipo_identificacion.codigo = 'PPT'`) se guardan como `600` + 7 dígitos
+  (Edgar Gamez = 6006776237, Adriannys Guédez = 6001402568). AsisLock y las mallas de los jefes traen el número de 7
+  dígitos. Desde el 2026-11-17, Gestor cruza las dos formas en la integración con AsisLock, así que **no hay que
+  cambiar** cómo RRHH registra el PPT. El molinete y el cargue de mallas por Excel siguen buscando la cédula exacta.
+- **Pendiente: 13 personas que usan AsisLock sin ficha en Gestor.** El 17-nov sus logins se rechazaron como
+  `empleado_no_encontrado`: 1001047557, 1003033501, 1006424143, 1007629736, 1007934532, 1010034519, 1011093528,
+  1012317550, 1012319327, 1019605166, 1030594604, 1032480465 y 1141314707 (CC). Hay que crearles la ficha. Hasta
+  entonces no tienen horario ni jornadas. Después, sus logins desde el 17-nov se recuperan con
+  `scripts/recuperarRechazadosAsislock.js` (`asistencia.md` §69.2).
+
 ## 56. Sesión 2026-11-20 — Descarga en Excel de empleados por estado y rango de fechas
 
 **Pedido:** en el rol RRHH quitar "Descargar jefaturas" y agregar una descarga de los empleados con toda su

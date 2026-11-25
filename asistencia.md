@@ -3758,6 +3758,11 @@ todas 390, 18 campañas, BACK 19 en vivo y 19 en el histórico, `alcance=otra` d
 recibe 403 en `alcance=todas`, `/equipo/campanias` y en la trazabilidad de alguien ajeno, y sigue viendo sus 5.
 Lint y build del frontend sin errores. En el navegador como David: entra con "11 personas a tu cargo" y "Mi equipo"; "Todas las campañas" muestra 390 · solo consulta; BACK pasa a Histórico con 19 personas; el detalle de un agente de BACK abre su trazabilidad y "Volver al equipo" regresa a BACK. Sin errores en consola.
 
+**Estado (2026-11-17):** en `main`, backend `156f6a2` (PR #68) y frontend `53fbb37`. El merge del backend chocó solo en
+la línea del conteo de pruebas de `CLAUDE.md` (la §68 contra el cruce con Aware del PR #64) y se resolvió en `3381ed0`.
+El backend está desplegado: `9d3e272` en el servidor, pm2 reiniciado. El despliegue del frontend (pull + `npm run build`)
+queda por confirmar. Despliegue conjunto: el frontend llama `GET /equipo/campanias`, que no existe sin el backend.
+
 ## 69. AsisLock y los PPT: Gestor acepta el número sin el prefijo 600 (2026-11-17)
 
 **Problema:** Edgar David Gamez Mendoza tiene en Gestor la ficha **6006776237** (tipo PPT) y en AsisLock aparece como
@@ -3819,6 +3824,36 @@ finalizada con 540 min. Una segunda corrida encontró 0. Los datos de prueba se 
 
 **Producción:** correr primero la simulación, después de desplegar el arreglo del §69 (sin él, `fichasPorCedula` no
 encuentra la ficha y todo sale `sigue_sin_ficha`).
+
+**Corrección (`44768de`):** la primera corrida con `--aplicar` en producción guardó todo, pero terminó con
+`TypeError: Cannot read properties of undefined (reading 'once')` en `mysql2/lib/base/pool.js`. Cada evento registrado
+lanza `notificarCambioJornada` sin `await`, y sus consultas (`ancestrosDe`, `directorUserIdDe`) llegaban después de
+`db.end()`. Ahora el script sale con `process.exit`, como `recalcularJornadas.js` y `cerrarJornadasDelDia.js`. Fuera del
+servidor ese aviso no tiene destinatario, así que no se pierde nada. Además, "Días pasados normalizados" ya no lista
+el día de hoy, que antes salía como "sin cambios".
+
+### 69.2 Estado en producción (2026-11-17)
+
+- **Desplegado:** `66aedee` (arreglo), `ada971f` (script) y `44768de` (corrección), en el servidor como `9d3e272`, con pm2
+  reiniciado. Desde ahí, AsisLock encuentra a los PPT con el número corto, les trae el horario y sus logins entran.
+- **Fichas en producción:** Edgar = **169**, Adriannys = **151** (en local son 180 y 162).
+- **Simulación completa (23-oct → 17-nov):** 63 avisos rechazados entre los dos, todos con ficha, pero muchos días solo
+  tienen login, sin logout. Esos días el cierre pone la salida a la hora de salida del horario y, **si no hay horario, a
+  las 23:59**, con lo que la jornada quedaría inflada (p. ej. 23-oct, login 8:27 → ~15 h).
+- **Decisión:** **no** recuperar el histórico del 23-oct al 16-nov, solo hoy. Esos días quedan como estaban: `ausente` si
+  tenían horario, sin jornada si no. Los avisos siguen en `asislock_registro`; si RRHH o financiera piden corregirlos,
+  revisar primero `horario_asignado` de esos días y correr el script con `--desde/--hasta` solo en los que tengan horario.
+- **Recuperado hoy (Edgar, `--desde=2026-11-17 --hasta=2026-11-17 --aplicar`):** #8923 login 7:57 → `registrado
+  (entrada)`; #8926 login 7:57 → `ignorado [ya_conectado]`; #9049 logout 8:37 → `registrado (desconexion)`;
+  #9053 login 8:39 → `registrado (reconexion)`.
+- **Adriannys hoy:** la simulación dio 0 rechazados, no hubo nada que recuperar.
+- **Otras 13 cédulas con rechazos hoy** (`empleado_no_encontrado`, 1–4 avisos cada una, entre las 9:07 y las 10:34):
+  1001047557, 1003033501, 1006424143, 1007629736, 1007934532, 1010034519, 1011093528, 1012317550, 1012319327,
+  1019605166, 1030594604, 1032480465 y 1141314707. Son CC de 10 dígitos **sin ficha en Gestor**; no es el caso PPT.
+  Parecen ingresos que empezaron a usar AsisLock antes de que RRHH los registrara. **Pendiente de RRHH:** crear sus
+  fichas. Después se recuperan con
+  `node scripts/recuperarRechazadosAsislock.js --cedulas=<las 13> --desde=2026-11-17 [--aplicar]` (sin `--hasta`, para
+  incluir los días que pasen mientras tanto).
 
 
 ## 70. Rediseño de Equipo (Hoy e Histórico): tiempo total, acumulado y veces por estado, gráficas (2026-11-18)
