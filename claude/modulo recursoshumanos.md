@@ -3566,3 +3566,124 @@ se les llena el campo que quedó vacío (`COALESCE`).
 **Verificado:** 466 tests. La API probada con todos los casos (crear, repetido, parecido, validación, editar,
 eliminar en uso, eliminar y 403 para un jefe por cédula). En el navegador como RRHH: lista, aviso de parecido,
 crear con cliente y sueldo y eliminar, sin errores en consola. `npm run build` sin errores.
+
+**Commits** (`sebas-branch`, entran en los PR abiertos; sin migración):
+- backend: `43c5d8b` (pantalla y API de cargos, búsqueda por nombre incompleto) y `44af720` (doc de la tabla);
+- frontend: `62b2471` (pantalla Cargos) y `bb97d57` (tabla solo con cargo, salario, editar y eliminar).
+
+Ajustes de la pantalla pedidos por el usuario el mismo día:
+- la ventana de nuevo y editar cargo pide solo nombre y clientes con sueldo (sin código SSFF, ver §61.1);
+- la tabla muestra solo **Cargo | Salario | editar | eliminar**. Salario son los sueldos distintos de sus clientes de
+  menor a mayor, o "—" si no tiene. Se quitaron la columna de clientes, empleados activos y los filtros "Sin
+  clientes"/"Sin empleados". El borrado sigue bloqueado para los cargos en uso, aunque la columna ya no se vea.
+
+### 61.3 Un nombre mal escrito no se vincula (caso "GERMAN STIVEN ARIS ROJAS", 2026-11-25)
+
+En producción, ya desplegado §61.2, RRHH cargó un empleado nuevo (Cristian Camilo Castro Ruiz, fila 2 del Excel
+`empleado faltante.xlsx`). Salió el aviso "No se encontraron como empleados (jefe/analista sin vincular, se dejó
+NULL): GERMAN STIVEN ARIS ROJAS".
+
+- Era un error de escritura en **Director de Área**: "ARIS" en vez de "ARIAS". Jefe de Área y Jefe Inmediato
+  venían bien escritos y se vincularon.
+- Analista Encargado ("ANGIE GISETHE RODRIGUEZ", sin segundo apellido) se vinculó: el arreglo de §61.2 ya funciona
+  en producción.
+- §61.2 tolera palabras de menos, **no letras mal escritas**: así está hecho a propósito, para no vincular a la
+  persona equivocada.
+- **Corrección:** editar la ficha y elegir el Director de Área, o corregir el Excel y volver a cargarlo. Al
+  recargarlo solo se llena el campo vacío.
+- **Pendiente de decisión del usuario:** tolerar diferencias de una letra cuando haya una sola ficha parecida, como
+  ya hace la homologación de catálogos.
+
+### 61.4 Cargos solo para Recursos Humanos (2026-11-25)
+
+Financiera ya no ve la pantalla "Cargos" (pedido del usuario: es solo de RRHH).
+
+- **Menú:** la opción `soloRrhh` de `RecursosHumanosLayout.jsx` no entra en el menú de financiera.
+- **Ruta:** `/recursos-humanos/cargos` usa `SoloRecursosHumanosRoute` en `App.jsx`, y cualquier otro rol vuelve a `/recursos-humanos`.
+- **API:** `GET/POST/PUT/DELETE /api/users-company/cargos` usan `verificarSoloRecursosHumanos` en `routes/usersCompany.js`, y financiera recibe 403. Ninguna otra pantalla usa esa API: el formulario de empleados lee los cargos de `/catalogos`.
+
+Sin migración. Despliegue: backend (`pm2 restart gestor-backend`) y frontend (`npm install && npm run build`).
+
+## 62. Novedades de Barranquilla por SQL y fecha de registro corregida (2026-11-25)
+
+**Pedido:** generar el SQL de las novedades del Excel `novedades baq (1).xlsx` de Gestión Humana (19 filas,
+Barranquilla) para correrlo en producción.
+
+**Formato del Excel**, distinto del de §50:
+- la cédula viene en `Documento`;
+- trae `Fecha de reporte`, `Fecha De Recibido`, `Diagnostico`, `Observaciones` y las columnas de soportes
+  (`Documento Original`, `Historia Clinica`, `Runt`, `Furips`, `Soat`).
+
+**El SQL**: `Descargas/novedades_barranquilla_2026-11-25.sql`. Lleva cédulas, así que no se versiona y no tiene número
+de migración. Lo armó un script temporal fuera del repo, que reutiliza `tipoNovedadDe` de `utils/novedadesExcel.js`.
+Por cada fila hace un `INSERT … SELECT`:
+- el empleado se busca por cédula y la novedad va en su **contrato más reciente**; si la cédula no tiene ficha, la
+  fila no se inserta;
+- el tipo se resuelve por nombre, con las mismas reglas de §50 (INC según origen, tránsito y días);
+- **no duplica**: salta la fila si el empleado ya tiene una novedad del mismo tipo con la misma fecha inicial;
+- el **responsable** es el Coordinador del Excel cuando su nombre corresponde a una sola ficha; si no, queda NULL;
+- `fecha_reporte` y `fecha_recibido` salen de sus columnas, `resumen_diagnostico` del diagnóstico ("N/A" = NULL) y los
+  soportes con "SI" quedan en 1;
+- la observación queda como "Cargue Excel novedades Barranquilla (fila N)." más la observación del Excel;
+- al final hay una consulta de verificación, fila por fila.
+
+**Datos ajustados del Excel:**
+- **Fila 2:** era una INC de 1 día con fecha final un año después (26/12/2026 en vez de 26/12/2025). Se usó la
+  fecha inicial como fecha final.
+- **Fila 14:** su observación dice "ADICIONALMENTE SE COMPENSAN 7 DIAS EN DINERO". Quedó como vacaciones
+  `disfrutadas_compensadas`: 5 + 7, total 12 (§59).
+
+**Prueba en local:**
+- entraron 13 novedades, las filas 8-20 (ids 429-441, **quedaron guardadas en la base local**), y 10 con responsable;
+- las filas 2-7 no entraron porque esas cédulas no tienen ficha en local;
+- una segunda corrida insertó 0.
+
+**En producción** el usuario lo corrió y funcionó.
+- **Las filas 3-7 ya las había registrado RRHH a mano en la pantalla.** Son los ids **475-479** (Hilder Arturo
+  Ramírez Cabrera ×2, Angie Paola De La Hoz Mendoza, Yurleys Ortiz Ortega y Luis David Echeverry Valle), y el SQL
+  las saltó por la regla de no duplicar.
+- La fila 2 (INC del 26/12/2025) no aparece entre las manuales.
+- **Ubicarlas en la base:**
+  - `Descargas/consulta_novedades_barranquilla.sql` (lleva cédulas, solo lectura) cruza cada fila del Excel con
+    las novedades del empleado que tienen esa fecha inicial;
+  - para las manuales bastó filtrar por cédula y `DATE(created_at) = '2026-11-25'`.
+
+**Fecha de registro corregida:** RRHH pidió que esas 5 queden registradas el **6 de noviembre a la 1:00 p. m.**
+- La columna "Registrada" del consolidado y la "Fecha De Registro" del Excel salen de `novedad_rrhh.created_at`,
+  que se guarda **en UTC** y se muestra en hora de Bogotá (`utils/reporteNovedades.js`). Por eso 1:00 p. m. de
+  Colombia = `18:00` UTC:
+  ```sql
+  UPDATE novedad_rrhh SET created_at = '2026-11-06 18:00:00' WHERE idnovedad_rrhh IN (475, 476, 477, 478, 479);
+  ```
+- **Aplicado en producción y verificado** (`CONVERT_TZ` = 2026-11-06 13:00:00 en las 5).
+- El consolidado ordena por `created_at DESC`. Por eso salen **debajo** del bloque del cargue masivo de §50
+  (06/11/2026 04:26 p. m.), no arriba. Para dejarlas arriba haría falta una hora posterior a las 4:26 p. m.
+
+**Pendientes:**
+- borrar de Descargas los dos `.sql` con cédulas cuando ya no se usen;
+- decidir si se borran de la base local las 13 de prueba (429-441);
+- ver si la INC de la fila 2 hay que registrarla.
+
+## 63. Rediseño de las pantallas de RRHH con el diseño de Equipo (2026-11-25)
+
+Frontend `094f4e4` en `sebas-branch`, sin push. Es la Ola 3 de `claude/plan rediseno vistas.md`. Sin backend ni migración.
+
+- **Personal de la empresa** (`AgentManagement`, incluida la vista de solo lectura del admin):
+  - los mosaicos de Activos y Retirados filtran por Estado, y el rango pasa solo a "fecha de retiro";
+  - "Según los filtros · N en total" va en la línea de detalle del mosaico;
+  - filtros y rango van en barras blancas;
+  - la tabla es navy, la fila abre la ficha y el estado se muestra en una pastilla de color (`COLOR_EMPLEADO`).
+- **Consolidado de novedades:**
+  - los mosaicos de soportes filtran (pendientes, completos, documento del expediente);
+  - el tipo de novedad lleva su color (`colorTipoNovedad`);
+  - la fila abre el detalle;
+  - la descarga sigue mandando los mismos filtros.
+- **Traspasos:** mosaicos, alertas en un panel navy y tabla navy; la fila despliega el detalle.
+- **Contratación Hydra y SST:**
+  - las pestañas van en el encabezado;
+  - lotes, avisos y equivalencias van en tablas navy;
+  - el lote lleva mosaicos y pastillas por estado de candidato y de examen;
+  - los exámenes médicos van en paneles navy dentro de la ficha del candidato.
+- **Pasivo vacacional** (Ola 2, `4a6f232`): los mosaicos conservan "Según los filtros · N en total". Solo financiera descarga y ajusta, igual que antes.
+
+**Despliegue:** frontend (merge + pull + `npm install && npm run build`).
