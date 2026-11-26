@@ -4644,3 +4644,7 @@ Decidido con el usuario:
 Verificado en local con un Excel de 3 personas: la de 42 h pasa, la de 43 h 30 min y la de 49 h sin descanso salen con sus filas, "Aplicar" responde que no se cargó nada y no se escribe ningún horario.
 
 **Despliegue:** migración 110 ANTES del código (sin el parámetro el cargue responde que falta y no carga nada), luego backend y frontend.
+
+### 90.1 La plantilla de la malla solo ofrece DESCANSO en Novedad (2026-11-26)
+
+El desplegable de la columna Novedad de la plantilla traía INC, VACACIONES, RETIRO, SUSPENSION, LNR y LR además de DESCANSO. Ahora solo trae **DESCANSO**: las ausencias las registra RRHH como novedad, no el jefe en la malla. La instrucción 3 de la hoja Instrucciones lo dice. El cargue sigue aceptando las otras si vienen escritas o precargadas de un día que ya las tenía (no se pierde lo cargado). Solo backend (`horarioService.plantillaMallaExcel`), sin migración.
