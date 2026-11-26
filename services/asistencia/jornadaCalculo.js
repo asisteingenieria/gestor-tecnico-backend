@@ -47,7 +47,10 @@ async function calcularEstadosDelDia(usersCompanyIds, fecha, ahora) {
         const eventos = jornada ? eventosPorJornada.get(jornada.idjornada) || [] : [];
         const horario = horarioPorEmpleado.get(id) ?? null;
         const estadoCalculado = calcularJornada(eventos, horario, ahora, horasExtraPorEmpleado.get(id) || [], parametros);
-        return [id, { estadoCalculado, horario }];
+        // Con qué se abrió la jornada (asislock, molinete, empleado = portal, director, sistema), para la columna
+        // Ingreso de quienes no entran por AsisLock (§89).
+        const origenEntrada = eventos.find((e) => e.tipo === 'entrada')?.origen ?? null;
+        return [id, { estadoCalculado, horario, origenEntrada }];
     }));
 }
 

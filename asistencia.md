@@ -4618,3 +4618,13 @@ Un backoffice nuevo queda con ella solo, sin tocar datos. Verificado en local: H
 - El frontend no cambia (la etiqueta de la alerta queda sin uso).
 
 **Despliegue:** solo backend, sin migración.
+
+## 89. Columna Ingreso: "Biométrico" para quien entra solo por el molinete (2026-11-26)
+
+**Problema.** En Equipo → Hoy, la columna Ingreso solo leía la modalidad de AsisLock (Presencial/Teletrabajo). Quien entra solo con el biométrico del molinete (por ejemplo coordinadores que no usan AsisLock) tenía Hora Login pero Ingreso vacío.
+
+**Cambio.**
+- Backend: `jornadaCalculo.calcularEstadosDelDia` devuelve `origenEntrada` (el `origen` del evento de entrada) y `equipoService.estadoEnVivo` lo manda como `origen_entrada`.
+- Frontend: `MODALIDAD_INGRESO` suma "Biométrico" (molinete), "Portal" (Mi jornada) y "Manual" (la registró el jefe), y `modalidadIngreso(emp)` en `utils/asislock.js` da la modalidad de AsisLock o, sin ella, la del origen de la entrada. Cubre al staff —Tecnología, RRHH, ADMINISTRATIVO—, que nunca entra por AsisLock (en local, hoy las 29 jornadas de ADMINISTRATIVO abrieron por molinete), y a cualquier agente o coordinador que solo pase el biométrico. Lo usan la columna, el Excel exportado y el conteo "N presencial" de En turno (el biométrico cuenta como presencial).
+
+**Despliegue:** backend y frontend, sin migración. Backend primero (el frontend sin `origen_entrada` muestra "—" como antes).
