@@ -4440,3 +4440,32 @@ Todas las pantallas de asistencia toman el diseño de Equipo Hoy/Histórico (§7
 
 Detalle de piezas, colores y verificación en `claude/plan rediseno vistas.md` ("Olas 1-4 — hecho").
 **Despliegue:** frontend (merge + pull + `npm install && npm run build`).
+
+## 83. Staff sin columnas de AsisLock en el monitor del equipo (2026-11-26)
+
+**Pedido.** En "Equipo" (jefes, coordinador) y en "Asistencia en vivo" de financiera, el staff —técnicos,
+desarrolladores, analistas, formadores, jefes, directores, administrativos— salía con las columnas Tiempo
+disponible, Break, Baño, Almuerzo, Capacitación y Desconectado vacías y con estado "Conectado", aunque no
+entra a AsisLock (marca por molinete o portal).
+
+**Regla** (`domain/asistencia/fuenteMarcaje.js`, `usaAsislock`, con tests):
+1. Si hoy tiene registros de AsisLock → usa AsisLock (nunca se esconde un dato real).
+2. Centro de costo de staff (ADMINISTRATIVO, DIRECCION …, y los nombres anteriores a la 093: Administración,
+   Tecnología, Recursos Humanos, WORKFORCE, STAFF) → no.
+3. Cargo de agente, asesor, coordinador o backoffice → sí; con JEFE, DIRECTOR o GERENTE → no.
+4. Otro cargo → no (analistas de calidad, formadores, legalizadores dentro de una campaña).
+
+En local: 389 activos, 70 quedan como staff. "COORDINADOR DE DESARROLLO" en ADMINISTRATIVO es staff por el
+centro de costo, no por el cargo.
+
+**Backend.** `equipoService.estadoEnVivo` agrega `usa_asislock` a cada fila (lo usan el Equipo del jefe, el del
+coordinador y financiera). Sin migración.
+
+**Frontend** (`utils/monitorAsistencia.js`: `usaAsislock`, `columnasMonitor`; `CeldasMonitor.jsx`,
+`EquipoAsistencia.jsx`, `MonitorEquipo.jsx`):
+- Tabla solo de staff (p. ej. el equipo de Tecnología): sin las seis columnas de AsisLock, "Hora entrada" en vez
+  de "Hora Login" y leyenda sin pausas.
+- Tabla mixta: la fila de staff une esas seis columnas en una celda "No usa AsisLock · marca por molinete o portal".
+- Estado "Presente" en vez de "Conectado" para el staff.
+- Un backend anterior no manda `usa_asislock` y el frontend lo toma como `true` (se ve como antes), así que el
+  orden de despliegue no importa. El histórico mensual no cambia.
