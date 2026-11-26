@@ -4628,3 +4628,19 @@ Un backoffice nuevo queda con ella solo, sin tocar datos. Verificado en local: H
 - Frontend: `MODALIDAD_INGRESO` suma "Biométrico" (molinete), "Portal" (Mi jornada) y "Manual" (la registró el jefe), y `modalidadIngreso(emp)` en `utils/asislock.js` da la modalidad de AsisLock o, sin ella, la del origen de la entrada. Cubre al staff —Tecnología, RRHH, ADMINISTRATIVO—, que nunca entra por AsisLock (en local, hoy las 29 jornadas de ADMINISTRATIVO abrieron por molinete), y a cualquier agente o coordinador que solo pase el biométrico. Lo usan la columna, el Excel exportado y el conteo "N presencial" de En turno (el biométrico cuenta como presencial).
 
 **Despliegue:** backend y frontend, sin migración. Backend primero (el frontend sin `origen_entrada` muestra "—" como antes).
+
+## 90. Malla en Excel: 42 horas y un descanso por semana (2026-11-26)
+
+**Regla.** Al cargar la malla en Excel, cada persona del equipo debe sumar **exactamente** 42 h por semana y tener **al menos un día de descanso**. Si una sola semana de una sola persona no cuadra, **no se carga nada** y la vista previa dice qué filas del Excel, qué persona y qué semana corregir.
+
+Decidido con el usuario:
+- Semana de lunes a domingo. Horas del día = salida − entrada − almuerzo; el descanso suma 0. Un libre aprobado (§86) cuenta como descanso.
+- Los días de la semana que no trae el Excel se toman del horario ya cargado. Si aun así falta algún día (bordes del mes, ingreso a mitad de semana), esa semana no se valida y sale en "Semanas sin validar", sin bloquear.
+- Una semana con novedad (INC, VACACIONES, LNR, LR, SUSPENSION, RETIRO en la malla o en lo ya cargado, o una novedad de RRHH) no se valida y se avisa.
+- Las 42 h son el parámetro `horas_semanales_malla` (migración 110), no un número del código.
+
+**Código.** `domain/asistencia/semanaMalla.js` (puro, con tests) → `horarioService.validarSemanasDelPlan`, que `planDeMalla` corre salvo en la carga retroactiva (§76). `previsualizarMalla` devuelve `puede_aplicar`, `desajustes_semana` y `semanas_sin_validar`; `aplicarMalla` responde 422 si hay desajustes. Frontend: `CargarMallaModal` abre la pestaña "No cuadran 42 h / descanso", muestra el aviso y deshabilita "Aplicar". La hoja de instrucciones de la plantilla trae la regla (punto 8). La asignación masiva desde la pantalla no la exige.
+
+Verificado en local con un Excel de 3 personas: la de 42 h pasa, la de 43 h 30 min y la de 49 h sin descanso salen con sus filas, "Aplicar" responde que no se cargó nada y no se escribe ningún horario.
+
+**Despliegue:** migración 110 ANTES del código (sin el parámetro el cargue responde que falta y no carga nada), luego backend y frontend.

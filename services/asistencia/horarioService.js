@@ -8,6 +8,9 @@ const notificacionService = require('./notificacionService');
 const mallaHorarios = require('../../domain/asistencia/mallaHorarios');
 const plantillaMalla = require('../../domain/asistencia/plantillaMalla');
 const mallaRetroactiva = require('../../domain/asistencia/mallaRetroactiva');
+const semanaMalla = require('../../domain/asistencia/semanaMalla');
+const parametroRepo = require('../../repositories/asistencia/parametroRepository');
+const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const cierreService = require('./cierreService');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
@@ -240,8 +243,35 @@ async function planDeMalla(directorUsersCompanyId, buffer, rango = null) {
     }
     const plantillas = await horarioPlantillaRepo.findPorDueno(directorUsersCompanyId);
     const plan = mallaHorarios.planificar({ registros: lectura.registros, hoy, equipo, cedulasRrhh, cedulasRetiradas, existentes, plantillas });
+    // 42 h y un descanso por semana (§90). La carga retroactiva (§76) no lo exige: corrige días que ya pasaron.
+    plan.semanas = rango ? { desajustes: [], sinValidar: [] } : await validarSemanasDelPlan(plan);
     return { lectura, plan, hoy };
 }
+
+// Semanas completas (lunes a domingo) de cada persona del equipo que trae el Excel: lo del Excel más lo ya cargado
+// en los días que no trae, y las novedades de RRHH de esas semanas (§90).
+async function validarSemanasDelPlan(plan) {
+    const { horas_semanales_malla: horasSemana } = await parametroRepo.obtener();
+    if (!Number.isFinite(horasSemana) || horasSemana <= 0) {
+        throw new ReglaAsistenciaError('Falta el parámetro horas_semanales_malla (migración 110): no se puede validar la malla');
+    }
+    const filas = plan.filas.filter((f) => ['nuevo', 'reemplaza', 'igual'].includes(f.estado));
+    const rango = semanaMalla.rangoDeSemanas(filas.map((f) => f.fecha));
+    if (!rango) return { desajustes: [], sinValidar: [] };
+    const ids = [...new Set(filas.map((f) => f.users_company_id))];
+    const [horarios, novedadesRrhh] = await Promise.all([
+        horarioAsignadoRepo.findRangoPorEmpleados(ids, rango.desde, rango.hasta),
+        novedadEquipoRepo.vigentesDe(ids, rango.desde, rango.hasta)
+    ]);
+    const existentes = new Map(horarios.map((h) => [`${h.users_company_id}|${claveFecha(h.fecha)}`, h]));
+    return semanaMalla.validarSemanas({ filas, existentes, novedadesRrhh, minutosSemana: horasSemana * 60 });
+}
+
+// Mensaje cuando la malla no cuadra: no se carga nada.
+const mensajeDesajustes = (desajustes) => {
+    const personas = new Set(desajustes.map((d) => d.users_company_id)).size;
+    return `No se cargó la malla: ${personas} ${personas === 1 ? 'persona no cumple' : 'personas no cumplen'} las horas semanales o el día de descanso. Corrige las filas indicadas y vuelve a subirla.`;
+};
 
 // Personas omitidas (retiradas, antes de su ingreso, no están a cargo o no existen en RRHH), una línea por persona.
 const ESTADOS_OMITIDOS = ['retirado', 'antes_ingreso', 'no_a_cargo', 'no_encontrado'];
@@ -266,7 +296,14 @@ async function previsualizarMalla({ directorUsersCompanyId, buffer }) {
         success: true,
         hoja: lectura.hoja,
         hoy,
-        resumen: { ...plan.resumen, errores: lectura.errores.length, sin_diligenciar: lectura.sinDiligenciar ?? 0 },
+        resumen: {
+            ...plan.resumen, errores: lectura.errores.length, sin_diligenciar: lectura.sinDiligenciar ?? 0,
+            desajustes_semana: plan.semanas.desajustes.length, semanas_sin_validar: plan.semanas.sinValidar.length
+        },
+        // §90: con un solo desajuste no se carga nada. `puede_aplicar` lo dice para que la pantalla no ofrezca el botón.
+        puede_aplicar: plan.semanas.desajustes.length === 0,
+        desajustes_semana: plan.semanas.desajustes.slice(0, MAX_ERRORES_RESPUESTA),
+        semanas_sin_validar: plan.semanas.sinValidar.slice(0, MAX_ERRORES_RESPUESTA),
         horarios: delEquipo.map((f) => ({
             fila: f.fila,
             users_company_id: f.users_company_id,
@@ -307,6 +344,7 @@ const INSTRUCCIONES = (desde, hasta) => [
     ['5. Las filas que dejes sin Entrada, Salida ni Novedad no se cargan: ese día queda como estaba.'],
     ['6. No cambies Cedula ni Fecha. Nombre, Cargo y Centro de costo son informativos.'],
     ['7. Los turnos que cruzan la medianoche (salida antes de la entrada) no se pueden cargar.'],
+    ['8. Cada persona debe sumar exactamente 42 horas por semana (lunes a domingo, sin el almuerzo) y tener al menos un día de descanso. Si una sola persona no cuadra, no se carga nada y la vista previa dice qué filas corregir. Las semanas con vacaciones, incapacidad u otra novedad no se revisan.'],
     [],
     ['Cuando termines, súbela en Horarios → Cargar malla. Primero verás una vista previa y después la aplicas.']
 ];
@@ -385,6 +423,8 @@ async function plantillaMallaExcel({ directorUsersCompanyId, desde, hasta }) {
  */
 async function aplicarMalla({ directorUsersCompanyId, buffer, creadoPor }) {
     const { plan, hoy } = await planDeMalla(directorUsersCompanyId, buffer);
+    // Todo o nada (§90): si una persona no cuadra sus horas o su descanso en alguna semana, no se carga ningún horario.
+    if (plan.semanas.desajustes.length > 0) throw new ReglaAsistenciaError(mensajeDesajustes(plan.semanas.desajustes));
     const aAplicar = plan.filas.filter((f) => f.estado === 'nuevo' || f.estado === 'reemplaza');
     if (aAplicar.length === 0) {
         return { success: true, horarios_aplicados: 0, plantillas_creadas: [], resumen: plan.resumen, message: 'No hay horarios nuevos ni cambios para aplicar' };
