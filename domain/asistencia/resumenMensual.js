@@ -30,8 +30,10 @@ const num = (v) => Number(v) || 0;
  * `descansos` = Set de fechas que su horario marca como día de descanso (§73). Un descanso en que no trabajó va en
  * la grilla como 'descanso' (haya o no jornada) y cuenta en `dias_descanso`; nunca es ausencia. La novedad que
  * cubre el día manda sobre el descanso; si trabajó, el día sigue trabajado.
+ * `libres` = Set de fechas de esos descansos que son un día libre aprobado (novedad de asistencia, §86): el día se
+ * trata igual que un descanso, pero lleva `libre: true` para mostrarse como "Libre" y cuenta además en `dias_libre`.
  */
-function resumenDeJornadas(jornadas, novedades = new Map(), descansos = new Set()) {
+function resumenDeJornadas(jornadas, novedades = new Map(), descansos = new Set(), libres = new Set()) {
     const trabajadas = jornadas.filter((j) => TRABAJADO.has(j.estado));
     const cubierto = (j) => novedades.get(fechaCelda(j.fecha))?.cubre_dia === true;
     const fechasConJornada = new Set(jornadas.map((j) => fechaCelda(j.fecha)));
@@ -49,6 +51,7 @@ function resumenDeJornadas(jornadas, novedades = new Map(), descansos = new Set(
         ausencias: jornadas.filter((j) => j.estado === 'ausente' && !cubierto(j) && !esDescanso(fechaCelda(j.fecha))).length,
         dias_novedad: diasNovedad.length,
         dias_descanso: diasDescanso.length,
+        dias_libre: diasDescanso.filter((f) => libres.has(f)).length,
         porcentaje_puntualidad: diasTrabajados > 0 ? Math.round((diasPuntuales / diasTrabajados) * 100) : null
     };
     for (const [salida, columna] of Object.entries(CAMPOS_MINUTOS)) {
@@ -65,7 +68,8 @@ function resumenDeJornadas(jornadas, novedades = new Map(), descansos = new Set(
             segundos_tarde: num(j.segundos_tarde),
             minutos_trabajados: num(j.minutos_trabajados),
             minutos_extra: num(j.minutos_extra),
-            novedad
+            novedad,
+            ...(esDescanso(fecha) && libres.has(fecha) ? { libre: true } : {})
         };
     });
     // Días con novedad sin jornada (sin horario ese día): también se ven en la grilla.
@@ -77,7 +81,10 @@ function resumenDeJornadas(jornadas, novedades = new Map(), descansos = new Set(
     // Días de descanso sin jornada: también en la grilla, con su marca.
     for (const fecha of diasDescanso) {
         if (!fechasConJornada.has(fecha)) {
-            resumen.dias.push({ fecha, estado: 'descanso', minutos_tarde: 0, segundos_tarde: 0, minutos_trabajados: 0, minutos_extra: 0, novedad: null });
+            resumen.dias.push({
+                fecha, estado: 'descanso', minutos_tarde: 0, segundos_tarde: 0, minutos_trabajados: 0, minutos_extra: 0, novedad: null,
+                ...(libres.has(fecha) ? { libre: true } : {})
+            });
         }
     }
     resumen.dias.sort((a, b) => a.fecha.localeCompare(b.fecha));

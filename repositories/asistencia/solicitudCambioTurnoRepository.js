@@ -102,6 +102,25 @@ async function findPendientesQueChocan(empleadoIds, fechas, conn = db) {
     return filas;
 }
 
+// Solicitudes (cualquier estado) que tocan a un empleado en una fecha, con su día y los nombres de quien pidió,
+// quien aprueba y quien resolvió: la traza de novedades de asistencia del día (§86).
+async function findPorEmpleadoYFecha(empleadoId, fecha, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT s.idsolicitud_cambio_turno, s.tipo, s.estado, s.motivo, s.motivo_rechazo, s.comentario, s.creado_en, s.resuelta_en,
+                ${nombreDe('sol')} AS solicitante, ${nombreDe('apr')} AS aprobador, ${nombreDe('res')} AS resuelto_por,
+                d.hora_entrada, d.hora_salida, d.es_descanso, d.anterior_hora_entrada, d.anterior_hora_salida, d.anterior_es_descanso
+         FROM solicitud_cambio_turno_dia d
+         JOIN solicitud_cambio_turno s ON s.idsolicitud_cambio_turno = d.solicitud_id
+         JOIN users_company sol ON sol.id = s.solicitante_users_company_id
+         JOIN users_company apr ON apr.id = s.aprobador_users_company_id
+         LEFT JOIN users_company res ON res.id = s.resuelto_por_users_company_id
+         WHERE d.users_company_id = ? AND d.fecha = ?
+         ORDER BY s.creado_en`,
+        [empleadoId, fecha]
+    );
+    return filas;
+}
+
 // Solo resuelve una pendiente; devuelve si la resolvió.
 async function resolver(id, { estado, motivoRechazo, comentario, resueltoPorUsersCompanyId, resueltoPor }, conn = db) {
     const [resultado] = await conn.query(
@@ -114,4 +133,4 @@ async function resolver(id, { estado, motivoRechazo, comentario, resueltoPorUser
     return resultado.affectedRows > 0;
 }
 
-module.exports = { insertar, insertarDias, findByIdParaActualizar, findListado, findById, findDias, findPendientesQueChocan, resolver };
+module.exports = { insertar, insertarDias, findByIdParaActualizar, findListado, findById, findDias, findPendientesQueChocan, findPorEmpleadoYFecha, resolver };

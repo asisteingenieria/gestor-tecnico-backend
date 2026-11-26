@@ -204,7 +204,8 @@ const ESTADOS_CAMBIO_TURNO = ['pendiente', 'aprobada', 'rechazada'];
 
 const solicitarCambioTurnoSchema = {
     body: {
-        tipo: { requerido: true, enum: ['cambio_horario', 'intercambio'] },
+        // 'libre' = días libres completos, novedad de asistencia del coordinador (§86).
+        tipo: { requerido: true, enum: ['cambio_horario', 'intercambio', 'libre'] },
         motivo: { requerido: true, tipo: 'texto' },
         empleado_id: { requerido: true, tipo: 'entero' },
         empleado2_id: { tipo: 'entero' },

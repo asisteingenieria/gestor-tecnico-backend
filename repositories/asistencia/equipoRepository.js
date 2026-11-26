@@ -245,6 +245,68 @@ async function gestorConNombreDe(usersCompanyId, conn = db) {
     return filas[0] ?? null;
 }
 
+// --- Novedades de asistencia (cambio de turno y libre, §86) ---
+// Las pide solo el coordinador (§86): quien tiene cargo de coordinador en su contrato vigente y es el jefe inmediato
+// (`jefe_inmediato_id`) de la persona, siempre que no sea también quien la gestiona —ese es el jefe de operaciones,
+// que solo aprueba—. El cargo se exige porque en RRHH hay agentes, formadores y otros cargos que figuran como jefe
+// inmediato de alguien: ellos no piden. Cada fila trae quién gestiona al empleado (`gestor_id`/`gestor`), que es quien
+// aprueba. Sin gestor la fila sale igual, para que la pantalla diga que falta asignarlo. Contrato vigente (§63).
+const CARGO_COORDINADOR = '%COORDINADOR%';
+const SOLICITABLES_WHERE = `c.jefe_inmediato_id = ? AND NOT (${GESTOR} <=> ?) AND c.users_company_id <> ? AND ec.nombre IN (?, ?)
+           AND ${CONTRATO_VIGENTE('c')}
+           AND EXISTS (SELECT 1
+                       FROM contrato cs
+                       JOIN estado_contrato ecs ON ecs.idestado_contrato = cs.estado_contrato_idestado_contrato
+                       JOIN cargo cgs ON cgs.idcargo = cs.cargo_idcargo
+                       WHERE cs.users_company_id = ? AND ecs.nombre IN (?, ?) AND ${CONTRATO_VIGENTE('cs')}
+                         AND UPPER(cgs.nombre) LIKE ?)`;
+// Parámetros de SOLICITABLES_WHERE, en orden.
+const paramsSolicitables = (id) => [id, id, id, ...ESTADOS_CONTRATO_ACTIVOS, id, ...ESTADOS_CONTRATO_ACTIVOS, CARGO_COORDINADOR];
+
+async function solicitablesDe(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT uc.id AS users_company_id, uc.nombre_propio, uc.numero_identificacion, car.nombre AS cargo,
+                cam.nombre AS campania, c.centro_costo_idcentro_costo AS centro_costo_id, cc.nombre AS centro_costo,
+                ${GESTOR} AS gestor_id, g.nombre_propio AS gestor
+         FROM contrato c
+         JOIN users_company uc ON uc.id = c.users_company_id
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         LEFT JOIN users_company g ON g.id = ${GESTOR}
+         LEFT JOIN cargo car ON car.idcargo = c.cargo_idcargo
+         LEFT JOIN campania cam ON cam.idcampania = c.campania_idcampania
+         LEFT JOIN centro_costo cc ON cc.idcentro_costo = c.centro_costo_idcentro_costo
+         WHERE ${SOLICITABLES_WHERE}
+         ORDER BY uc.nombre_propio`,
+        paramsSolicitables(usersCompanyId)
+    );
+    return filas;
+}
+
+// De una lista de fichas, las que esta ficha puede pedir, con el gestor de cada una (una consulta).
+async function solicitablesEntre(usersCompanyId, empleadoIds, conn = db) {
+    if (empleadoIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT c.users_company_id, ${GESTOR} AS gestor_id
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE ${SOLICITABLES_WHERE} AND c.users_company_id IN (?)`,
+        [...paramsSolicitables(usersCompanyId), empleadoIds]
+    );
+    return filas;
+}
+
+async function tieneSolicitables(usersCompanyId, conn = db) {
+    const [filas] = await conn.query(
+        `SELECT 1
+         FROM contrato c
+         JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+         WHERE ${SOLICITABLES_WHERE}
+         LIMIT 1`,
+        paramsSolicitables(usersCompanyId)
+    );
+    return filas.length > 0;
+}
+
 // Cargo del contrato activo más reciente, para mostrarlo bajo el nombre en la barra del portal.
 async function cargoDe(usersCompanyId, conn = db) {
     const [filas] = await conn.query(
@@ -262,6 +324,9 @@ async function cargoDe(usersCompanyId, conn = db) {
 
 module.exports = {
     cargoDe,
+    solicitablesDe,
+    solicitablesEntre,
+    tieneSolicitables,
     tieneJefesACargo,
     gestorConNombreDe,
     tienePersonalACargo,

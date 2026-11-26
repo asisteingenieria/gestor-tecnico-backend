@@ -13,6 +13,7 @@ const { noHaLlegado } = require('../../domain/asistencia/reglasJornada');
 const { veTodasLasCampanias, alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const asislockVista = require('./asislockVista');
 const molineteVista = require('./molineteVista');
+const novedadAsistenciaVista = require('./novedadAsistenciaVista');
 const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
 const { novedadDelDia, porEmpleado, novedadesPorFecha } = require('../../domain/asistencia/novedadesAsistencia');
 const { usaAsislock } = require('../../domain/asistencia/fuenteMarcaje');
@@ -150,7 +151,9 @@ async function estadoEnVivo(empleados) {
                 plantilla: horario.plantilla,
                 hora_entrada: horario.hora_entrada,
                 hora_salida: horario.hora_salida,
-                es_descanso: !!horario.es_descanso
+                es_descanso: !!horario.es_descanso,
+                // Día libre aprobado (novedad de asistencia, §86): un descanso que se muestra como "Libre".
+                es_libre: !!horario.es_libre
             } : null,
             estado: estadoCalculado.estado,
             // Sin entrada y su turno de hoy ya empezó (§62): en el monitor, 'No ha llegado' en vez de 'Sin iniciar'.
@@ -226,6 +229,8 @@ async function trazabilidadDeEmpleado(empleadoId, fecha) {
         jornada: { ...jornada, ...estadoCalculado },
         asislock: await asislockVista.delDia(empleadoId, fecha),
         molinete: await molineteVista.delDia(empleadoId, fecha),
+        // Cambios de turno y libres que tocan el día, con a qué hora se pidieron y se resolvieron (§86).
+        novedades_asistencia: await novedadAsistenciaVista.delDia(empleadoId, fecha),
         eventos: eventos.map((e) => ({
             tipo: e.tipo,
             ocurrido_en: e.ocurrido_en.toISOString(),
@@ -315,13 +320,14 @@ async function resumenMensualEquipo({ directorUsersCompanyId, periodo, campaniaI
     ]);
     const novedadesDe = porEmpleado(novedades);
     const descansosDe = descansosPorEmpleado(horarios);
+    const libresDe = descansosPorEmpleado(horarios.filter((h) => h.es_libre));
 
     const filas = await Promise.all(personas.map(async (persona) => {
         await cierreService.normalizarRangoSiEsPasado(persona.users_company_id, desde, hasta, ahora);
         const jornadas = await jornadaRepo.findRango(persona.users_company_id, desde, hasta);
         // Hasta hoy: unas vacaciones que siguen la próxima semana no cuentan días que aún no pasan.
         const novedadesMes = novedadesPorFecha(novedadesDe.get(persona.users_company_id), desde, hastaHoy);
-        return { ...persona, ...resumenDeJornadas(jornadas, novedadesMes, descansosDe.get(persona.users_company_id)) };
+        return { ...persona, ...resumenDeJornadas(jornadas, novedadesMes, descansosDe.get(persona.users_company_id), libresDe.get(persona.users_company_id)) };
     }));
     filas.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
 

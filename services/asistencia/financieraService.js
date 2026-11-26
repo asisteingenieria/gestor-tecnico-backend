@@ -120,7 +120,8 @@ async function resumenMensual({ periodo, campaniaId = null }) {
         for (const h of horarios) {
             if (!turnosPorEmp.has(h.users_company_id)) turnosPorEmp.set(h.users_company_id, []);
             turnosPorEmp.get(h.users_company_id).push({
-                fecha: h.fecha, plantilla: h.plantilla, hora_entrada: h.hora_entrada, hora_salida: h.hora_salida, es_descanso: !!h.es_descanso
+                fecha: h.fecha, plantilla: h.plantilla, hora_entrada: h.hora_entrada, hora_salida: h.hora_salida, es_descanso: !!h.es_descanso,
+                es_libre: !!h.es_libre
             });
         }
         const hastaHoy = hasta < hoy ? hasta : hoy;
@@ -129,11 +130,13 @@ async function resumenMensual({ periodo, campaniaId = null }) {
             // Grilla con los días con novedad marcados (también los que no tienen jornada), como la del jefe.
             const novedadesMes = novedadesPorFecha(mes.novedadesDe.get(r.users_company_id), desde, hastaHoy);
             // Días de descanso de su malla (§73): marcados en la grilla y contados en `dias_descanso`.
-            const descansos = new Set((turnosPorEmp.get(r.users_company_id) || [])
-                .filter((t) => t.es_descanso)
-                .map((t) => (t.fecha instanceof Date ? t.fecha.toISOString().slice(0, 10) : String(t.fecha).slice(0, 10))));
+            const fechaDe = (t) => (t.fecha instanceof Date ? t.fecha.toISOString().slice(0, 10) : String(t.fecha).slice(0, 10));
+            const turnosDelEmp = turnosPorEmp.get(r.users_company_id) || [];
+            const descansos = new Set(turnosDelEmp.filter((t) => t.es_descanso).map(fechaDe));
+            // Días libres aprobados (§86): descansos que la grilla muestra como "Libre".
+            const libres = new Set(turnosDelEmp.filter((t) => t.es_libre).map(fechaDe));
             const resumenDiasDe = () => {
-                const { dias, dias_descanso } = resumenDeJornadas(diasPorEmp.get(r.users_company_id) || [], novedadesMes, descansos);
+                const { dias, dias_descanso } = resumenDeJornadas(diasPorEmp.get(r.users_company_id) || [], novedadesMes, descansos, libres);
                 return { dias, dias_descanso };
             };
             return {

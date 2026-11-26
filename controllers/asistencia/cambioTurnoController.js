@@ -10,7 +10,7 @@ async function empleados(req, res) {
 }
 
 async function plantillas(req, res) {
-    res.json(await cambioTurnoService.plantillasPara({ solicitanteUsersCompanyId: req.user.users_company_id }));
+    res.json(await cambioTurnoService.plantillasPara({ solicitanteUsersCompanyId: req.user.users_company_id, empleadoId: req.query.empleadoId }));
 }
 
 // `empleados` llega como "12,34" en la query.
