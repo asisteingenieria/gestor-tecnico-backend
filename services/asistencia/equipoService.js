@@ -133,7 +133,7 @@ async function estadoEnVivo(empleados) {
     const novedadesDe = porEmpleado(novedades);
 
     return empleados.map((empleado) => {
-        const { estadoCalculado, horario } = estados.get(empleado.users_company_id);
+        const { estadoCalculado, horario, origenEntrada } = estados.get(empleado.users_company_id);
         // Novedad de RRHH de hoy (incapacidad, vacaciones, licencia…, §71): si cubre el día, no es "No ha llegado".
         const novedad = novedadDelDia(novedadesDe.get(empleado.users_company_id), fecha);
         return {
@@ -179,6 +179,8 @@ async function estadoEnVivo(empleados) {
             jornada_corre: !!estadoCalculado.cuentaJornada,
             alertas: estadoCalculado.alertas,
             asislock: asislockPorEmpleado[empleado.users_company_id] ?? null,
+            // Quien entra solo con el biométrico (molinete) no trae modalidad de AsisLock: la pantalla lo muestra así (§89).
+            origen_entrada: origenEntrada ?? null,
             // Staff (técnicos, desarrolladores, analistas, jefes…): no entra a AsisLock y el monitor no le
             // muestra las columnas de pausas (§83).
             usa_asislock: usaAsislock({
