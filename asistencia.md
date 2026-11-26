@@ -4469,3 +4469,14 @@ coordinador y financiera). Sin migración.
 - Estado "Presente" en vez de "Conectado" para el staff.
 - Un backend anterior no manda `usa_asislock` y el frontend lo toma como `true` (se ve como antes), así que el
   orden de despliegue no importa. El histórico mensual no cambia.
+
+## 84. El retraso se escribe con sus unidades: "5 min 13 s" (2026-11-26)
+
+**Pedido.** En la trazabilidad, un login a las 07:05:13 con turno de 07:00 decía "+5:13 min tarde", y se leía como
+5 horas 13 minutos.
+
+**Cambio** (solo frontend, `tardeExacto` en `src/utils/llegadaAsistencia.js`, que usan todas las pantallas de §72):
+cada unidad va escrita y se omiten las que valen 0. Ejemplos: "5 min 13 s", "45 min", "1 h 5 min 41 s", "40 s".
+Antes eran "5:13 min", "45:00 min" y "1:05:41 h". Aplica a la trazabilidad, al monitor del equipo, a Mi jornada, a
+Mis estadísticas, al histórico mensual del jefe y de financiera y a la columna "Tiempo tarde" de sus Excel. El
+backend no cambia: sigue mandando `segundos_tarde`. Sin migración. **Despliegue:** frontend (pull + `npm install && npm run build`).
