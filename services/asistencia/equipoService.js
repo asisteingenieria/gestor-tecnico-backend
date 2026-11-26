@@ -15,6 +15,7 @@ const asislockVista = require('./asislockVista');
 const molineteVista = require('./molineteVista');
 const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
 const { novedadDelDia, porEmpleado, novedadesPorFecha } = require('../../domain/asistencia/novedadesAsistencia');
+const { usaAsislock } = require('../../domain/asistencia/fuenteMarcaje');
 
 function requireUsersCompanyId(usersCompanyId) {
     if (!usersCompanyId) throw new NoEncontradoError('Tu usuario no está vinculado a una ficha de RRHH');
@@ -174,7 +175,14 @@ async function estadoEnVivo(empleados) {
             segundos_en_jornada: estadoCalculado.entradaEn ? estadoCalculado.segundosEnJornada : null,
             jornada_corre: !!estadoCalculado.cuentaJornada,
             alertas: estadoCalculado.alertas,
-            asislock: asislockPorEmpleado[empleado.users_company_id] ?? null
+            asislock: asislockPorEmpleado[empleado.users_company_id] ?? null,
+            // Staff (técnicos, desarrolladores, analistas, jefes…): no entra a AsisLock y el monitor no le
+            // muestra las columnas de pausas (§83).
+            usa_asislock: usaAsislock({
+                cargo: empleado.cargo,
+                centroCosto: empleado.centro_costo,
+                tieneAsislockHoy: !!asislockPorEmpleado[empleado.users_company_id]
+            })
         };
     });
 }
