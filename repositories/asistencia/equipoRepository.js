@@ -16,7 +16,43 @@ const CONTRATO_VIGENTE = (alias) => `${alias}.idcontrato = (SELECT MAX(cv.idcont
 // Desde la 082 (§44) quien gestiona puede ser otro: `contrato.gestor_asistencia_id`, cuando el jefe
 // de área no usa el sistema (German Arias, dueño de la empresa). NULL = el jefe de área. El jefe de
 // área que se muestra en la ficha y en los reportes no cambia; solo cambia quién gestiona.
-const GESTOR = 'COALESCE(c.gestor_asistencia_id, c.jefe_area_id)';
+//
+// Backoffice (§87): todo el que tenga un cargo de backoffice —BACKOFFICE, BACKOFFICE OBAMACARE, BACKOFFICE PE,
+// COORDINADOR BACKOFFICE PE…— lo gestiona la Jefe de Backoffice (cargo JEFE DE BACKOFFICE), no su jefe de área: ella
+// le carga el horario y su gente sale en su Equipo. Los jefes de operaciones ya no los ven. Es regla por cargo, así
+// que un backoffice nuevo le llega solo. Si no hay Jefe de Backoffice vigente, vuelve al jefe de área. Un
+// `gestor_asistencia_id` puesto a mano sigue mandando. Sin `?`: estos fragmentos van dentro de consultas con
+// parámetros posicionales; los literales son constantes del código, no datos de nadie.
+const ACTIVOS_SQL = `('${ESTADOS_CONTRATO_ACTIVOS.join("', '")}')`;
+const CARGOS_BACKOFFICE = `(SELECT cgb.idcargo FROM cargo cgb
+                             WHERE UPPER(cgb.nombre) LIKE '%BACKOFFICE%' AND UPPER(cgb.nombre) NOT LIKE '%JEFE%')`;
+const ES_BACKOFFICE = (a) => `${a}.cargo_idcargo IN ${CARGOS_BACKOFFICE}`;
+const JEFE_BACKOFFICE = `(SELECT MIN(cjb.users_company_id) FROM contrato cjb
+                            JOIN estado_contrato ecjb ON ecjb.idestado_contrato = cjb.estado_contrato_idestado_contrato
+                            JOIN cargo cgjb ON cgjb.idcargo = cjb.cargo_idcargo
+                           WHERE UPPER(cgjb.nombre) LIKE '%JEFE%BACKOFFICE%' AND ecjb.nombre IN ${ACTIVOS_SQL}
+                             AND cjb.idcontrato = (SELECT MAX(cvb.idcontrato) FROM contrato cvb WHERE cvb.users_company_id = cjb.users_company_id)
+                             AND NOT EXISTS (SELECT 1 FROM retiro rvb WHERE rvb.contrato_idcontrato = cjb.idcontrato))`;
+// Fichas con cargo de backoffice (Jefe de Backoffice incluida): solo ellas siguen viendo a un backoffice por ser su
+// jefe inmediato o de área (la Coordinadora de Backoffice PE ve a los suyos; un jefe de operaciones no).
+const PERSONAL_BACKOFFICE = `(SELECT cpb.users_company_id FROM contrato cpb
+                               JOIN estado_contrato ecpb ON ecpb.idestado_contrato = cpb.estado_contrato_idestado_contrato
+                               JOIN cargo cgpb ON cgpb.idcargo = cpb.cargo_idcargo
+                              WHERE UPPER(cgpb.nombre) LIKE '%BACKOFFICE%' AND ecpb.nombre IN ${ACTIVOS_SQL})`;
+
+// Quién gestiona el contrato con alias `a`.
+const gestorDe = (a) => `COALESCE(${a}.gestor_asistencia_id, CASE WHEN ${ES_BACKOFFICE(a)} THEN ${JEFE_BACKOFFICE} END, ${a}.jefe_area_id)`;
+const GESTOR = gestorDe('c');
+
+// ¿La línea de mando `col` (jefe_inmediato_id o jefe_area_id) del contrato `a` cuenta para ver a la persona? Siempre,
+// salvo que sea backoffice y ese jefe no sea de backoffice (§87).
+const lineaVisible = (a, col) => `(NOT ${ES_BACKOFFICE(a)} OR ${a}.${col} IN ${PERSONAL_BACKOFFICE})`;
+
+// "El contrato `a` cuelga de alguien de la lista" por las tres líneas de mando, con la regla de backoffice.
+// Lleva tres `?` (la lista, tres veces), en el mismo orden que la condición anterior.
+const DEL_ARBOL_SQL = (a = 'c') => `((${lineaVisible(a, 'jefe_inmediato_id')} AND ${a}.jefe_inmediato_id IN (?))
+          OR (${lineaVisible(a, 'jefe_area_id')} AND ${a}.jefe_area_id IN (?))
+          OR ${gestorDe(a)} IN (?))`;
 
 // Login (users.id) del jefe de área del contrato activo de un empleado, o null si no
 // tiene jefe asignado o el jefe no tiene cuenta de login vinculada.
@@ -122,18 +158,19 @@ async function listaEmpleadosACargo(directorUsersCompanyId, conn = db) {
 // toda su área (incluidos los coordinadores que le reportan como jefe inmediato) y el director todo lo de
 // abajo. Para ESCRIBIR (horarios, horas extra, correcciones) sigue valiendo solo GESTOR: esSubordinado y
 // listaEmpleadosACargo.
+// Desde §87 un backoffice cuelga solo de quien lo gestiona (la Jefe de Backoffice) y de sus jefes que sean de backoffice.
 const LINEAS_CTE = `lineas AS (
         SELECT c.users_company_id AS empleado_id, c.jefe_inmediato_id AS jefe_id
           FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE ec.nombre IN (?, ?) AND c.jefe_inmediato_id IS NOT NULL
+         WHERE ec.nombre IN (?, ?) AND c.jefe_inmediato_id IS NOT NULL AND ${lineaVisible('c', 'jefe_inmediato_id')}
         UNION
         SELECT c.users_company_id, c.jefe_area_id
           FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE ec.nombre IN (?, ?) AND c.jefe_area_id IS NOT NULL
+         WHERE ec.nombre IN (?, ?) AND c.jefe_area_id IS NOT NULL AND ${lineaVisible('c', 'jefe_area_id')}
         UNION
-        SELECT c.users_company_id, c.gestor_asistencia_id
+        SELECT c.users_company_id, ${GESTOR}
           FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
-         WHERE ec.nombre IN (?, ?) AND c.gestor_asistencia_id IS NOT NULL
+         WHERE ec.nombre IN (?, ?) AND ${GESTOR} IS NOT NULL
     )`;
 const PARAMS_LINEAS = [...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS, ...ESTADOS_CONTRATO_ACTIVOS];
 
@@ -145,9 +182,9 @@ async function tienePersonalACargo(usersCompanyId, conn = db) {
            FROM contrato c
            JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
           WHERE ec.nombre IN (?, ?) AND c.users_company_id <> ?
-            AND (c.jefe_inmediato_id = ? OR c.jefe_area_id = ? OR c.gestor_asistencia_id = ?)
+            AND ${DEL_ARBOL_SQL('c')}
           LIMIT 1`,
-        [...ESTADOS_CONTRATO_ACTIVOS, usersCompanyId, usersCompanyId, usersCompanyId, usersCompanyId]
+        [...ESTADOS_CONTRATO_ACTIVOS, usersCompanyId, [usersCompanyId], [usersCompanyId], [usersCompanyId]]
     );
     return filas.length > 0;
 }
@@ -223,7 +260,7 @@ async function tieneJefesACargo(usersCompanyId, conn = db) {
          WHERE ${GESTOR} = ? AND ec.nombre IN (?, ?) AND c.users_company_id <> ?
            AND EXISTS (SELECT 1 FROM contrato c2
                         JOIN estado_contrato ec2 ON ec2.idestado_contrato = c2.estado_contrato_idestado_contrato
-                       WHERE COALESCE(c2.gestor_asistencia_id, c2.jefe_area_id) = c.users_company_id AND ec2.nombre IN (?, ?))
+                       WHERE ${gestorDe('c2')} = c.users_company_id AND ec2.nombre IN (?, ?))
          LIMIT 1`,
         [usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS, usersCompanyId, ...ESTADOS_CONTRATO_ACTIVOS]
     );
@@ -252,7 +289,8 @@ async function gestorConNombreDe(usersCompanyId, conn = db) {
 // inmediato de alguien: ellos no piden. Cada fila trae quién gestiona al empleado (`gestor_id`/`gestor`), que es quien
 // aprueba. Sin gestor la fila sale igual, para que la pantalla diga que falta asignarlo. Contrato vigente (§63).
 const CARGO_COORDINADOR = '%COORDINADOR%';
-const SOLICITABLES_WHERE = `c.jefe_inmediato_id = ? AND NOT (${GESTOR} <=> ?) AND c.users_company_id <> ? AND ec.nombre IN (?, ?)
+// Un backoffice solo lo pide un coordinador de backoffice (§87).
+const SOLICITABLES_WHERE = `c.jefe_inmediato_id = ? AND ${lineaVisible('c', 'jefe_inmediato_id')} AND NOT (${GESTOR} <=> ?) AND c.users_company_id <> ? AND ec.nombre IN (?, ?)
            AND ${CONTRATO_VIGENTE('c')}
            AND EXISTS (SELECT 1
                        FROM contrato cs
@@ -323,6 +361,8 @@ async function cargoDe(usersCompanyId, conn = db) {
 }
 
 module.exports = {
+    gestorDe,
+    DEL_ARBOL_SQL,
     cargoDe,
     solicitablesDe,
     solicitablesEntre,
