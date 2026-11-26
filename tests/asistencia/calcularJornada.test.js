@@ -77,11 +77,12 @@ test('salida anticipada dentro de la ventana permitida', () => {
     assert.equal(resultado.minutosSalidaAnticipada, 5);
 });
 
-test('excedente sin hora extra aprobada no cuenta como extra y alerta', () => {
+test('excedente sin hora extra aprobada no cuenta como extra y no alerta (§88)', () => {
     const eventos = [evento('entrada', '08:00:00'), evento('salida', '17:30:00')];
     const resultado = calcularJornada(eventos, HORARIO, horaDia('17:30:00'), []);
     assert.equal(resultado.minutosExtra, 0);
-    assert.ok(resultado.alertas.includes('extra_sin_aprobar'));
+    assert.ok(!resultado.alertas.includes('extra_sin_aprobar'));
+    assert.equal(resultado.minutosTrabajados, 570);
 });
 
 test('excedente con hora extra aprobada cuenta hasta el tope aprobado', () => {

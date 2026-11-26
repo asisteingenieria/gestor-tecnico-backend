@@ -4606,3 +4606,15 @@ dos horas, y el Histórico mostró el día en violeta. Los datos de prueba se bo
 Un backoffice nuevo queda con ella solo, sin tocar datos. Verificado en local: Hellen gestiona 20 backoffice; Nuncira, Kevin, Laura Acero y Carlos Salomón quedan con 0. 480 tests pasan.
 
 **Despliegue:** solo backend (pull + `pm2 restart gestor-backend`), sin migración ni frontend.
+
+## 88. Sin alerta "Hora extra sin aprobar"; aprobar recalcula la jornada (2026-11-26)
+
+**Problema.** En producción salía "Hora extra sin aprobar" a mucha gente: bastaba un segundo después de la salida del turno. No es una solicitud, por eso no aparecía en Horas extra del jefe ni del director.
+
+**Decisión del usuario.** Quedarse después de la salida no es alerta. El tiempo queda en la traza del día (desborde, `resumenHoraExtra`) y el jefe decide si pide la hora extra; no es obligatorio.
+- `calcularJornada` ya no pone `extra_sin_aprobar`. Sin aprobación, el excedente sigue sin contar como hora extra (`minutos_extra = 0`) pero sí como tiempo trabajado.
+- Flujo para pagarla: el jefe la solicita (Horas extra → "Solicitar horas extra", persona y día), su director la aprueba en "Por aprobar".
+- **Al aprobar** (`horaExtraService.aprobar`), en la misma transacción se recalculan los totales guardados de la jornada de ese día (`recalcularJornadaDe`), aunque ya esté cerrada: `minutos_extra` queda con lo aprobado en estadísticas, histórico y financiera. Antes solo cambiaba la vista en vivo hasta un `recalcularJornadas`. Una ausencia no se recalcula (§77). Después del commit avisa por socket (`notificarCambioJornada`).
+- El frontend no cambia (la etiqueta de la alerta queda sin uso).
+
+**Despliegue:** solo backend, sin migración.

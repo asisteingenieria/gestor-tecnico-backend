@@ -186,12 +186,12 @@ function calcularJornada(eventos, horario, ahora, horasExtraAprobadas = [], para
             minutosSalidaAnticipada = minutosEntre(salida.ocurrido_en, horaSalidaProgramada);
         }
 
+        // Quedarse después de la salida no es alerta (§88): queda en la traza del día (desborde) y solo cuenta como
+        // hora extra lo que se apruebe. Pedirla es decisión del jefe, no una obligación.
         if (fin > horaSalidaProgramada) {
             const aprobada = horasExtraAprobadas.find((h) => normalizarClave(h.fecha) === normalizarClave(horario.fecha));
             if (aprobada && aprobada.minutos_aprobados) {
                 minutosExtra = Math.min(minutosEntre(horaSalidaProgramada, fin), aprobada.minutos_aprobados);
-            } else {
-                alertas.push('extra_sin_aprobar');
             }
         }
 

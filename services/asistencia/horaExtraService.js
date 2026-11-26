@@ -6,6 +6,9 @@ const festivoRepo = require('../../repositories/asistencia/festivoRepository');
 const ventanaNocturnaRepo = require('../../repositories/asistencia/ventanaNocturnaRepository');
 const notificacionRepo = require('../../repositories/asistencia/notificacionAsistenciaRepository');
 const notificacionAsistenciaService = require('./notificacionAsistenciaService');
+const notificacionService = require('./notificacionService');
+const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
+const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const { clasificarHoraExtra, totalMinutos, claseDominante } = require('../../domain/asistencia/clasificarHoraExtra');
 const { CLASES } = require('../../domain/asistencia/reporteHorasExtra');
 const { assertAprobador, mensajesHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
@@ -190,6 +193,17 @@ function avisosDeResolucion(solicitud, aprobada, motivo) {
     return avisos;
 }
 
+// Al aprobar, la jornada de ese día cuenta la hora extra (§88): se recalculan sus totales guardados
+// (`minutos_extra`, que leen estadísticas, histórico y financiera) aunque la jornada ya esté cerrada, y la alerta
+// "Hora extra sin aprobar" desaparece. Una ausencia no tiene eventos y se queda como está (§77). Devuelve si recalculó.
+async function recalcularJornadaDe(usersCompanyId, fecha, conn) {
+    const jornada = await jornadaRepo.findPorFecha(usersCompanyId, fecha, conn);
+    if (!jornada || jornada.estado === 'ausente') return false;
+    const { estadoCalculado, eventos } = await calcularEstadoConDatos(usersCompanyId, fecha, jornada.idjornada, new Date(), conn);
+    await jornadaRepo.actualizarTotales(jornada.idjornada, construirTotales(estadoCalculado, eventos), conn);
+    return true;
+}
+
 // Aprobar: el director confirma la clasificación o la ajusta (manda `tramos`). Los minutos aprobados
 // son la suma de los tramos efectivos. Si no manda tramos, se quedan los que calculó el servidor.
 async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario, aprobadoPor }) {
@@ -212,6 +226,7 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario
         );
         if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
         if (ajuste.length > 0) await horaExtraRepo.reemplazarTramos(idhoraExtra, efectivos, conn);
+        await recalcularJornadaDe(solicitud.users_company_id, normalizarFecha(solicitud.fecha), conn);
         await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
     } catch (e) {
@@ -221,6 +236,8 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario
         conn.release();
     }
     notificacionAsistenciaService.avisarEnVivo(notificaciones);
+    // Las pantallas en vivo (Equipo hoy, monitor) quitan la alerta sin esperar la resincronización.
+    notificacionService.notificarCambioJornada(solicitud.users_company_id, 'hora_extra_aprobada');
     return { success: true };
 }
 
