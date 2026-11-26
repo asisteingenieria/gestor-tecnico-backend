@@ -4480,3 +4480,25 @@ cada unidad va escrita y se omiten las que valen 0. Ejemplos: "5 min 13 s", "45 
 Antes eran "5:13 min", "45:00 min" y "1:05:41 h". Aplica a la trazabilidad, al monitor del equipo, a Mi jornada, a
 Mis estadísticas, al histórico mensual del jefe y de financiera y a la columna "Tiempo tarde" de sus Excel. El
 backend no cambia: sigue mandando `segundos_tarde`. Sin migración. **Despliegue:** frontend (pull + `npm install && npm run build`).
+
+## 85. Filtro por cargo, además de centro de costo, en las vistas de Equipo (2026-11-26)
+
+**Pedido.** Que jefes, financiera y coordinadores puedan filtrar su equipo por cargo además de por centro de costo.
+
+**Cambio** (solo frontend, sin backend ni migración: `cargo` y `centro_costo` ya venían en cada fila):
+- Pieza compartida: `src/hooks/useFiltroCentroCargo.js` (estado) y `src/components/asistencia/FiltroCentroCargo.jsx`
+  (los dos selectores). Los filtros se combinan: el conteo de cada centro respeta el cargo elegido y el de cada cargo
+  respeta el centro. Cada selector aparece si en el equipo hay más de un valor, aunque el otro filtro deje uno solo.
+  "Sin cargo" / "Sin centro de costo" agrupan a quien no lo tiene.
+- **Equipo Hoy del jefe** y **Asistencia en vivo de financiera** (`EquipoAsistencia`): el selector de centro existente
+  pasa a la pieza compartida y se suma el de cargo. Filtran todo el tablero (mosaicos, franja de llegada y tabla). Cambiar
+  de campaña o de alcance limpia los dos.
+- **Equipo del coordinador** (`MonitorEquipo`): no tenía filtros; ahora tiene centro y cargo, y filtran mosaicos y tabla.
+- **Histórico de financiera** (`AsistenciaMensual`, ventana de detalle de la campaña): se suma cargo al centro.
+- El **Histórico del jefe y del coordinador** (`EquipoMensual`) ya tenía los dos filtros (§70); no cambia.
+
+**Verificado en local** con el jefe de prueba del seed (dos contratos con otro cargo y centro de forma temporal,
+revertidos después): opciones con conteo cruzado, mosaicos y tabla filtrados en `/asistencia/equipo` y
+`/operaciones/equipo`, sin errores en consola. La ventana del histórico de financiera no se probó en el navegador (no
+hay usuario financiera de prueba); usa la misma pieza. Lint y `npm run build` sin errores.
+**Despliegue:** frontend (pull + `npm install && npm run build`).
