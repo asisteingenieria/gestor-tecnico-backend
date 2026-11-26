@@ -339,7 +339,7 @@ const INSTRUCCIONES = (desde, hasta) => [
     ['Cómo llenarla'],
     ['1. Entrada y Salida en hora de 24 horas: 08:00, 17:00. Almuerzo es la duración: 00:30 = 30 minutos, 01:00 = una hora.'],
     ['2. Modelo Trabajo: elige de la lista Presencial o Trabajo en casa. Viene precargado con el del día o el del contrato; cámbialo si ese día es distinto.'],
-    ['3. Descanso: deja Entrada y Salida vacías y elige en Novedad DESCANSO (o INC, VACACIONES, RETIRO, SUSPENSION, LNR, LR si es otra ausencia).'],
+    ['3. Descanso: deja Entrada y Salida vacías y elige en Novedad DESCANSO. Las incapacidades, vacaciones y licencias las registra RRHH como novedad.'],
     ['4. Si la persona ya tenía horario ese día, viene precargado: cámbialo solo si hace falta.'],
     ['5. Las filas que dejes sin Entrada, Salida ni Novedad no se cargan: ese día queda como estaba.'],
     ['6. No cambies Cedula ni Fecha. Nombre, Cargo y Centro de costo son informativos.'],
@@ -376,7 +376,9 @@ function libroPlantillaMalla(filas, desde, hasta) {
     return agregarListas(buffer, 1, [
         {
             rango: `${col('Novedad')}2:${col('Novedad')}${ultima}`,
-            opciones: mallaHorarios.NOVEDADES_DESCANSO,
+            // Solo DESCANSO (§90.1): las ausencias (incapacidad, vacaciones, licencias…) las registra RRHH como novedad,
+            // no el jefe en la malla. El cargue sigue aceptando las demás si vienen escritas o precargadas.
+            opciones: ['DESCANSO'],
             titulo: 'Novedad',
             mensaje: 'Solo para días de descanso: deja Entrada y Salida vacías.'
         },
