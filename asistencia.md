@@ -3903,7 +3903,7 @@ backend nuevo, las columnas por estado y el tiempo total salen en "—".
 ### 70.4 Pendientes
 
 - Novedades y Retiros siguen con el diseño anterior.
-- Barra horizontal de ~15 px en las páginas con scroll vertical: el contenedor general mide `100vw`. No es de este cambio.
+- Barra horizontal de ~15 px en las páginas con scroll vertical: el contenedor general mide `100vw`. No es de este cambio. **Corregida el 2026-11-25** (Fase 0 de `claude/plan rediseno vistas.md`: `#root` a `width: 100%`). Las piezas de este diseño ya son reutilizables en `src/components/ui/`.
 
 ## 71. Novedades de RRHH en Equipo: sin "No ha llegado" ni ausencia cuando hay novedad (2026-11-18)
 
@@ -4418,3 +4418,25 @@ vencimiento local da 10 h aunque el servidor esté 7 min adelantado. Una sesión
 
 **Despliegue:** backend (pull + `pm2 restart gestor-backend`) y frontend (pull + `npm install && npm run build`).
 Pueden ir en cualquier orden.
+
+## 82. Rediseño de las vistas de asistencia con el diseño de Equipo (2026-11-25)
+
+Todas las pantallas de asistencia toman el diseño de Equipo Hoy/Histórico (§70): las del jefe, las de financiera y las del portal del empleado. Es solo frontend, sin backend ni migración.
+
+| Commit (`sebas-branch`, sin push) | Qué |
+|---|---|
+| `3e31d40` | Fase 0: piezas comunes |
+| `f4f9d59` | Ola 1: asistencia |
+| `4a6f232` | Ola 2: financiera, con el Pasivo vacacional del equipo |
+| `b7bbdde` | Ola 4: portal del empleado |
+
+- **Equipo del jefe y Asistencia en vivo de financiera** (`EquipoAsistencia`): el mismo monitor del coordinador.
+  - Conserva las siete tarjetas que suman el total (§78). Cada una filtra.
+  - Agrega "Llegaron tarde" como filtro aparte y la barra del reparto del día.
+  - La tabla de tiempos por estado comparte lógica con `MonitorEquipo` (`utils/monitorAsistencia.js`, `hooks/useTiemposEnVivo.js`).
+  - No cambió el backend: las dos vistas ya leían `equipoService.estadoEnVivo`.
+- **Trazabilidad** (`TrazabilidadView`): los KPI pasan a mosaicos, la línea del día va en un panel navy y los eventos en una tabla navy. La usan el jefe, financiera y el empleado.
+- **Horarios:** mosaicos de la semana (personas, plantillas, turnos, descansos, días sin horario), barra de filtros, plantillas y semana en paneles navy.
+
+Detalle de piezas, colores y verificación en `claude/plan rediseno vistas.md` ("Olas 1-4 — hecho").
+**Despliegue:** frontend (merge + pull + `npm install && npm run build`).

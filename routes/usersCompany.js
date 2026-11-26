@@ -38,6 +38,17 @@ const verificarGestionRRHH = (req, res, next) => {
     next();
 };
 
+// Catálogo de cargos (§61.4): solo recursosHumanos. Financiera no lo ve ni lo edita.
+const verificarSoloRecursosHumanos = (req, res, next) => {
+    if (req.user.role !== 'recursosHumanos') {
+        return res.status(403).json({
+            success: false,
+            message: 'Acceso denegado. El catálogo de cargos es solo para Recursos Humanos.'
+        });
+    }
+    next();
+};
+
 // Lectura del listado de empleados: además de RRHH, gestorActivos la necesita
 // (solo lectura) para el selector de "agente asignado" al crear/editar un activo.
 const verificarLecturaEmpleados = (req, res, next) => {
@@ -73,11 +84,11 @@ router.use(verifyToken);
 
 router.get('/',                          verificarLecturaEmpleados, userCompanyController.getAll);
 router.get('/catalogos',                 verificarRecursosHumanos, userCompanyController.getCatalogos);
-// Catálogo de cargos para RRHH y financiera (§61): antes de las rutas '/:id'.
-router.get('/cargos',                    verificarGestionRRHH, cargoController.listar);
-router.post('/cargos',                   verificarGestionRRHH, cargoController.crear);
-router.put('/cargos/:cargoId',           verificarGestionRRHH, cargoController.actualizar);
-router.delete('/cargos/:cargoId',        verificarGestionRRHH, cargoController.eliminar);
+// Catálogo de cargos, solo Recursos Humanos (§61, §61.4): antes de las rutas '/:id'.
+router.get('/cargos',                    verificarSoloRecursosHumanos, cargoController.listar);
+router.post('/cargos',                   verificarSoloRecursosHumanos, cargoController.crear);
+router.put('/cargos/:cargoId',           verificarSoloRecursosHumanos, cargoController.actualizar);
+router.delete('/cargos/:cargoId',        verificarSoloRecursosHumanos, cargoController.eliminar);
 // Excel con la jefatura de cada empleado vigente y quién le sube el horario (§51). Antes de '/:id'.
 router.get('/export/jefaturas',          verificarRecursosHumanos, userCompanyController.exportarJefaturas);
 // Excel de empleados con toda su información, por estado y rango de fechas (§56): solo RRHH y financiera.
