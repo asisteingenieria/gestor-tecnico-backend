@@ -4515,8 +4515,8 @@ o la rechaza. Queda la traza completa y el histórico: a qué hora se envió y a
 - Aprueba quien gestiona al empleado: `GESTOR = COALESCE(gestor_asistencia_id, jefe_area_id)`.
 - El coordinador pide solo por su gente directa (`jefe_inmediato_id`).
 
-**Migración 109** (`109_novedad_asistencia_libre.sql`, idempotente, requiere la 084; **pendiente en producción y va
-ANTES del código**, porque los upserts de horarios nombran `es_libre`):
+**Migración 109** (`109_novedad_asistencia_libre.sql`, idempotente, requiere la 084; **desplegada en producción el 2026-11-26** junto con el código —backend `a7dd528`, frontend `88d8a4a`—; va
+ANTES del código, porque los upserts de horarios nombran `es_libre`):
 - `solicitud_cambio_turno.tipo` suma el valor `'libre'`;
 - `horario_asignado.es_libre` (0/1). Un libre aprobado es un día `es_descanso = 1` con `es_libre = 1`.
 
@@ -4591,3 +4591,18 @@ dos horas, y el Histórico mostró el día en violeta. Los datos de prueba se bo
 1. Migración 109.
 2. Backend (pull + `pm2 restart gestor-backend`).
 3. Frontend (pull + `npm install && npm run build`).
+
+## 87. Backoffice: los gestiona la Jefe de Backoffice (2026-11-26)
+
+**Problema.** Los backoffice les aparecían a los jefes de operaciones (su jefe de área) para cargarles horario, aunque quien los maneja es la Jefe de Backoffice (cargo `JEFE DE BACKOFFICE`, hoy Hellen Martínez Gamarra).
+
+**Regla (por cargo, sin migración).** Todo contrato con un cargo que contiene `BACKOFFICE` y no es de jefe (BACKOFFICE, BACKOFFICE OBAMACARE, BACKOFFICE PE, COORDINADOR BACKOFFICE PE…) lo gestiona la Jefe de Backoffice:
+- `GESTOR` pasa a ser `gestorDe(alias)` en `equipoRepository`: `COALESCE(gestor_asistencia_id, Jefe de Backoffice si es backoffice, jefe_area_id)`. Un `gestor_asistencia_id` puesto a mano sigue mandando; si no hay Jefe de Backoffice vigente, vuelve al jefe de área. Con varias Jefes de Backoffice vigentes toma la de ficha más baja (hoy hay una).
+- Ella les carga la malla (pantalla y Excel), les pide horas extra (las aprueba su director, Nelson Acero) y los ve en Equipo, Histórico, novedades del equipo y retiros.
+- Las líneas de jefe inmediato y jefe de área de un backoffice solo cuentan si ese jefe también tiene cargo de backoffice (`lineaVisible`): la Coordinadora de Backoffice PE sigue viendo a los suyos y pidiéndoles novedades de asistencia; Nuncira, Nelson como jefe de área directo, Kevin o Laura Acero ya no los ven ni los pueden pedir.
+- El director de la Jefe de Backoffice (Nelson) los sigue viendo en consulta por su árbol, como al resto de la gente de sus jefes.
+- Mismo criterio en `novedadEquipoRepository`, `retiroEquipoRepository` (`DEL_ARBOL_SQL`) y el filtro por jefe de `reporteHorasExtraRepository`.
+
+Un backoffice nuevo queda con ella solo, sin tocar datos. Verificado en local: Hellen gestiona 20 backoffice; Nuncira, Kevin, Laura Acero y Carlos Salomón quedan con 0. 480 tests pasan.
+
+**Despliegue:** solo backend (pull + `pm2 restart gestor-backend`), sin migración ni frontend.

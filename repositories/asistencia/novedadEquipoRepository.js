@@ -1,4 +1,5 @@
 const db = require('../../config/db');
+const { DEL_ARBOL_SQL } = require('./equipoRepository');
 
 const ESTADOS_CONTRATO_ACTIVOS = ['activo', 'periodo_prueba'];
 
@@ -11,7 +12,7 @@ const ESTADOS_CONTRATO_ACTIVOS = ['activo', 'periodo_prueba'];
 async function listarDelArbol({ idsArbol, raizUsersCompanyId, desde, hasta, empleadoId, tipoNovedadId }, conn = db) {
     if (idsArbol.length === 0) return [];
     const condiciones = [
-        '(c.jefe_inmediato_id IN (?) OR c.jefe_area_id IN (?) OR c.gestor_asistencia_id IN (?))',
+        DEL_ARBOL_SQL('c'),
         'c.users_company_id <> ?'
     ];
     const params = [idsArbol, idsArbol, idsArbol, raizUsersCompanyId];

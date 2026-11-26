@@ -1,4 +1,5 @@
 const db = require('../../config/db');
+const { DEL_ARBOL_SQL } = require('./equipoRepository');
 
 // Retiros del equipo para la Red Maestra de Claro (asistencia.md §59, migración 102).
 // Quién cuelga de quién lo resuelve equipoRepository.idsDelArbol (tres líneas de mando, §57). Como en las
@@ -19,7 +20,8 @@ const ES_RETIRO_VIGENTE_CLARO = `UPPER(TRIM(cl.nombre)) = ?
     AND c.idcontrato = (SELECT MAX(c2.idcontrato) FROM contrato c2 WHERE c2.users_company_id = c.users_company_id)`;
 
 // Contratos retirados que tenían como jefe (inmediato, de área o gestor) a alguien del árbol.
-const DEL_ARBOL = '(c.jefe_inmediato_id IN (?) OR c.jefe_area_id IN (?) OR c.gestor_asistencia_id IN (?)) AND c.users_company_id <> ?';
+// Con la regla de backoffice de equipoRepository (§87).
+const DEL_ARBOL = `${DEL_ARBOL_SQL('c')} AND c.users_company_id <> ?`;
 
 async function listarDelArbol({ idsArbol, raizUsersCompanyId, soloPendientes = false }, conn = db) {
     if (idsArbol.length === 0) return [];
