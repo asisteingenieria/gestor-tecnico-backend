@@ -58,6 +58,13 @@ function horarioNuevo({ plantilla, valores, esDescanso }) {
     };
 }
 
+// Día libre (§86): el día queda como descanso —no cuenta como ausencia ni llegada tarde— y marcado como libre
+// (`horario_asignado.es_libre`, al aprobar) para verse como "Libre" y no como el descanso de la malla.
+const HORARIO_LIBRE = {
+    horarioPlantillaId: null, horaEntrada: '00:00:00', horaSalida: '00:00:00', minutosAlmuerzo: 0,
+    horaAlmuerzoInicio: null, toleranciaEntradaMin: 0, esDescanso: true
+};
+
 // Copia del horario vigente (fila de horario_asignado o null) para mostrar el antes y el después.
 function anteriorDe(horario) {
     if (!horario) return { anteriorHoraEntrada: null, anteriorHoraSalida: null, anteriorEsDescanso: null, anteriorPlantilla: null };
@@ -72,6 +79,14 @@ function anteriorDe(horario) {
 // Días de un cambio de horario: el mismo horario nuevo en cada fecha. `actuales` = Map fecha → horario vigente.
 function diasCambioHorario(empleadoId, fechas, nuevo, actuales) {
     return fechas.map((fecha) => ({ usersCompanyId: empleadoId, fecha, ...nuevo, ...anteriorDe(actuales.get(fecha)) }));
+}
+
+// Días de un libre: los del rango que no son ya descanso en la malla (un fin de semana dentro del rango no se
+// pide). Si todos lo son, no hay nada que pedir.
+function diasLibre(empleadoId, fechas, actuales) {
+    const pedibles = fechas.filter((f) => !actuales.get(f)?.es_descanso);
+    if (pedibles.length === 0) throw new ReglaAsistenciaError('Esos días ya son de descanso en su horario');
+    return diasCambioHorario(empleadoId, pedibles, HORARIO_LIBRE, actuales);
 }
 
 function comoNuevo(horario) {
@@ -110,14 +125,15 @@ function textoFechas(fechas) {
     return `del ${ddmm(unicas[0])} al ${ddmm(unicas[unicas.length - 1])}`;
 }
 
-// "cambio de turno de Ana Pérez el 30/10" / "intercambio de turnos entre Ana Pérez y Luis Gil el 30/10".
+// "cambio de turno de Ana Pérez el 30/10" / "intercambio de turnos entre Ana Pérez y Luis Gil el 30/10" /
+// "libre de Ana Pérez el 30/10".
 // `dias` trae `empleado` (nombre) y `fecha` ('YYYY-MM-DD').
 function resumenSolicitud(tipo, dias) {
     const nombres = [...new Set(dias.map((d) => formatearNombre(d.empleado)))];
     const fechas = textoFechas(dias.map((d) => d.fecha));
-    return tipo === 'intercambio'
-        ? `intercambio de turnos entre ${nombres.join(' y ')} ${fechas}`
-        : `cambio de turno de ${nombres[0]} ${fechas}`;
+    if (tipo === 'intercambio') return `intercambio de turnos entre ${nombres.join(' y ')} ${fechas}`;
+    if (tipo === 'libre') return `libre de ${nombres[0]} ${fechas}`;
+    return `cambio de turno de ${nombres[0]} ${fechas}`;
 }
 
 const recortar = (texto) => (texto.length > LARGO_MENSAJE ? `${texto.slice(0, LARGO_MENSAJE - 1)}…` : texto);
@@ -131,7 +147,9 @@ const mensajes = {
     turnoCambiado: (diasDelEmpleado) => recortar(`Tu turno cambió: ${[...diasDelEmpleado]
         .sort((a, b) => a.fecha.localeCompare(b.fecha))
         .map((d) => `${ddmm(d.fecha)} ${textoHorario(d)}`)
-        .join(', ')}`)
+        .join(', ')}`),
+    // Al empleado, cuando le aprueban un libre: "Tienes libre el 30/10" / "del 30/10 al 31/10".
+    libreAprobado: (diasDelEmpleado) => recortar(`Tienes libre ${textoFechas(diasDelEmpleado.map((d) => d.fecha))}`)
 };
 
 module.exports = {
@@ -140,6 +158,7 @@ module.exports = {
     horarioNuevo,
     diasCambioHorario,
     diasIntercambio,
+    diasLibre,
     resumenSolicitud,
     textoHorario,
     formatearNombre,

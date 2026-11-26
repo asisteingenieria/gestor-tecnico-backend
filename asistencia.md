@@ -4502,3 +4502,92 @@ revertidos después): opciones con conteo cruzado, mosaicos y tabla filtrados en
 `/operaciones/equipo`, sin errores en consola. La ventana del histórico de financiera no se probó en el navegador (no
 hay usuario financiera de prueba); usa la misma pieza. Lint y `npm run build` sin errores.
 **Despliegue:** frontend (pull + `npm install && npm run build`).
+
+## 86. Novedades de asistencia: cambio de turno y libre, que piden los coordinadores (2026-11-26)
+
+**Pedido.** Los coordinadores registran novedades de asistencia de su equipo. Hay dos: **cambio de turno** y **libre**.
+El coordinador elige a alguien de su equipo y crea la novedad. La novedad le llega al jefe de operaciones, que la aprueba
+o la rechaza. Queda la traza completa y el histórico: a qué hora se envió y a qué hora se aceptó, como con la hora extra.
+
+**Decisiones** (del usuario):
+- Se reutiliza el módulo de cambios de turno (§50-§51). Al aprobar, el horario se aplica a la malla.
+- El libre es de uno o varios días completos. No cuenta como ausencia ni como llegada tarde, y se muestra como "Libre".
+- Aprueba quien gestiona al empleado: `GESTOR = COALESCE(gestor_asistencia_id, jefe_area_id)`.
+- El coordinador pide solo por su gente directa (`jefe_inmediato_id`).
+
+**Migración 109** (`109_novedad_asistencia_libre.sql`, idempotente, requiere la 084; **pendiente en producción y va
+ANTES del código**, porque los upserts de horarios nombran `es_libre`):
+- `solicitud_cambio_turno.tipo` suma el valor `'libre'`;
+- `horario_asignado.es_libre` (0/1). Un libre aprobado es un día `es_descanso = 1` con `es_libre = 1`.
+
+**Backend:**
+- **Quién puede pedir.** Solo el coordinador: quien tiene **cargo de coordinador** (`UPPER(cargo) LIKE '%COORDINADOR%'`) en
+  su contrato vigente y es el jefe inmediato de la persona, siempre que no sea también quien la gestiona. El cargo se exige
+  porque en RRHH hay agentes, formadores y un desarrollador que figuran como jefe inmediato de alguien: ellos no piden y
+  no ven la opción. Ejemplo en los datos: Laura Alejandra Acero Tovar (COORDINADOR CALL) pide por sus 15 personas y le
+  llegan a su jefe de operaciones; una agente suya no ve "Turnos y libres"; el jefe solo aprueba. La regla vive en `equipoRepository` (`SOLICITABLES_WHERE`, usado por `solicitablesDe/solicitablesEntre/tieneSolicitables`), sin pedir por sí mismo y solo por
+  fichas vigentes. **El jefe de operaciones no pide, solo aprueba** (ajuste del usuario el mismo día); antes de este
+  ajuste el jefe también podía pedir y le aprobaba el director, como en §51. El agente no pide aunque figure como jefe
+  inmediato de alguien: no ve la opción y la API responde 403.
+- **Buscador de empleados** del formulario y de la lista: sin importar tildes ni mayúsculas (`normalizarNombre`), "julian"
+  encuentra a "Julián".
+- **Listado del equipo en el formulario:** al abrir "Nueva novedad", el campo Empleado muestra de una vez a toda la gente
+  directa del coordinador ("Tu equipo · N personas", con cédula, cargo, campaña y centro de costo); escribir solo filtra
+  la lista ("1 de 4 personas de tu equipo").
+- **Quién aprueba.** El jefe de operaciones que gestiona al empleado. `aprobadorDeNovedad` (en `domain/asistencia/aprobacionJerarquica.js`):
+  - si quien pide es el coordinador, aprueba el gestor del empleado (el jefe de operaciones);
+  - si quien pide es el propio gestor, aprueba el gestor de ese jefe (el director), como en §51.
+  - Un intercambio entre dos personas con aprobadores distintos da 422.
+- **Validación del libre.** `diasLibre` (en `domain/asistencia/cambioTurno.js`) salta los días que ya son de descanso.
+  Si no queda ningún día, responde 422.
+- **Al aprobar.** Se escribe `es_descanso + es_libre` y el empleado recibe en la campana "Tienes libre el/del …".
+- **Plantillas.** El formulario ofrece las del solicitante y las del gestor del empleado.
+- **Permisos.** `GET /cambios-turno/permisos` suma `puede_aprobar_novedades`, que es verdadero para quien gestiona un equipo
+  o tiene jefes a cargo.
+- **Trazabilidad del día.** Tanto la propia como la del equipo y la de financiera traen `novedades_asistencia`
+  (`services/asistencia/novedadAsistenciaVista.js`), con:
+  - solicitante, aprobador y quién resolvió;
+  - `creado_en` y `resuelta_en`;
+  - el turno anterior y el nuevo.
+- **Resumen mensual** (jefes y financiera). Los días libres van como `descanso` con `libre: true`, y se suma `dias_libre`.
+  El turno de hoy del monitor lleva `es_libre`.
+- **Tests.** `tests/asistencia/novedadAsistencia.test.js`. Suite completa: 480 tests.
+
+**Frontend:**
+- **Pantalla "Turnos y libres"** (antes "Cambios de turno"; la ruta no cambia: `/…/cambios-turno`). Su título es
+  "Novedades de asistencia".
+  - Tipos: Cambio de turno, Libre e Intercambio.
+  - El libre solo pide desde, hasta y motivo, y muestra una vista previa "Sin horario → Libre". Los días que ya son de
+    descanso salen marcados como "no se pide".
+  - Antes de enviar, se ve a quién le llega la solicitud.
+  - Hay un filtro por tipo.
+  - Cada tarjeta lleva la traza (`TrazaSolicitud.jsx`): enviada por X con fecha y hora con segundos, a quién le llegó y
+    el motivo; "pendiente de Y hace …"; aprobada o rechazada por Z con su hora y "respondida N después de enviada".
+  - El jefe de operaciones ve la bandeja "Por aprobar" y el contador del menú.
+- **Equipo Hoy, monitor del coordinador y trazabilidad.** El turno dice "Libre".
+- **Histórico de jefes, coordinadores y financiera.** Celda con rayas violeta "Libre" y su entrada en la leyenda.
+- **Trazabilidad del día.** Panel "Novedades de asistencia del día" con la traza.
+- **Utilidades.** `src/utils/novedadAsistencia.js` (etiquetas, `instante`, `tiempoEntre`).
+
+**Limitación.** Un día libre no tiene jornada, así que su trazabilidad del día responde 404. La traza del libre se consulta
+en "Turnos y libres", y el día se ve en el Histórico.
+
+**Verificado en local.** Prueba de punta a punta por API con 19 checks:
+- permisos y 403;
+- solo su gente;
+- el choque con una pendiente da 409;
+- bandeja y campana;
+- aprobar y rechazar;
+- traza con horas;
+- malla con `es_libre`;
+- aviso al empleado.
+
+En el navegador, con un coordinador temporal (`empleado1` como jefe inmediato de las fichas 9 y 10, revertido después):
+el coordinador pidió un libre de 2 días, la jefa lo vio en "Por aprobar" con el contador y lo aprobó, la traza mostró las
+dos horas, y el Histórico mostró el día en violeta. Los datos de prueba se borraron. Lint de los archivos tocados y
+`npm run build` sin errores nuevos.
+
+**Despliegue:**
+1. Migración 109.
+2. Backend (pull + `pm2 restart gestor-backend`).
+3. Frontend (pull + `npm install && npm run build`).

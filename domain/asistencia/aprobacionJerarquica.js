@@ -24,6 +24,15 @@ function assertAprobador(solicitanteId, aprobadorId) {
     }
 }
 
+// Novedades de asistencia (cambio de turno y libre, §86). Aprueba quien gestiona al empleado (el jefe de
+// operaciones): así el coordinador, que es su jefe inmediato, le pide a ese jefe. Si quien pide ya es el gestor
+// del empleado (el jefe pidiendo por su equipo), aprueba el gestor de quien pide, el director, como en §51.
+// Devuelve el id del aprobador, o null si no hay a quién.
+function aprobadorDeNovedad({ solicitanteId, gestorDelEmpleadoId, gestorDelSolicitanteId }) {
+    if (gestorDelEmpleadoId && gestorDelEmpleadoId !== solicitanteId) return gestorDelEmpleadoId;
+    return gestorDelSolicitanteId ?? null;
+}
+
 // "Ana Pérez" o "3 personas".
 function paraQuien(nombres) {
     return nombres.length === 1 ? formatearNombre(nombres[0]) : `${nombres.length} personas`;
@@ -41,4 +50,4 @@ const mensajesHoraExtra = {
     paraEmpleado: (fecha, inicio, fin) => recortar(`Tienes horas extra aprobadas ${franja(fecha, inicio, fin)}`)
 };
 
-module.exports = { assertAprobador, mensajesHoraExtra, formatearNombre };
+module.exports = { assertAprobador, aprobadorDeNovedad, mensajesHoraExtra, formatearNombre };
