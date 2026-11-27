@@ -11,7 +11,7 @@ const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const { clasificarHoraExtra, totalMinutos, claseDominante } = require('../../domain/asistencia/clasificarHoraExtra');
 const { CLASES } = require('../../domain/asistencia/reporteHorasExtra');
-const { assertAprobador, mensajesHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
+const { aprobadorHoraExtra, esCargoDirector, mensajesHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
 const { sumarDias, normalizarFecha } = require('../../utils/fechaBogota');
 const { NoAutorizadoError, NoEncontradoError, ConflictoJornadaError, ValidacionError } = require('../../errors/AppError');
 
@@ -81,6 +81,62 @@ async function assertEquipoDirecto(jefeUsersCompanyId, empleados, conn = db) {
     return ids;
 }
 
+// Quién aprueba lo que pide este jefe (§94): si es director (por cargo), él mismo y la solicitud nace
+// aprobada; si no, su gestor (§51). Lo usan la pantalla y el Excel (§91).
+async function aprobadorDeSolicitud(jefeUsersCompanyId, conn = db) {
+    const [cargo, gestor] = await Promise.all([equipoRepo.cargoDe(jefeUsersCompanyId, conn), equipoRepo.jefeAreaDe(jefeUsersCompanyId, conn)]);
+    return aprobadorHoraExtra({ solicitanteId: jefeUsersCompanyId, cargoSolicitante: cargo, gestorDelSolicitanteId: gestor });
+}
+
+const COMENTARIO_AUTOAPROBADA = 'Aprobada al solicitarla: la pidió un director';
+
+// Aprueba, dentro de la transacción de quien la crea, una solicitud que pidió un director (§94): mismo
+// camino que la aprobación del director (§88, recalcula la jornada del día) con la clasificación calculada.
+// Devuelve el aviso al empleado ("Tienes horas extra aprobadas…"), o null si la solicitud no tiene franja.
+async function aprobarAlSolicitar(idhoraExtra, tramos, aprobadoPor, conn) {
+    const solicitud = await horaExtraRepo.findDetalle(idhoraExtra, conn);
+    await aprobarEnConexion(solicitud, { ajuste: [], efectivos: tramos, comentario: COMENTARIO_AUTOAPROBADA, aprobadoPor }, conn);
+    if (!solicitud.hora_inicio || !solicitud.hora_fin) return null;
+    return {
+        usersCompanyId: solicitud.users_company_id, tipo: 'hora_extra_aprobada', horaExtraId: idhoraExtra,
+        mensaje: mensajesHoraExtra.paraEmpleado(normalizarFecha(solicitud.fecha), solicitud.hora_inicio, solicitud.hora_fin)
+    };
+}
+
+// Después del commit: avisos en vivo y, si nacieron aprobadas, las pantallas de jornada de cada empleado.
+function avisarDespuesDeSolicitar(notificaciones, autoaprobada, empleadosIds) {
+    notificacionAsistenciaService.avisarEnVivo(notificaciones);
+    if (!autoaprobada) return;
+    for (const id of new Set(empleadosIds)) notificacionService.notificarCambioJornada(id, 'hora_extra_aprobada');
+}
+
+// Equipo del formulario "Solicitar horas extra" (§94): la gente que gestiona el jefe —la misma que valida
+// `assertEquipoDirecto` y que trae la plantilla Excel—, con quién aprueba. Antes el formulario la pedía a
+// /cambios-turno/empleados, que desde §86 es solo del coordinador y dejaba al jefe con "No se pudo cargar tu equipo".
+async function equipoParaSolicitar({ jefeUsersCompanyId }) {
+    requireUsersCompanyId(jefeUsersCompanyId);
+    const [empleados, gestor, cargo] = await Promise.all([
+        equipoRepo.listaEmpleadosACargo(jefeUsersCompanyId),
+        equipoRepo.gestorConNombreDe(jefeUsersCompanyId),
+        equipoRepo.cargoDe(jefeUsersCompanyId)
+    ]);
+    const autoaprobada = esCargoDirector(cargo);
+    const gestorValido = gestor?.gestor_id && gestor.gestor_id !== jefeUsersCompanyId;
+    return empleados.map((e) => ({
+        users_company_id: e.users_company_id,
+        nombre: e.nombre_propio,
+        cedula: e.numero_identificacion,
+        cargo: e.cargo,
+        campania: e.campania,
+        centro_costo_id: e.centro_costo_id,
+        centro_costo: e.centro_costo,
+        // Director: él mismo aprueba (nace aprobada). Si no, su gestor; null = no tiene quién le apruebe.
+        gestor_id: autoaprobada ? jefeUsersCompanyId : gestorValido ? gestor.gestor_id : null,
+        gestor: autoaprobada ? null : gestorValido ? gestor.gestor : null,
+        autoaprobada
+    }));
+}
+
 // El jefe pide horas extra para uno o varios de su equipo, en la misma franja. Cada persona queda en
 // su propia solicitud porque la clasificación depende de su turno de ese día.
 async function solicitar({ jefeUsersCompanyId, empleados, fecha, horaInicio, horaFin, motivo, solicitadoPor }) {
@@ -89,8 +145,7 @@ async function solicitar({ jefeUsersCompanyId, empleados, fecha, horaInicio, hor
     if (!motivoLimpio) throw new ValidacionError('El motivo es obligatorio');
     const fechaStr = normalizarFecha(fecha);
     const ids = await assertEquipoDirecto(jefeUsersCompanyId, empleados);
-    const aprobador = await equipoRepo.jefeAreaDe(jefeUsersCompanyId);
-    assertAprobador(jefeUsersCompanyId, aprobador);
+    const { aprobadorId: aprobador, autoaprobada } = await aprobadorDeSolicitud(jefeUsersCompanyId);
 
     const clasificadas = await Promise.all(ids.map(async (id) => ({ id, tramos: await calcularTramos(id, fechaStr, horaInicio, horaFin) })));
     if (clasificadas.some((c) => totalMinutos(c.tramos) <= 0)) throw new ValidacionError('La franja de horas extra no suma tiempo');
@@ -106,14 +161,18 @@ async function solicitar({ jefeUsersCompanyId, empleados, fecha, horaInicio, hor
                 motivo: motivoLimpio, solicitadoPor, solicitanteUsersCompanyId: jefeUsersCompanyId, aprobadorUsersCompanyId: aprobador
             }, conn);
             await horaExtraRepo.insertarTramos(idhoraExtra, tramos, conn);
-            creadas.push(await horaExtraRepo.findDetalle(idhoraExtra, conn));
+            const avisoEmpleado = autoaprobada ? await aprobarAlSolicitar(idhoraExtra, tramos, solicitadoPor, conn) : null;
+            creadas.push({ ...(await horaExtraRepo.findDetalle(idhoraExtra, conn)), avisoEmpleado });
         }
-        notificaciones = [{
-            usersCompanyId: aprobador,
-            tipo: 'hora_extra_solicitada',
-            horaExtraId: creadas[0].idhora_extra,
-            mensaje: mensajesHoraExtra.solicitada(creadas[0].solicitante, creadas.map((c) => c.empleado), fechaStr, horaInicio, horaFin)
-        }];
+        // El director no se avisa a sí mismo: el aviso va a cada empleado, ya aprobada (§94).
+        notificaciones = autoaprobada
+            ? creadas.map((c) => c.avisoEmpleado).filter(Boolean)
+            : [{
+                usersCompanyId: aprobador,
+                tipo: 'hora_extra_solicitada',
+                horaExtraId: creadas[0].idhora_extra,
+                mensaje: mensajesHoraExtra.solicitada(creadas[0].solicitante, creadas.map((c) => c.empleado), fechaStr, horaInicio, horaFin)
+            }];
         await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
     } catch (e) {
@@ -122,8 +181,8 @@ async function solicitar({ jefeUsersCompanyId, empleados, fecha, horaInicio, hor
     } finally {
         conn.release();
     }
-    notificacionAsistenciaService.avisarEnVivo(notificaciones);
-    return { success: true, ids: creadas.map((c) => c.idhora_extra), aprobador: creadas[0].aprobador };
+    avisarDespuesDeSolicitar(notificaciones, autoaprobada, ids);
+    return { success: true, ids: creadas.map((c) => c.idhora_extra), aprobador: creadas[0].aprobador, autoaprobada };
 }
 
 // El jefe ve antes de enviar cómo quedaría clasificada la franja para cada persona (sin guardar nada).
@@ -322,4 +381,7 @@ async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprob
     return { success: true };
 }
 
-module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, aprobarVarias, rechazar, calcularTramos };
+module.exports = {
+    solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, aprobarVarias, rechazar, calcularTramos,
+    aprobadorDeSolicitud, aprobarAlSolicitar, avisarDespuesDeSolicitar, equipoParaSolicitar
+};

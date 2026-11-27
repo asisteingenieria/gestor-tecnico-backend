@@ -18,6 +18,20 @@ function recortar(texto) {
 
 // El aprobador es el gestor de quien solicita. Si no tiene, o es él mismo (la ficha se gestiona a sí
 // misma), nadie podría aprobar y la solicitud quedaría colgada: se rechaza de entrada.
+// Horas extra que pide un director (§94): cargo con la palabra DIRECTOR (Director de Operaciones, de
+// Formación, de Tecnología, Financiero…). No se envían a aprobar: nacen aprobadas por él mismo.
+function esCargoDirector(cargo) {
+    return /\bDIRECTORA?\b/i.test(String(cargo || ''));
+}
+
+// Quién aprueba las horas extra que pide `solicitanteId`: el mismo director (aprobadas al crearlas) o
+// el gestor de quien pide, que no puede faltar ni ser él mismo.
+function aprobadorHoraExtra({ solicitanteId, cargoSolicitante, gestorDelSolicitanteId }) {
+    if (esCargoDirector(cargoSolicitante)) return { aprobadorId: solicitanteId, autoaprobada: true };
+    assertAprobador(solicitanteId, gestorDelSolicitanteId);
+    return { aprobadorId: gestorDelSolicitanteId, autoaprobada: false };
+}
+
 function assertAprobador(solicitanteId, aprobadorId) {
     if (!aprobadorId || aprobadorId === solicitanteId) {
         throw new ReglaAsistenciaError('No tienes en RRHH un jefe que apruebe tus solicitudes: pide que lo asignen en tu ficha');
@@ -52,4 +66,4 @@ const mensajesHoraExtra = {
     paraEmpleado: (fecha, inicio, fin) => recortar(`Tienes horas extra aprobadas ${franja(fecha, inicio, fin)}`)
 };
 
-module.exports = { assertAprobador, aprobadorDeNovedad, mensajesHoraExtra, formatearNombre };
+module.exports = { assertAprobador, aprobadorDeNovedad, esCargoDirector, aprobadorHoraExtra, mensajesHoraExtra, formatearNombre };
