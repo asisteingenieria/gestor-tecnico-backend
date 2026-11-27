@@ -17,6 +17,7 @@ const parametroRepo = require('../../repositories/asistencia/parametroRepository
 const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
 const cambioTurnoRepo = require('../../repositories/asistencia/solicitudCambioTurnoRepository');
 const { fechaLaboral, sumarDias } = require('../../utils/fechaBogota');
+const { horasComoTexto } = require('../../utils/excelFechas');
 const { NoEncontradoError, ReglaAsistenciaError, ValidacionError } = require('../../errors/AppError');
 
 // Horas extra en Excel (asistencia.md §91): el jefe pide en un solo archivo las horas extra de su equipo directo y le
@@ -89,6 +90,8 @@ async function plantilla({ jefeUsersCompanyId, desde, hasta }) {
         const [a, m, d] = f.Fecha.split('-').map(Number);
         Object.assign(celda, { t: 'n', v: Date.UTC(a, m - 1, d) / 86400000 + 25569, z: 'dd/mm/yyyy' });
     });
+    // Horas como texto: 19:30 se ve 19:30 también en la barra de fórmulas (§90.2).
+    horasComoTexto(ws, XLSX, ['Hora inicio', 'Hora fin']);
     ws['!cols'] = [14, 34, 26, 24, 12, 13, 20, 34, 11, 11, 40].map((wch) => ({ wch }));
     ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(filas.length, 1), c: ENCABEZADOS.length - 1 } }) };
     const instrucciones = XLSX.utils.aoa_to_sheet(INSTRUCCIONES(inicio, fin));

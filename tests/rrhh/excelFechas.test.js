@@ -29,3 +29,12 @@ test('las columnas "Fecha…" quedan como fecha real y el resto no cambia', () =
     assert.equal(celda.t, 'd');
     assert.equal(celda.v.toISOString().slice(0, 10), '2023-11-01');
 });
+test('horasComoTexto: las columnas de hora quedan con formato Texto, también las celdas vacías (§90.2)', () => {
+    const XLSX = require('xlsx');
+    const { horasComoTexto } = require('../../utils/excelFechas');
+    const ws = XLSX.utils.aoa_to_sheet([['Cedula', 'Entrada', 'Almuerzo'], ['1', '08:00', null], ['2', 0.5, '00:30']]);
+    horasComoTexto(ws, XLSX, ['Entrada', 'Almuerzo']);
+    assert.deepEqual(['B2', 'C2', 'B3', 'C3'].map((c) => [ws[c].t, ws[c].v, ws[c].z]),
+        [['s', '08:00', '@'], ['s', '', '@'], ['s', '0.5', '@'], ['s', '00:30', '@']]);
+    assert.equal(ws.A2.z, undefined);
+});

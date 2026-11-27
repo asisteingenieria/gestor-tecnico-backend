@@ -15,6 +15,7 @@ const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const cierreService = require('./cierreService');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
 const { agregarListas } = require('../../utils/excelListas');
+const { horasComoTexto } = require('../../utils/excelFechas');
 const { fechaLaboral, sumarDias } = require('../../utils/fechaBogota');
 const { alcanceDeConsulta } = require('../../domain/asistencia/vistaTodasCampanias');
 const XLSX = require('xlsx');
@@ -360,6 +361,8 @@ function libroPlantillaMalla(filas, desde, hasta) {
         const [a, m, d] = f.Fecha.split('-').map(Number);
         Object.assign(celda, { t: 'n', v: Date.UTC(a, m - 1, d) / 86400000 + 25569, z: 'dd/mm/yyyy' });
     });
+    // Horas como texto: 00:30 se ve 00:30 también en la barra de fórmulas (§90.2).
+    horasComoTexto(ws, XLSX, ['Entrada', 'Salida', 'Almuerzo']);
     ws['!cols'] = [14, 34, 28, 26, 12, 10, 10, 10, 14, 18].map((wch) => ({ wch }));
     ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(filas.length, 1), c: ENCABEZADOS.length - 1 } }) };
 
