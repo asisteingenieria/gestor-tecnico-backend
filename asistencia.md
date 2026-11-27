@@ -4678,3 +4678,13 @@ Al subir el archivo, una fila en un día con novedad es error ("Tiene novedad es
 ### 90.2 Horas con formato Texto en las plantillas (2026-11-27)
 
 En la plantilla de la malla, al escribir `00:30` en Almuerzo, Excel lo convertía en hora del día: la celda mostraba `0:30` y la barra de fórmulas `12:30:00 a. m.`. Lo mismo pasaba con Entrada y Salida (`14:00` → `2:00:00 p. m.`) y confundía a los jefes. Ahora la plantilla trae las columnas **Entrada, Salida y Almuerzo** de la malla y **Hora inicio y Hora fin** de horas extra (§91) con formato **Texto** en todas las filas, también en las vacías. Lo que se escribe queda tal cual en la celda y en la barra. El cargue lee igual el texto y las horas de Excel (`minutosDeCelda`), así que las plantillas viejas siguen sirviendo. La regla está en `utils/excelFechas.horasComoTexto`, con test. No lleva migración.
+
+### 90.3 Semanas con festivo en la malla (2026-11-27)
+
+Una semana (lunes a domingo) que tiene un festivo de `festivo_colombia` no exige llegar a las 42 h: con el festivo
+no se completan. Sigue siendo error pasarse de 42 h. El festivo que no se trabaja (descanso o sin horas) cuenta como el
+día de descanso de la semana; si se trabaja, hace falta otro descanso. `semanaMalla.validarSemanas` recibe `festivos`
+(Set de fechas) y `horarioService.validarSemanasDelPlan` los consulta con `festivoRepository.sonFestivos` para el rango
+de las semanas. La hoja Instrucciones de la plantilla lo dice en el punto 8. Sin migración: `festivo_colombia` existe
+desde la 074 (festivos 2025-2030). Test en `tests/asistencia/semanaMalla.test.js`.
+

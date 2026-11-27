@@ -107,3 +107,19 @@ test('cada semana se valida por separado', () => {
     assert.equal(r.desajustes.length, 1);
     assert.equal(r.desajustes[0].semana_desde, '2026-12-14');
 });
+
+// --- Semana con festivo (§90.3): el 8 de diciembre de 2026 es festivo ---
+test('semana con festivo: menos de 42 h pasa, más de 42 h no, y el festivo sin trabajar cuenta como descanso', () => {
+    const festivos = new Set(['2026-12-08']);
+    // Festivo en descanso y 5 días de 7 h = 35 h.
+    const conFestivo = [turno(SEMANA[0], '08:00', '15:30'), descanso(SEMANA[1]), ...SEMANA.slice(2, 6).map((f) => turno(f, '08:00', '15:30')), descanso(SEMANA[6])];
+    assert.equal(validar(conFestivo, { festivos }).desajustes.length, 0);
+    // Sin el festivo, las 35 h son desajuste.
+    assert.match(validar(conFestivo).desajustes[0].problemas[0], /faltan 7 h/);
+    // El festivo sin trabajar es el descanso de la semana: trabaja los otros 6 días.
+    const festivoEsDescanso = SEMANA.map((f, i) => (i === 1 ? descanso(f) : turno(f, '08:00', '14:00', 0)));
+    assert.equal(validar(festivoEsDescanso, { festivos }).desajustes.length, 0);
+    // Pasarse de 42 h sigue siendo desajuste.
+    const pasada = [...SEMANA.slice(0, 6).map((f) => turno(f, '08:00', '16:00')), descanso(SEMANA[6])];
+    assert.match(validar(pasada, { festivos }).desajustes[0].problemas[0], /se pasa/);
+});

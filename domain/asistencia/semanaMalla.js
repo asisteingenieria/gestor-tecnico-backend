@@ -11,6 +11,8 @@
  *   - Una semana con alguna novedad —INC, VACACIONES, LNR, LR, SUSPENSION, RETIRO en la malla o en lo ya cargado, o
  *     una novedad de RRHH— no se valida y se avisa: con esos días no se llega a las horas.
  *   - Un libre aprobado (§86) cuenta como día de descanso.
+ *   - Semana con festivo (§90.3): no se exige llegar a las horas, solo no pasarse. El festivo que no se trabaja
+ *     (descanso o sin horas) cuenta como el día de descanso de la semana.
  */
 
 const { NOVEDADES_DESCANSO } = require('./mallaHorarios');
@@ -74,9 +76,10 @@ const fechaIso = (f) => (f instanceof Date ? iso(f) : String(f).slice(0, 10));
  * @param {Map}      p.existentes     `${users_company_id}|${fecha}` → horario_asignado, para las semanas completas
  * @param {Array}    p.novedadesRrhh  { users_company_id, tipo, fecha_inicial, fecha_final } que tocan esas semanas
  * @param {number}   p.minutosSemana  minutos exactos por semana (42 h = 2520)
+ * @param {Set}      p.festivos       fechas 'YYYY-MM-DD' festivas de esas semanas (festivo_colombia)
  * @returns {{ desajustes: Array, sinValidar: Array }}
  */
-function validarSemanas({ filas, existentes, novedadesRrhh = [], minutosSemana }) {
+function validarSemanas({ filas, existentes, novedadesRrhh = [], minutosSemana, festivos = new Set() }) {
     // Persona → semana → días del Excel.
     const porPersona = new Map();
     for (const f of filas) {
@@ -114,9 +117,10 @@ function validarSemanas({ filas, existentes, novedadesRrhh = [], minutosSemana }
             }
 
             const minutos = dias.reduce((acc, d) => acc + minutosDelDia(d), 0);
-            const descansos = dias.filter((d) => d.esDescanso).length;
+            const festivosSemana = fechas.filter((f) => festivos.has(f));
+            const descansos = dias.filter((d, i) => d.esDescanso || (festivos.has(fechas[i]) && minutosDelDia(d) === 0)).length;
             const problemas = [];
-            if (minutos < minutosSemana) problemas.push(`Suma ${textoHoras(minutos)}: le faltan ${textoHoras(minutosSemana - minutos)} para las ${textoHoras(minutosSemana)}`);
+            if (minutos < minutosSemana && festivosSemana.length === 0) problemas.push(`Suma ${textoHoras(minutos)}: le faltan ${textoHoras(minutosSemana - minutos)} para las ${textoHoras(minutosSemana)}`);
             if (minutos > minutosSemana) problemas.push(`Suma ${textoHoras(minutos)}: se pasa ${textoHoras(minutos - minutosSemana)} de las ${textoHoras(minutosSemana)}`);
             if (descansos === 0) problemas.push('No tiene ningún día de descanso en la semana');
             if (problemas.length > 0) {
