@@ -4742,3 +4742,64 @@ Verificado en local en el navegador con un escenario temporal (empleado1 como je
 escenario revertido y solicitudes borradas. 508 tests.
 
 **Despliegue:** backend y frontend, sin migración. Backend primero.
+
+## 94. Las horas extra que pide un director nacen aprobadas (2026-11-27)
+
+**Caso.** GIOVANNY ALFREDO OSPINA CORREA (cargo DIRECTOR DE FORMACION) gestiona a 9 personas y le sale "Solicitar
+horas extra". Lo que pedía le llegaba a su gestora de asistencia (Geraldin Cruz) para aprobar. **Decisión del
+usuario:** cuando un director solicita horas extra, no se envían a aprobar: se crean y se aprueban.
+
+- **Quién es director: por cargo**, como el coordinador de §86: cargo con la palabra DIRECTOR/DIRECTORA
+  (`domain/asistencia/aprobacionJerarquica.esCargoDirector`, con test). En local: Director de Formación, de Gestión
+  Humana, de Operaciones (Nuncira, Nelson Acero), de Tecnología y Financiero (Geraldin).
+- `aprobadorHoraExtra` decide: director → `{ aprobadorId: él mismo, autoaprobada: true }` (no necesita gestor); si no,
+  su gestor con `assertAprobador` como siempre (§51).
+- **Al crear** (`horaExtraService.solicitar` y el Excel, `horaExtraExcelService.enviar`, §91), en la misma transacción
+  cada solicitud se aprueba con `aprobarAlSolicitar` → `aprobarEnConexion` (el mismo camino de la aprobación, §88/§93):
+  `estado = aprobada`, minutos = los de la clasificación calculada, `aprobador_users_company_id` = el director,
+  `comentario_director` = "Aprobada al solicitarla: la pidió un director", y se recalcula la jornada del día. El
+  director no se avisa a sí mismo: cada empleado recibe "Tienes horas extra aprobadas…" y sus pantallas se
+  actualizan (`notificarCambioJornada`). La respuesta trae `autoaprobada: true`.
+- `GET /cambios-turno/permisos` suma `horas_extra_autoaprobadas`; la vista previa del Excel trae `autoaprobada` y deja
+  enviar sin gestor. Frontend (`HorasExtra.jsx`, `HorasExtraExcelModal.jsx`): subtítulo "quedan aprobadas al
+  enviarlas", formulario y Excel dicen "Como director, quedan aprobadas al enviarlas", el aviso dice "registradas y
+  aprobadas" y la lista abre en Aprobadas.
+- **Error que había desde §86 (en producción desde el 2026-11-26):** el formulario "Solicitar horas extra" cargaba
+  el equipo de `/cambios-turno/empleados`, que desde §86 es solo del coordinador (`canSolicitarCambioTurno`) y
+  devuelve su gente por jefe inmediato. A todo jefe o director el formulario le decía **"No se pudo cargar tu
+  equipo"**; solo servía el Excel. Ahora tiene su endpoint `GET /api/asistencia/horas-extra/equipo`
+  (`canDirigirEquipo`, `horaExtraService.equipoParaSolicitar`): la gente que gestiona el jefe
+  (`listaEmpleadosACargo`, la misma que valida `assertEquipoDirecto` y trae la plantilla Excel) con quién aprueba.
+
+Verificado en local: servicio con Giovanny real (solicitud aprobada al crearla, aprobador = él, aviso al empleado) y
+un jefe sin cargo de director sigue necesitando gestor; en el navegador con la ficha de prueba 7 con cargo de director
+temporal: el formulario carga el equipo, "Solicitar para 2" → "Horas extra registradas y aprobadas", 2 aprobadas.
+Datos de prueba borrados, cargo restaurado y 26-nov recalculado. 511 tests. `npm run build` sin errores.
+
+**Despliegue:** backend y frontend, sin migración. Backend primero (el frontend nuevo llama a `/horas-extra/equipo`).
+
+## 95. Gestor de asistencia retirado: la gente queda sin quién le asigne horario (2026-11-27)
+
+**Caso.** En el usuario de Geraldin Cruz, ALVARO OSPINA (coordinador técnico, mantenimiento; jefe inmediato Geraldin, jefe
+de área German Arias) salía en **Equipo** pero no en **Horarios** para asignarle horario.
+
+**Causa.** Su `contrato.gestor_asistencia_id` (082, §44) seguía en **Edwin Bello**, el jefe de mantenimiento, que ya
+está retirado. Equipo es consulta y sigue las tres líneas de mando (§57), así que Geraldin lo ve por ser su jefe
+inmediato. Horarios, horas extra y la malla son escritura y usan el gestor (`COALESCE(gestor_asistencia_id,
+jefe_area_id)`), que era Edwin. En local eran 4: Alvaro Ospina, Cristian Perdomo, Amaury Villalba y Abel Lara, todos
+con jefe inmediato Geraldin.
+
+**Migración 112** (`112_gestor_asistencia_retirado_a_jefe_inmediato.sql`, solo datos, sin cédulas, idempotente, **pendiente
+en producción**, no depende del código). Aplica la regla de §44 ("al resto, su jefe inmediato"): un contrato vigente
+cuyo gestor de asistencia está retirado/inactivo (o sin contrato) pasa a su jefe inmediato, si este está vigente y no es
+el mismo empleado. Trae una vista previa al inicio y, al final, los que quedan pendientes porque tampoco tienen jefe
+inmediato vigente. Usa una tabla temporal para evitar el error 1093 y `SQL_SAFE_UPDATES = 0` para Workbench. En local
+cambió los 4 y Geraldin pasó a gestionar 19; la segunda corrida no cambia nada.
+
+**Queda abierto:** si se retira otro gestor de asistencia vuelve a pasar. Se puede volver a correr la 112, o hacer que
+el retiro en RRHH pase solo a su gente al jefe inmediato (decisión pendiente del usuario).
+
+**Centros de costo "antiguos" en Equipo:** Equipo, Horarios y la ficha de RRHH muestran el mismo dato, el centro de
+costo del contrato (`cc.nombre`). Si salen centros que ya no existen (no vigentes desde la 093), es porque esos
+contratos siguen apuntando a ellos en producción. En local, del árbol de Geraldin solo 1 contrato tiene centro no
+vigente (Operación Claro). Se corrige reasignando el centro en la ficha o con un SQL como la 093b.

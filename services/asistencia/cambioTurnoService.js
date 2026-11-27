@@ -9,7 +9,7 @@ const { notificarCambioJornada } = require('./notificacionService');
 const {
     MAX_DIAS_CAMBIO_TURNO, assertFechasSolicitables, horarioNuevo, diasCambioHorario, diasIntercambio, diasLibre, resumenSolicitud, mensajes
 } = require('../../domain/asistencia/cambioTurno');
-const { assertAprobador, aprobadorDeNovedad } = require('../../domain/asistencia/aprobacionJerarquica');
+const { assertAprobador, aprobadorDeNovedad, esCargoDirector } = require('../../domain/asistencia/aprobacionJerarquica');
 const { fechaLaboral, sumarDias, normalizarFecha } = require('../../utils/fechaBogota');
 const {
     NoAutorizadoError, NoEncontradoError, ConflictoJornadaError, ReglaAsistenciaError, ValidacionError
@@ -40,13 +40,18 @@ async function puedeSolicitar(usersCompanyId) {
 // `puede_aprobar`: tiene jefes a su cargo (el director); lo usa también la pantalla de horas extra (§51).
 // `puede_aprobar_novedades` (§86): gestiona a alguien, así que le pueden llegar las novedades de sus coordinadores.
 async function permisos({ usersCompanyId }) {
-    if (!usersCompanyId) return { puede_solicitar: false, puede_aprobar: false, puede_aprobar_novedades: false };
-    const [puedeSolicitarNovedad, gestiona, tieneJefes] = await Promise.all([
+    if (!usersCompanyId) return { puede_solicitar: false, puede_aprobar: false, puede_aprobar_novedades: false, horas_extra_autoaprobadas: false };
+    const [puedeSolicitarNovedad, gestiona, tieneJefes, cargo] = await Promise.all([
         equipoRepo.tieneSolicitables(usersCompanyId),
         equipoRepo.tieneEmpleadosACargo(usersCompanyId),
-        equipoRepo.tieneJefesACargo(usersCompanyId)
+        equipoRepo.tieneJefesACargo(usersCompanyId),
+        equipoRepo.cargoDe(usersCompanyId)
     ]);
-    return { puede_solicitar: puedeSolicitarNovedad, puede_aprobar: tieneJefes, puede_aprobar_novedades: gestiona || tieneJefes };
+    return {
+        puede_solicitar: puedeSolicitarNovedad, puede_aprobar: tieneJefes, puede_aprobar_novedades: gestiona || tieneJefes,
+        // Las horas extra que pide un director nacen aprobadas (§94): la pantalla no dice "La aprueba…".
+        horas_extra_autoaprobadas: esCargoDirector(cargo)
+    };
 }
 
 // Quién aprueba cada empleado que pide esta ficha (§86). `gestorPropio` = { gestor_id, gestor } de quien pide.

@@ -5,12 +5,11 @@ const horarioAsignadoRepo = require('../../repositories/asistencia/horarioAsigna
 const equipoRepo = require('../../repositories/asistencia/equipoRepository');
 const empleadoRepo = require('../../repositories/asistencia/empleadoRepository');
 const notificacionRepo = require('../../repositories/asistencia/notificacionAsistenciaRepository');
-const notificacionAsistenciaService = require('./notificacionAsistenciaService');
-const { calcularTramos } = require('./horaExtraService');
+const { calcularTramos, aprobadorDeSolicitud, aprobarAlSolicitar, avisarDespuesDeSolicitar } = require('./horaExtraService');
 const horaExtraExcel = require('../../domain/asistencia/horaExtraExcel');
 const { homologarPpt } = require('../../domain/asistencia/mallaHorarios');
 const { totalMinutos, claseDominante } = require('../../domain/asistencia/clasificarHoraExtra');
-const { assertAprobador, mensajesHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
+const { mensajesHoraExtra, esCargoDirector } = require('../../domain/asistencia/aprobacionJerarquica');
 const { textoHoras, lunesDe, diasDeSemana } = require('../../domain/asistencia/semanaMalla');
 const { validarLimites } = require('../../domain/asistencia/limitesHoraExtra');
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
@@ -212,14 +211,17 @@ const resumenDe = (solicitudes) => ({
 /** Lee el Excel y dice qué se enviaría, sin guardar nada. */
 async function previsualizar({ jefeUsersCompanyId, buffer }) {
     const { lectura, solicitudes, errores, avisos } = await planDelArchivo(jefeUsersCompanyId, buffer);
-    const aprobador = await equipoRepo.gestorConNombreDe(jefeUsersCompanyId);
+    const [aprobador, cargo] = await Promise.all([equipoRepo.gestorConNombreDe(jefeUsersCompanyId), equipoRepo.cargoDe(jefeUsersCompanyId)]);
+    const autoaprobada = esCargoDirector(cargo);
     const resumen = resumenDe(solicitudes);
     return {
         success: true,
         hoja: lectura.hoja,
         resumen: { ...resumen, horas: textoHoras(resumen.minutos), errores: errores.length, vacias: lectura.vacias },
-        aprobador: aprobador?.gestor ?? null,
-        puede_enviar: errores.length === 0 && solicitudes.length > 0 && Boolean(aprobador?.gestor_id),
+        aprobador: autoaprobada ? null : aprobador?.gestor ?? null,
+        // §94: si quien sube es director, se aprueban al enviarlas y no necesita gestor.
+        autoaprobada,
+        puede_enviar: errores.length === 0 && solicitudes.length > 0 && (autoaprobada || Boolean(aprobador?.gestor_id)),
         solicitudes: solicitudes.map((s) => ({
             fila: s.fila, users_company_id: s.users_company_id, cedula: s.cedula, nombre: s.nombre_rrhh ?? s.nombre,
             fecha: s.fecha, hora_inicio: s.horaInicio, hora_fin: s.horaFin, motivo: s.motivo, minutos: s.minutos, tramos: s.tramos
@@ -238,8 +240,8 @@ async function enviar({ jefeUsersCompanyId, buffer, solicitadoPor }) {
         throw new ReglaAsistenciaError(`No se envió ninguna hora extra: ${errores.length} ${errores.length === 1 ? 'fila tiene' : 'filas tienen'} error. Corrígelas y vuelve a subir el archivo.`);
     }
     if (solicitudes.length === 0) throw new ValidacionError('El archivo no trae horas extra: llena Hora inicio, Hora fin y Motivo en los días que las haya');
-    const aprobador = await equipoRepo.jefeAreaDe(jefeUsersCompanyId);
-    assertAprobador(jefeUsersCompanyId, aprobador);
+    // Si quien sube el Excel es director (§94), nacen aprobadas por él mismo.
+    const { aprobadorId: aprobador, autoaprobada } = await aprobadorDeSolicitud(jefeUsersCompanyId);
 
     const resumen = resumenDe(solicitudes);
     const conn = await db.getConnection();
@@ -248,6 +250,7 @@ async function enviar({ jefeUsersCompanyId, buffer, solicitadoPor }) {
     try {
         await conn.beginTransaction();
         const ids = [];
+        const avisosEmpleados = [];
         for (const s of solicitudes) {
             const id = await horaExtraRepo.insertarSolicitud({
                 usersCompanyId: s.users_company_id, fecha: s.fecha, horaInicio: s.horaInicio, horaFin: s.horaFin,
@@ -255,10 +258,11 @@ async function enviar({ jefeUsersCompanyId, buffer, solicitadoPor }) {
                 solicitanteUsersCompanyId: jefeUsersCompanyId, aprobadorUsersCompanyId: aprobador
             }, conn);
             await horaExtraRepo.insertarTramos(id, s.tramos, conn);
+            if (autoaprobada) avisosEmpleados.push(await aprobarAlSolicitar(id, s.tramos, solicitadoPor, conn));
             ids.push(id);
         }
         detalle = await horaExtraRepo.findDetalle(ids[0], conn);
-        notificaciones = [{
+        notificaciones = autoaprobada ? avisosEmpleados.filter(Boolean) : [{
             usersCompanyId: aprobador,
             tipo: 'hora_extra_solicitada',
             horaExtraId: ids[0],
@@ -272,8 +276,8 @@ async function enviar({ jefeUsersCompanyId, buffer, solicitadoPor }) {
     } finally {
         conn.release();
     }
-    notificacionAsistenciaService.avisarEnVivo(notificaciones);
-    return { success: true, enviadas: resumen.solicitudes, personas: resumen.personas, horas: textoHoras(resumen.minutos), aprobador: detalle.aprobador };
+    avisarDespuesDeSolicitar(notificaciones, autoaprobada, solicitudes.map((s) => s.users_company_id));
+    return { success: true, enviadas: resumen.solicitudes, personas: resumen.personas, horas: textoHoras(resumen.minutos), aprobador: detalle.aprobador, autoaprobada };
 }
 
 module.exports = { plantilla, previsualizar, enviar };

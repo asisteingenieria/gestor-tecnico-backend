@@ -43,3 +43,28 @@ test('los mensajes no pasan de 255 caracteres', () => {
     assert.equal(largo.length, 255);
     assert.ok(largo.endsWith('…'));
 });
+
+// §94: las horas extra que pide un director nacen aprobadas.
+const { esCargoDirector, aprobadorHoraExtra } = require('../../domain/asistencia/aprobacionJerarquica');
+
+test('esCargoDirector reconoce los cargos de director', () => {
+    for (const cargo of ['DIRECTOR DE FORMACION', 'DIRECTOR DE OPERACIONES', 'Director Financiero', 'DIRECTORA DE GESTION HUMANA']) {
+        assert.equal(esCargoDirector(cargo), true, cargo);
+    }
+    for (const cargo of ['JEFE DE OPERACIONES', 'COORDINADOR CALL', 'FORMADOR', '', null]) {
+        assert.equal(esCargoDirector(cargo), false, String(cargo));
+    }
+});
+
+test('aprobadorHoraExtra: el director se aprueba a sí mismo aunque no tenga gestor', () => {
+    assert.deepEqual(aprobadorHoraExtra({ solicitanteId: 15, cargoSolicitante: 'DIRECTOR DE FORMACION', gestorDelSolicitanteId: 190 }),
+        { aprobadorId: 15, autoaprobada: true });
+    assert.deepEqual(aprobadorHoraExtra({ solicitanteId: 15, cargoSolicitante: 'DIRECTOR DE OPERACIONES', gestorDelSolicitanteId: null }),
+        { aprobadorId: 15, autoaprobada: true });
+});
+
+test('aprobadorHoraExtra: el jefe que no es director va a su gestor y sin gestor es error', () => {
+    assert.deepEqual(aprobadorHoraExtra({ solicitanteId: 25, cargoSolicitante: 'JEFE DE OPERACIONES', gestorDelSolicitanteId: 21 }),
+        { aprobadorId: 21, autoaprobada: false });
+    assert.throws(() => aprobadorHoraExtra({ solicitanteId: 25, cargoSolicitante: 'JEFE DE OPERACIONES', gestorDelSolicitanteId: null }), ReglaAsistenciaError);
+});
