@@ -11,6 +11,7 @@ const mallaRetroactiva = require('../../domain/asistencia/mallaRetroactiva');
 const semanaMalla = require('../../domain/asistencia/semanaMalla');
 const parametroRepo = require('../../repositories/asistencia/parametroRepository');
 const novedadEquipoRepo = require('../../repositories/asistencia/novedadEquipoRepository');
+const festivoRepo = require('../../repositories/asistencia/festivoRepository');
 const jornadaRepo = require('../../repositories/asistencia/jornadaRepository');
 const cierreService = require('./cierreService');
 const { calcularEstadoConDatos, construirTotales } = require('./jornadaCalculo');
@@ -260,12 +261,15 @@ async function validarSemanasDelPlan(plan) {
     const rango = semanaMalla.rangoDeSemanas(filas.map((f) => f.fecha));
     if (!rango) return { desajustes: [], sinValidar: [] };
     const ids = [...new Set(filas.map((f) => f.users_company_id))];
-    const [horarios, novedadesRrhh] = await Promise.all([
+    const diasRango = [];
+    for (let f = rango.desde; f <= rango.hasta; f = sumarDias(f, 1)) diasRango.push(f);
+    const [horarios, novedadesRrhh, festivos] = await Promise.all([
         horarioAsignadoRepo.findRangoPorEmpleados(ids, rango.desde, rango.hasta),
-        novedadEquipoRepo.vigentesDe(ids, rango.desde, rango.hasta)
+        novedadEquipoRepo.vigentesDe(ids, rango.desde, rango.hasta),
+        festivoRepo.sonFestivos(diasRango)
     ]);
     const existentes = new Map(horarios.map((h) => [`${h.users_company_id}|${claveFecha(h.fecha)}`, h]));
-    return semanaMalla.validarSemanas({ filas, existentes, novedadesRrhh, minutosSemana: horasSemana * 60 });
+    return semanaMalla.validarSemanas({ filas, existentes, novedadesRrhh, minutosSemana: horasSemana * 60, festivos });
 }
 
 // Mensaje cuando la malla no cuadra: no se carga nada.
@@ -345,7 +349,7 @@ const INSTRUCCIONES = (desde, hasta) => [
     ['5. Las filas que dejes sin Entrada, Salida ni Novedad no se cargan: ese día queda como estaba.'],
     ['6. No cambies Cedula ni Fecha. Nombre, Cargo y Centro de costo son informativos.'],
     ['7. Los turnos que cruzan la medianoche (salida antes de la entrada) no se pueden cargar.'],
-    ['8. Cada persona debe sumar exactamente 42 horas por semana (lunes a domingo, sin el almuerzo) y tener al menos un día de descanso. Si una sola persona no cuadra, no se carga nada y la vista previa dice qué filas corregir. Las semanas con vacaciones, incapacidad u otra novedad no se revisan.'],
+    ['8. Cada persona debe sumar exactamente 42 horas por semana (lunes a domingo, sin el almuerzo) y tener al menos un día de descanso. Si una sola persona no cuadra, no se carga nada y la vista previa dice qué filas corregir. Las semanas con vacaciones, incapacidad u otra novedad no se revisan. En una semana con festivo no se exigen las 42 horas, solo no pasarse, y el festivo sin trabajar cuenta como descanso.'],
     [],
     ['Cuando termines, súbela en Horarios → Cargar malla. Primero verás una vista previa y después la aplicas.']
 ];
