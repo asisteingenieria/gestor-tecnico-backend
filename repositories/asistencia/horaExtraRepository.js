@@ -146,7 +146,22 @@ async function resolver(id, { estado, minutosAprobados, clase, comentario, aprob
     return resultado.affectedRows > 0;
 }
 
+// Pendientes o aprobadas de varias personas en un rango: el Excel de horas extra (§91) no deja pedir una segunda el
+// mismo día y la plantilla las muestra en "Ya solicitada".
+async function findActivasPorEmpleadosEntre(usersCompanyIds, desde, hasta, conn = db) {
+    if (usersCompanyIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT idhora_extra, users_company_id, fecha, hora_inicio, hora_fin, estado
+           FROM hora_extra
+          WHERE users_company_id IN (?) AND fecha BETWEEN ? AND ? AND estado IN ('pendiente', 'aprobada')
+          ORDER BY users_company_id, fecha, idhora_extra`,
+        [usersCompanyIds, desde, hasta]
+    );
+    return filas;
+}
+
 module.exports = {
+    findActivasPorEmpleadosEntre,
     findAprobadasPorEmpleadoYFecha,
     findAprobadasPorEmpleadosYFecha,
     insertarSolicitud,

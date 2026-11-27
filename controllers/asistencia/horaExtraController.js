@@ -1,4 +1,5 @@
 const horaExtraService = require('../../services/asistencia/horaExtraService');
+const horaExtraExcelService = require('../../services/asistencia/horaExtraExcelService');
 const { autorDe } = require('./autor');
 
 // El jefe solicita por su equipo (§51): `empleados` es la lista de fichas.
@@ -67,4 +68,33 @@ async function rechazar(req, res) {
     res.json(resultado);
 }
 
-module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };
+// Horas extra en Excel (§91): plantilla con el equipo directo, vista previa y envío con el mismo archivo.
+async function plantillaExcel(req, res) {
+    const r = await horaExtraExcelService.plantilla({
+        jefeUsersCompanyId: req.user.users_company_id,
+        desde: req.query.desde,
+        hasta: req.query.hasta
+    });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.nombre}"`);
+    res.setHeader('X-Total-Personas', String(r.personas));
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Total-Personas');
+    res.send(r.buffer);
+}
+
+async function previsualizarExcel(req, res) {
+    res.json(await horaExtraExcelService.previsualizar({ jefeUsersCompanyId: req.user.users_company_id, buffer: req.file?.buffer }));
+}
+
+async function enviarExcel(req, res) {
+    res.status(201).json(await horaExtraExcelService.enviar({
+        jefeUsersCompanyId: req.user.users_company_id,
+        buffer: req.file?.buffer,
+        solicitadoPor: autorDe(req)
+    }));
+}
+
+module.exports = {
+    plantillaExcel,
+    previsualizarExcel,
+    enviarExcel, solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };
