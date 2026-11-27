@@ -59,4 +59,26 @@ function fechasReales(ws, XLSX) {
     return ws;
 }
 
-module.exports = { aSerial, fechasReales, FORMATO_DIA, FORMATO_DIA_HORA };
+/**
+ * Celdas de hora de las plantillas (Entrada, Salida, Almuerzo, Hora inicio, Hora fin) con formato Texto: lo que el
+ * jefe escribe queda tal cual (00:30, 14:00) en la celda y en la barra de fórmulas. Con formato General, Excel lo
+ * convierte en hora del día y la barra muestra "12:30:00 a. m." o "2:00:00 p. m.", que confunde (asistencia.md §90.2).
+ * El cargue lee igual los dos formatos. Aplica a todas las filas de datos, también a las vacías. Devuelve la hoja.
+ */
+function horasComoTexto(ws, XLSX, encabezados) {
+    if (!ws || !ws['!ref']) return ws;
+    const rango = XLSX.utils.decode_range(ws['!ref']);
+    for (let c = rango.s.c; c <= rango.e.c; c++) {
+        const encabezado = ws[XLSX.utils.encode_cell({ r: rango.s.r, c })];
+        if (!encabezado || !encabezados.includes(String(encabezado.v).trim())) continue;
+        for (let r = rango.s.r + 1; r <= rango.e.r; r++) {
+            const ref = XLSX.utils.encode_cell({ r, c });
+            const celda = ws[ref] ?? (ws[ref] = { t: 's', v: '' });
+            if (celda.t !== 's') Object.assign(celda, { t: 's', v: String(celda.v ?? '') });
+            celda.z = '@';
+        }
+    }
+    return ws;
+}
+
+module.exports = { aSerial, fechasReales, horasComoTexto, FORMATO_DIA, FORMATO_DIA_HORA };

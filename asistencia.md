@@ -4674,3 +4674,7 @@ La plantilla trae a todo el equipo directo, así que el jefe necesita ver quién
 - los cambios de turno, intercambios o libres **pendientes** de ese día (`solicitudCambioTurnoRepository.findPendientesEntre`).
 
 Al subir el archivo, una fila en un día con novedad es error ("Tiene novedad ese día: …"). La única excepción es **Horas de votación**, porque es parcial. Los cambios de turno pendientes también bloquean porque cambiarían el turno con el que se clasifica la franja: primero hay que resolverlos. La regla está en `horaExtraExcel.novedadesPorDia` + `planificar`, con test. No lleva migración.
+
+### 90.2 Horas con formato Texto en las plantillas (2026-11-27)
+
+En la plantilla de la malla, al escribir `00:30` en Almuerzo, Excel lo convertía en hora del día: la celda mostraba `0:30` y la barra de fórmulas `12:30:00 a. m.`. Lo mismo pasaba con Entrada y Salida (`14:00` → `2:00:00 p. m.`) y confundía a los jefes. Ahora la plantilla trae las columnas **Entrada, Salida y Almuerzo** de la malla y **Hora inicio y Hora fin** de horas extra (§91) con formato **Texto** en todas las filas, también en las vacías. Lo que se escribe queda tal cual en la celda y en la barra. El cargue lee igual el texto y las horas de Excel (`minutosDeCelda`), así que las plantillas viejas siguen sirviendo. La regla está en `utils/excelFechas.horasComoTexto`, con test. No lleva migración.
