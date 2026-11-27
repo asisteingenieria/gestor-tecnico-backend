@@ -102,6 +102,20 @@ async function findPendientesQueChocan(empleadoIds, fechas, conn = db) {
     return filas;
 }
 
+// Días de cambios de turno o libres pendientes de unas personas en un rango: el Excel de horas extra (§91.2) los
+// muestra en la columna Novedad y no deja pedir hora extra esos días, porque el turno puede cambiar.
+async function findPendientesEntre(empleadoIds, desde, hasta, conn = db) {
+    if (empleadoIds.length === 0) return [];
+    const [filas] = await conn.query(
+        `SELECT d.users_company_id, DATE_FORMAT(d.fecha, '%Y-%m-%d') AS fecha, s.tipo
+         FROM solicitud_cambio_turno_dia d
+         JOIN solicitud_cambio_turno s ON s.idsolicitud_cambio_turno = d.solicitud_id
+         WHERE s.estado = 'pendiente' AND d.users_company_id IN (?) AND d.fecha BETWEEN ? AND ?`,
+        [empleadoIds, desde, hasta]
+    );
+    return filas;
+}
+
 // Solicitudes (cualquier estado) que tocan a un empleado en una fecha, con su día y los nombres de quien pidió,
 // quien aprueba y quien resolvió: la traza de novedades de asistencia del día (§86).
 async function findPorEmpleadoYFecha(empleadoId, fecha, conn = db) {
@@ -133,4 +147,4 @@ async function resolver(id, { estado, motivoRechazo, comentario, resueltoPorUser
     return resultado.affectedRows > 0;
 }
 
-module.exports = { insertar, insertarDias, findByIdParaActualizar, findListado, findById, findDias, findPendientesQueChocan, findPorEmpleadoYFecha, resolver };
+module.exports = { findPendientesEntre, insertar, insertarDias, findByIdParaActualizar, findListado, findById, findDias, findPendientesQueChocan, findPorEmpleadoYFecha, resolver };

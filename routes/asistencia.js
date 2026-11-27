@@ -136,6 +136,10 @@ router.delete('/horarios/:id', canDirigirEquipo, validar(idParamSchema), asyncHa
 // Horas extra (§51): el jefe las solicita por su equipo y las aprueba su director (bandeja = las que
 // le toca aprobar; también las del flujo anterior de su propia gente).
 router.post('/horas-extra/solicitar', canDirigirEquipo, validar(solicitarHoraExtraSchema), asyncHandler(horaExtraController.solicitar));
+// Solicitud masiva en Excel (§91): plantilla, vista previa y envío (todo o nada).
+router.get('/horas-extra/excel/plantilla', canDirigirEquipo, validar(rangoQuerySchema), asyncHandler(horaExtraController.plantillaExcel));
+router.post('/horas-extra/excel/previsualizar', canDirigirEquipo, subirMalla, asyncHandler(horaExtraController.previsualizarExcel));
+router.post('/horas-extra/excel/enviar', canDirigirEquipo, subirMalla, asyncHandler(horaExtraController.enviarExcel));
 router.post('/horas-extra/previsualizar', canDirigirEquipo, validar(previsualizarHoraExtraSchema), asyncHandler(horaExtraController.previsualizar));
 router.get('/horas-extra/mias', canDirigirEquipo, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misSolicitudes));
 router.get('/horas-extra', canDirigirEquipo, validar(bandejaHorasExtraQuerySchema), asyncHandler(horaExtraController.bandeja));

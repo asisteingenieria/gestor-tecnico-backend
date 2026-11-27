@@ -44,6 +44,8 @@ function franja(fecha, inicio, fin) {
 
 const mensajesHoraExtra = {
     solicitada: (jefe, nombres, fecha, inicio, fin) => recortar(`${formatearNombre(jefe)} solicita horas extra para ${paraQuien(nombres)} ${franja(fecha, inicio, fin)}`),
+    // Las del Excel (§91): un solo aviso con el total, en vez de uno por fila.
+    solicitadasExcel: (jefe, solicitudes, personas, horas) => recortar(`${formatearNombre(jefe)} solicita ${solicitudes} ${solicitudes === 1 ? 'hora extra' : 'horas extra'} para ${personas} ${personas === 1 ? 'persona' : 'personas'} (${horas} en total) desde Excel`),
     aprobada: (empleado, fecha, director) => recortar(`Las horas extra de ${formatearNombre(empleado)} del ${ddmm(fecha)} fueron aprobadas por ${formatearNombre(director)}`),
     rechazada: (empleado, fecha, director, motivo) => recortar(`Las horas extra de ${formatearNombre(empleado)} del ${ddmm(fecha)} fueron rechazadas por ${formatearNombre(director)}${motivo ? `. Motivo: ${motivo}` : ''}`),
     // Al empleado, cuando ya están aprobadas: desde ahí AsisLock le cuenta el tiempo extra en esa franja.

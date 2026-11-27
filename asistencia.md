@@ -4648,3 +4648,29 @@ Verificado en local con un Excel de 3 personas: la de 42 h pasa, la de 43 h 30 m
 ### 90.1 La plantilla de la malla solo ofrece DESCANSO en Novedad (2026-11-26)
 
 El desplegable de la columna Novedad de la plantilla traía INC, VACACIONES, RETIRO, SUSPENSION, LNR y LR además de DESCANSO. Ahora solo trae **DESCANSO**: las ausencias las registra RRHH como novedad, no el jefe en la malla. La instrucción 3 de la hoja Instrucciones lo dice. El cargue sigue aceptando las otras si vienen escritas o precargadas de un día que ya las tenía (no se pierde lo cargado). Solo backend (`horarioService.plantillaMallaExcel`), sin migración.
+
+## 91. Solicitud de horas extra en Excel (2026-11-26)
+
+Los jefes piden horas extra para todo su equipo directo en un solo archivo, además de la pantalla una por una (§51).
+
+- **Plantilla**: Horas extra → "Solicitar en Excel" → rango desde/hasta (hasta 62 días; por defecto la última semana hasta hoy). `GET /api/asistencia/horas-extra/excel/plantilla?desde=&hasta=` (`canDirigirEquipo`). Una fila por persona del equipo directo y día del rango, desde su ingreso. Columnas: Cedula, Nombre, Cargo, Centro de costo, Fecha (fecha real), Turno, Ya solicitada (informativas) y **Hora inicio, Hora fin, Motivo** (las que se llenan). Hoja "Instrucciones".
+- **Reglas** (`domain/asistencia/horaExtraExcel.js`, con tests): las filas sin hora inicio, hora fin ni motivo se ignoran. Las fechas pueden ser pasadas o futuras. La hora va en formato de 24 h, y si fin < inicio la franja cruza la medianoche. Se permite **una hora extra por persona y día**: no se aceptan dos filas el mismo día ni una pendiente o aprobada que ya exista, porque el cálculo de la jornada toma una por día. Solo se acepta el equipo directo y no antes de la fecha de ingreso. Los PPT de 7 dígitos se homologan (§69). La franja se clasifica con `calcularTramos`, igual que en la pantalla, y si no suma tiempo es error.
+- **Vista previa** (`POST /horas-extra/excel/previsualizar`, campo `archivo`): no guarda nada. Muestra lo que se enviaría con su clasificación, las filas con error y qué corregir, y los avisos de domingos.
+- **Envío** (`POST /horas-extra/excel/enviar`, con el mismo archivo): es todo o nada. Si hay errores no envía ninguna. Si no los hay, crea una solicitud por persona y día en una sola transacción, con aprobador = el director del jefe (`jefeAreaDe` + `assertAprobador`), y manda **un solo aviso** al director con el total (`mensajesHoraExtra.solicitadasExcel`). Después el director aprueba cada una en su bandeja como siempre.
+- Código: `services/asistencia/horaExtraExcelService.js`, `horaExtraRepository.findActivasPorEmpleadosEntre`, frontend `HorasExtraExcelModal.jsx` y `asistenciaService.descargarPlantillaHorasExtra/previsualizarHorasExtraExcel/enviarHorasExtraExcel`.
+
+### 91.1 Límites legales de horas extra (migración 111)
+
+Los valida el Excel; la solicitud de la pantalla queda igual. Lógica en `domain/asistencia/limitesHoraExtra.js`, con tests:
+
+- **Máximo 2 h extra por día y 12 h por semana** (lunes a domingo), según el CST art. 22 (Ley 50 de 1990). Con las 42 h ordinarias de la malla (§90) la semana queda en 54 h. Se cuentan las clases de hora extra (diurnas, nocturnas y dominicales/festivas). **No cuentan los recargos** (recargo nocturno y dominical dentro del turno), porque son trabajo ordinario con recargo. La semana suma lo del Excel más lo ya pendiente o aprobado. Si se pasa, es error de todas las filas de esa persona en esa semana. Los topes salen de `asistencia_parametro` (`max_horas_extra_diarias` = 2, `max_horas_extra_semanales` = 12), así que se cambian sin tocar código.
+- **Domingos: aviso, no bloqueo.** La ley no prohíbe trabajar 3 domingos. Trabajar 3 o más en el mes calendario es **trabajo dominical habitual** (CST art. 180) y da derecho a un descanso compensatorio remunerado. La vista previa muestra la pestaña "Domingos" con las personas que piden un domingo y llegan a 3 o más en el mes, contando turnos no descanso y horas extra.
+- **Despliegue:** migración 111 ANTES del código. Sin los parámetros, la vista previa responde que faltan y no envía nada. La migración es idempotente.
+
+### 91.2 Novedades en la plantilla de horas extra (2026-11-26)
+
+La plantilla trae a todo el equipo directo, así que el jefe necesita ver quién no puede tener hora extra ese día. Nueva columna informativa **Novedad** (entre "Ya solicitada" y "Hora inicio"), que muestra:
+- las novedades de RRHH registradas que cubren el día, pasadas o programadas (`novedadEquipoRepository.vigentesDe`), con su rango, por ejemplo "Vacaciones (20/11/2026 al 28/11/2026)";
+- los cambios de turno, intercambios o libres **pendientes** de ese día (`solicitudCambioTurnoRepository.findPendientesEntre`).
+
+Al subir el archivo, una fila en un día con novedad es error ("Tiene novedad ese día: …"). La única excepción es **Horas de votación**, porque es parcial. Los cambios de turno pendientes también bloquean porque cambiarían el turno con el que se clasifica la franja: primero hay que resolverlos. La regla está en `horaExtraExcel.novedadesPorDia` + `planificar`, con test. No lleva migración.

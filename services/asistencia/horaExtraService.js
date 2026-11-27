@@ -264,4 +264,4 @@ async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprob
     return { success: true };
 }
 
-module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };
+module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar, calcularTramos };
