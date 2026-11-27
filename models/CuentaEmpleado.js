@@ -70,6 +70,46 @@ class CuentaEmpleado {
         await db.query('UPDATE cuenta_empleado SET password = ?, debe_cambiar_password = 0 WHERE idcuenta_empleado = ?', [hash, id]);
     }
 
+    // Panel del admin (/users → Cuentas por cédula): busca por cédula o nombre, sin importar
+    // tildes ni mayúsculas en el nombre (la collation de MySQL ya lo hace). Trae el estado del
+    // contrato más reciente para que el admin sepa si la cuenta puede entrar.
+    static async buscarParaAdmin(texto, limite = 50) {
+        const q = String(texto ?? '').trim();
+        if (q.length < 3) return [];
+        const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+        const [rows] = await db.query(
+            `SELECT ce.idcuenta_empleado AS id, ce.usuario, ce.users_company_id, ce.debe_cambiar_password,
+                    ce.ultimo_ingreso, ce.creado_en,
+                    uc.numero_identificacion AS cedula,
+                    TRIM(CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido)) AS nombre_completo,
+                    (SELECT ca.nombre FROM contrato c JOIN cargo ca ON ca.idcargo = c.cargo_idcargo
+                      WHERE c.users_company_id = uc.id ORDER BY c.idcontrato DESC LIMIT 1) AS cargo,
+                    (SELECT ec.nombre FROM contrato c JOIN estado_contrato ec ON ec.idestado_contrato = c.estado_contrato_idestado_contrato
+                      WHERE c.users_company_id = uc.id ORDER BY c.idcontrato DESC LIMIT 1) AS estado_contrato
+               FROM cuenta_empleado ce
+               JOIN users_company uc ON uc.id = ce.users_company_id
+              WHERE ce.usuario LIKE ?
+                 OR uc.numero_identificacion LIKE ?
+                 OR CONCAT_WS(' ', uc.primer_nombre, uc.segundo_nombre, uc.primer_apellido, uc.segundo_apellido) LIKE ?
+                 OR CONCAT_WS(' ', uc.primer_nombre, uc.primer_apellido) LIKE ?
+              ORDER BY nombre_completo
+              LIMIT ?`,
+            [like, like, like, like, limite]
+        );
+        return rows;
+    }
+
+    // El admin restablece la contraseña (utils/restablecerPassword.js): queda con cambio
+    // obligatorio en el próximo ingreso.
+    static async restablecerPassword(id, nuevaPassword) {
+        const hash = await bcrypt.hash(nuevaPassword, await bcrypt.genSalt(10));
+        const [r] = await db.query(
+            'UPDATE cuenta_empleado SET password = ?, debe_cambiar_password = 1 WHERE idcuenta_empleado = ?',
+            [hash, id]
+        );
+        return r.affectedRows > 0;
+    }
+
     static async registrarIngreso(id) {
         await db.query('UPDATE cuenta_empleado SET ultimo_ingreso = NOW() WHERE idcuenta_empleado = ?', [id]);
     }

@@ -4688,3 +4688,57 @@ día de descanso de la semana; si se trabaja, hace falta otro descanso. `semanaM
 de las semanas. La hoja Instrucciones de la plantilla lo dice en el punto 8. Sin migración: `festivo_colombia` existe
 desde la 074 (festivos 2025-2030). Test en `tests/asistencia/semanaMalla.test.js`.
 
+
+## 92. El admin restablece contraseñas desde Usuarios (2026-11-27)
+
+**Pedido.** Cuando alguien olvida la contraseña (por ejemplo un director que entra con su cédula), el admin del sistema
+se la restablece desde `/users`: vuelve a la cédula o a una temporal, y al ingresar se le pide cambiarla.
+
+- **Sin migración:** usa `debe_cambiar_password`, que ya tienen `users` y `cuenta_empleado`. Con la marca en 1, el login
+  devuelve `debeCambiarPassword`, el frontend lleva a `/cambiar-password` y `verifyToken` bloquea el resto de la API (§19).
+- **API** (`routes/users.js`, `isAdmin`, antes de `/:id`):
+  - `GET /api/users/cuentas-empleado?q=`: busca cuentas por cédula (`cuenta_empleado`) por cédula o nombre, mínimo 3
+    caracteres, máximo 50, con cargo, estado del último contrato y último ingreso;
+  - `POST /api/users/cuentas-empleado/:id/restablecer-password` y `POST /api/users/:id/restablecer-password`, cuerpo
+    `{ modo: 'cedula' | 'temporal', password? }`. La regla es `utils/restablecerPassword.claveRestablecida`, con test: la
+    cédula (de la cuenta por cédula, o de la ficha vinculada al usuario del sistema; sin ficha solo vale la temporal) o una
+    temporal de al menos 6 caracteres. Deja `debe_cambiar_password = 1` y escribe en el log de pm2 quién la restableció.
+  - El admin no restablece su propia cuenta (400): esa se cambia con la actual.
+- `GET /api/users` trae además `debe_cambiar_password` y la `cedula` de la ficha vinculada.
+- **Frontend** (`UserManagement.jsx`): pestañas "Usuarios del sistema" y "Cuentas por cédula"
+  (`components/usuarios/CuentasPorCedula.jsx`). Botón "Contraseña" por usuario y "Restablecer contraseña" por cuenta, que
+  abren `RestablecerPasswordModal.jsx` (cédula por defecto o temporal) y al terminar muestran usuario y contraseña para
+  entregarlos. Pastilla "Debe cambiar contraseña" y, en las cuentas por cédula, aviso si el contrato no está vigente (esa
+  cuenta no puede entrar aunque se restablezca).
+- La sesión que la persona tuviera abierta sigue viva hasta que venza (10 h o 5 h, §81).
+
+Verificado en local contra la BD con 14 comprobaciones (buscar, restablecer a cédula y temporal, login que exige el cambio,
+cambio que quita la marca, 400/404, propia cuenta), con las cuentas de prueba restauradas. 508 tests. `npm run build` sin
+errores.
+
+**Despliegue:** backend y frontend, sin migración.
+
+## 93. Horas extra: "Aprobar todas" para el director (2026-11-27)
+
+**Pedido.** El director que aprueba horas extra no tiene que aprobarlas una por una.
+
+- **API:** `PUT /api/asistencia/horas-extra/aprobar-varias` (`canDirigirEquipo`), cuerpo `{ ids, comentario? }`
+  (`aprobarVariasHoraExtraSchema`). Va antes de `/:id/aprobar`.
+- **Se mandan los ids que el director tiene en pantalla**, no "todo lo pendiente": una solicitud que llega después de
+  abrir la bandeja no se aprueba sin verla. Máximo 300 por llamada.
+- `horaExtraService.aprobarVarias`: cada id pasa por `solicitudParaResolver` (la de otro director o ya resuelta se
+  **omite** y se informa en `omitidas`, sin tumbar las demás). Cada una se aprueba con la clasificación que calculó el
+  servidor (sin ajuste de tramos; una que no suma tiempo se omite para revisarla una por una). Todas en **una sola
+  transacción**, con el recálculo de la jornada de cada día (§88) y los avisos al jefe que la pidió y al empleado; los
+  avisos en vivo y `notificarCambioJornada` van después del commit. La aprobación individual y la masiva comparten
+  `aprobarEnConexion`. Responde `{ success, aprobadas, omitidas }`.
+- **Frontend** (`HorasExtra.jsx`): en "Por aprobar" con el filtro Pendientes y más de una solicitud aparece
+  "Aprobar todas (N)". Pide confirmación en la misma pantalla con el total de horas ("¿Aprobar las 5 solicitudes
+  (7 h 30 min) con la clasificación calculada?"). La confirmación se cierra al cambiar de pestaña o filtro. Las que
+  necesiten ajuste o rechazo se resuelven antes, una por una, con los botones de siempre.
+
+Verificado en local en el navegador con un escenario temporal (empleado1 como jefe de las fichas 9-12 y Marta,
+`9000000001`, como directora): 5 pendientes → "Aprobar todas" → 5 aprobadas de 90 min, 10 avisos (jefe y empleado);
+escenario revertido y solicitudes borradas. 508 tests.
+
+**Despliegue:** backend y frontend, sin migración. Backend primero.

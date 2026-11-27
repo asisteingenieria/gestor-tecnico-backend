@@ -42,6 +42,7 @@ const {
     actualizarAsignacionSchema,
     bandejaHorasExtraQuerySchema,
     aprobarHoraExtraSchema,
+    aprobarVariasHoraExtraSchema,
     rechazarHoraExtraSchema,
     eventoManualSchema,
     periodoQuerySchema,
@@ -143,6 +144,8 @@ router.post('/horas-extra/excel/enviar', canDirigirEquipo, subirMalla, asyncHand
 router.post('/horas-extra/previsualizar', canDirigirEquipo, validar(previsualizarHoraExtraSchema), asyncHandler(horaExtraController.previsualizar));
 router.get('/horas-extra/mias', canDirigirEquipo, validar(misHorasExtraQuerySchema), asyncHandler(horaExtraController.misSolicitudes));
 router.get('/horas-extra', canDirigirEquipo, validar(bandejaHorasExtraQuerySchema), asyncHandler(horaExtraController.bandeja));
+// Aprobar todas las pendientes que el director tiene en pantalla (§93). Va antes de /:id.
+router.put('/horas-extra/aprobar-varias', canDirigirEquipo, validar(aprobarVariasHoraExtraSchema), asyncHandler(horaExtraController.aprobarVarias));
 router.put('/horas-extra/:id/aprobar', canDirigirEquipo, validar(aprobarHoraExtraSchema), asyncHandler(horaExtraController.aprobar));
 router.put('/horas-extra/:id/rechazar', canDirigirEquipo, validar(rechazarHoraExtraSchema), asyncHandler(horaExtraController.rechazar));
 
