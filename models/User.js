@@ -5,7 +5,11 @@ class User {
     static async getAll() {
         try {
             const [rows] = await db.query(
-                'SELECT id, username, full_name, role, sede, departamento, users_company_id, ver_empleados_rrhh, created_at FROM users WHERE role != ? ORDER BY full_name',
+                `SELECT u.id, u.username, u.full_name, u.role, u.sede, u.departamento, u.users_company_id, u.ver_empleados_rrhh,
+                        u.debe_cambiar_password, u.created_at, uc.numero_identificacion AS cedula
+                   FROM users u
+                   LEFT JOIN users_company uc ON uc.id = u.users_company_id
+                  WHERE u.role != ? ORDER BY u.full_name`,
                 ['anonimo']
             );
             return rows;
@@ -270,6 +274,27 @@ class User {
 
     static async validatePassword(plainPassword, hashedPassword) {
         return await bcrypt.compare(plainPassword, hashedPassword);
+    }
+
+    // Cuenta con la cédula de su ficha (si está vinculada), para restablecer la contraseña a la
+    // cédula desde el panel del admin.
+    static async getConCedula(id) {
+        const [rows] = await db.query(
+            `SELECT u.id, u.username, u.full_name, u.role, u.users_company_id, uc.numero_identificacion AS cedula
+               FROM users u
+               LEFT JOIN users_company uc ON uc.id = u.users_company_id
+              WHERE u.id = ?`,
+            [id]
+        );
+        return rows[0];
+    }
+
+    // El admin restablece la contraseña (utils/restablecerPassword.js): queda con cambio
+    // obligatorio en el próximo ingreso.
+    static async restablecerPassword(id, nuevaPassword) {
+        const hash = await bcrypt.hash(nuevaPassword, await bcrypt.genSalt(10));
+        const [r] = await db.query('UPDATE users SET password = ?, debe_cambiar_password = 1 WHERE id = ?', [hash, id]);
+        return r.affectedRows > 0;
     }
 
     static async marcarPasswordCambiada(id) {

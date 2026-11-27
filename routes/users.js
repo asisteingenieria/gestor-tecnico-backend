@@ -7,7 +7,10 @@ const {
     getUserById,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    buscarCuentasEmpleado,
+    restablecerPasswordCuentaEmpleado,
+    restablecerPasswordUsuario
 } = require('../controllers/userController');
 const { verifyToken, isAdmin } = require('../middleware/auth');
 
@@ -21,6 +24,11 @@ router.get('/technicians', getTechnicians);
 router.get('/coordinators', getCoordinators);
 
 // Rutas solo para administradores
+// Restablecer contraseñas (cuentas por cédula y usuarios del sistema). Van antes de /:id.
+router.get('/cuentas-empleado', isAdmin, buscarCuentasEmpleado);
+router.post('/cuentas-empleado/:id/restablecer-password', isAdmin, restablecerPasswordCuentaEmpleado);
+router.post('/:id/restablecer-password', isAdmin, restablecerPasswordUsuario);
+
 router.get('/', isAdmin, getAllUsers);
 router.get('/:id', isAdmin, getUserById);
 router.post('/', isAdmin, createUser);

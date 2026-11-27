@@ -413,3 +413,76 @@ exports.deleteUser = async (req, res) => {
         res.status(500).send('Error del servidor');
     }
 };
+// ── Restablecer contraseñas desde el panel del admin ─────────────────────────────────────
+// Dos tipos de cuenta: las de `users` (las que crea el admin) y las de `cuenta_empleado` (los
+// empleados y jefes que entran con su cédula, asistencia.md §24). En las dos la contraseña
+// vuelve a la cédula o a una temporal y queda el cambio obligatorio en el próximo ingreso.
+const { claveRestablecida } = require('../utils/restablecerPassword');
+
+// @desc    Buscar cuentas por cédula (cuenta_empleado) por cédula o nombre
+// @route   GET /api/users/cuentas-empleado?q=
+// @access  Private (Admin)
+exports.buscarCuentasEmpleado = async (req, res) => {
+    try {
+        const q = String(req.query.q ?? '').trim();
+        if (q.length < 3) return res.json({ cuentas: [], msg: 'Escribe al menos 3 caracteres' });
+        res.json({ cuentas: await CuentaEmpleado.buscarParaAdmin(q) });
+    } catch (err) {
+        console.error('buscarCuentasEmpleado:', err.message);
+        res.status(500).json({ msg: 'Error del servidor' });
+    }
+};
+
+// @desc    Restablecer la contraseña de una cuenta por cédula
+// @route   POST /api/users/cuentas-empleado/:id/restablecer-password  { modo: 'cedula'|'temporal', password? }
+// @access  Private (Admin)
+exports.restablecerPasswordCuentaEmpleado = async (req, res) => {
+    try {
+        const cuenta = await CuentaEmpleado.getById(req.params.id);
+        if (!cuenta) return res.status(404).json({ msg: 'Cuenta no encontrada' });
+
+        // La cuenta por cédula usa la cédula como usuario: es su contraseña por defecto.
+        const { password, error } = claveRestablecida({ ...req.body, cedula: cuenta.usuario });
+        if (error) return res.status(400).json({ msg: error });
+
+        await CuentaEmpleado.restablecerPassword(cuenta.idcuenta_empleado, password);
+        console.log(`[restablecer-password] admin ${req.user.username} restableció la cuenta por cédula ${cuenta.usuario} (modo ${req.body.modo})`);
+        res.json({
+            msg: 'Contraseña restablecida. Al ingresar deberá cambiarla.',
+            usuario: cuenta.usuario,
+            modo: req.body.modo
+        });
+    } catch (err) {
+        console.error('restablecerPasswordCuentaEmpleado:', err.message);
+        res.status(500).json({ msg: 'Error del servidor' });
+    }
+};
+
+// @desc    Restablecer la contraseña de un usuario del sistema
+// @route   POST /api/users/:id/restablecer-password  { modo: 'cedula'|'temporal', password? }
+// @access  Private (Admin)
+exports.restablecerPasswordUsuario = async (req, res) => {
+    try {
+        const usuario = await User.getConCedula(req.params.id);
+        if (!usuario) return res.status(404).json({ msg: 'Usuario no encontrado' });
+        // La propia contraseña se cambia desde "Cambiar contraseña", con la actual.
+        if (String(usuario.id) === String(req.user.id) && req.user.tipo_cuenta !== 'empleado') {
+            return res.status(400).json({ msg: 'Para tu propia cuenta usa "Cambiar contraseña".' });
+        }
+
+        // Con ficha vinculada, la cédula de la ficha; sin ficha solo vale la temporal.
+        const { password, error } = claveRestablecida({ ...req.body, cedula: usuario.cedula });
+        if (error) return res.status(400).json({ msg: error });
+
+        await User.restablecerPassword(usuario.id, password);
+        console.log(`[restablecer-password] admin ${req.user.username} restableció el usuario ${usuario.username} (modo ${req.body.modo})`);
+        res.json({
+            msg: 'Contraseña restablecida. Al ingresar deberá cambiarla.',
+            usuario: usuario.username,
+            modo: req.body.modo
+        });
+    } catch (err) {
+        console.error('restablecerPasswordUsuario:', err.message);
+        res.status(500).json({ msg: 'Error del servidor' });
+    }
+};
