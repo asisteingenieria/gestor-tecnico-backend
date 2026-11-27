@@ -58,6 +58,16 @@ async function aprobar(req, res) {
     res.json(resultado);
 }
 
+async function aprobarVarias(req, res) {
+    const resultado = await horaExtraService.aprobarVarias({
+        directorUsersCompanyId: req.user.users_company_id,
+        ids: req.body.ids,
+        comentario: req.body.comentario,
+        aprobadoPor: autorDe(req)
+    });
+    res.json(resultado);
+}
+
 async function rechazar(req, res) {
     const resultado = await horaExtraService.rechazar({
         directorUsersCompanyId: req.user.users_company_id,
@@ -97,4 +107,4 @@ async function enviarExcel(req, res) {
 module.exports = {
     plantillaExcel,
     previsualizarExcel,
-    enviarExcel, solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar };
+    enviarExcel, solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, aprobarVarias, rechazar };

@@ -204,6 +204,19 @@ async function recalcularJornadaDe(usersCompanyId, fecha, conn) {
     return true;
 }
 
+// Escribe la aprobación de una solicitud dentro de la transacción de quien llama: estado, tramos
+// ajustados (si los hay) y el recálculo de la jornada de ese día (§88).
+async function aprobarEnConexion(solicitud, { ajuste, efectivos, comentario, aprobadoPor }, conn) {
+    const resuelta = await horaExtraRepo.resolver(
+        solicitud.idhora_extra,
+        { estado: 'aprobada', minutosAprobados: totalMinutos(efectivos), clase: claseDominante(efectivos), comentario, aprobadoPor },
+        conn
+    );
+    if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
+    if (ajuste.length > 0) await horaExtraRepo.reemplazarTramos(solicitud.idhora_extra, efectivos, conn);
+    await recalcularJornadaDe(solicitud.users_company_id, normalizarFecha(solicitud.fecha), conn);
+}
+
 // Aprobar: el director confirma la clasificación o la ajusta (manda `tramos`). Los minutos aprobados
 // son la suma de los tramos efectivos. Si no manda tramos, se quedan los que calculó el servidor.
 async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario, aprobadoPor }) {
@@ -212,21 +225,13 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario
 
     const ajuste = normalizarTramos(tramos);
     const efectivos = ajuste.length > 0 ? ajuste : await horaExtraRepo.findTramos(idhoraExtra);
-    const minutosAprobados = totalMinutos(efectivos);
-    if (minutosAprobados <= 0) throw new ValidacionError('La hora extra aprobada no suma tiempo');
+    if (totalMinutos(efectivos) <= 0) throw new ValidacionError('La hora extra aprobada no suma tiempo');
 
     const notificaciones = avisosDeResolucion(solicitud, true);
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
-        const resuelta = await horaExtraRepo.resolver(
-            idhoraExtra,
-            { estado: 'aprobada', minutosAprobados, clase: claseDominante(efectivos), comentario, aprobadoPor },
-            conn
-        );
-        if (!resuelta) throw new ConflictoJornadaError('La solicitud de hora extra ya está resuelta');
-        if (ajuste.length > 0) await horaExtraRepo.reemplazarTramos(idhoraExtra, efectivos, conn);
-        await recalcularJornadaDe(solicitud.users_company_id, normalizarFecha(solicitud.fecha), conn);
+        await aprobarEnConexion(solicitud, { ajuste, efectivos, comentario, aprobadoPor }, conn);
         await notificacionRepo.insertarVarias(notificaciones, conn);
         await conn.commit();
     } catch (e) {
@@ -239,6 +244,59 @@ async function aprobar({ directorUsersCompanyId, idhoraExtra, tramos, comentario
     // Las pantallas en vivo (Equipo hoy, monitor) quitan la alerta sin esperar la resincronización.
     notificacionService.notificarCambioJornada(solicitud.users_company_id, 'hora_extra_aprobada');
     return { success: true };
+}
+
+// Aprobar todas (§93): el director aprueba de una vez las pendientes que tiene en pantalla, cada una con
+// la clasificación que calculó el servidor (sin ajuste de tramos). Se mandan los ids que ve, no "todo lo
+// pendiente", para no aprobar una que llegó después de abrir la bandeja. Las que ya no le tocan o ya se
+// resolvieron se omiten y se informan; el resto se aprueba en una sola transacción, todo o nada.
+const MAX_APROBAR_TODAS = 300;
+
+async function aprobarVarias({ directorUsersCompanyId, ids, comentario, aprobadoPor }) {
+    requireUsersCompanyId(directorUsersCompanyId);
+    const unicos = [...new Set((Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (unicos.length === 0) throw new ValidacionError('No hay solicitudes para aprobar');
+    if (unicos.length > MAX_APROBAR_TODAS) throw new ValidacionError(`Se pueden aprobar hasta ${MAX_APROBAR_TODAS} solicitudes a la vez`);
+
+    const aAprobar = [];
+    const omitidas = [];
+    for (const id of unicos) {
+        try {
+            const solicitud = await solicitudParaResolver(directorUsersCompanyId, id);
+            const efectivos = await horaExtraRepo.findTramos(id);
+            if (totalMinutos(efectivos) <= 0) {
+                omitidas.push({ id, motivo: 'No suma tiempo: revísala una por una' });
+                continue;
+            }
+            aAprobar.push({ solicitud, efectivos });
+        } catch (e) {
+            if (e instanceof NoEncontradoError || e instanceof ConflictoJornadaError) omitidas.push({ id, motivo: e.message });
+            else throw e;
+        }
+    }
+
+    const notificaciones = aAprobar.flatMap(({ solicitud }) => avisosDeResolucion(solicitud, true));
+    if (aAprobar.length > 0) {
+        const conn = await db.getConnection();
+        try {
+            await conn.beginTransaction();
+            for (const { solicitud, efectivos } of aAprobar) {
+                await aprobarEnConexion(solicitud, { ajuste: [], efectivos, comentario, aprobadoPor }, conn);
+            }
+            await notificacionRepo.insertarVarias(notificaciones, conn);
+            await conn.commit();
+        } catch (e) {
+            await conn.rollback();
+            throw e;
+        } finally {
+            conn.release();
+        }
+        notificacionAsistenciaService.avisarEnVivo(notificaciones);
+        for (const ucId of new Set(aAprobar.map(({ solicitud }) => solicitud.users_company_id))) {
+            notificacionService.notificarCambioJornada(ucId, 'hora_extra_aprobada');
+        }
+    }
+    return { success: true, aprobadas: aAprobar.length, omitidas };
 }
 
 async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprobadoPor }) {
@@ -264,4 +322,4 @@ async function rechazar({ directorUsersCompanyId, idhoraExtra, comentario, aprob
     return { success: true };
 }
 
-module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, rechazar, calcularTramos };
+module.exports = { solicitar, previsualizar, misHorasExtra, misSolicitudes, bandeja, aprobar, aprobarVarias, rechazar, calcularTramos };

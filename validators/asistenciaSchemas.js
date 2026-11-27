@@ -132,6 +132,14 @@ const aprobarHoraExtraSchema = {
     }
 };
 
+// Aprobar todas (§93): los ids que el director tiene en pantalla.
+const aprobarVariasHoraExtraSchema = {
+    body: {
+        ids: { requerido: true, tipo: 'array', minimo: 1 },
+        comentario: { tipo: 'texto' }
+    }
+};
+
 const rechazarHoraExtraSchema = {
     params: { id: { requerido: true, tipo: 'entero' } },
     body: { comentario: { tipo: 'texto' } }
@@ -283,6 +291,7 @@ module.exports = {
     actualizarAsignacionSchema,
     bandejaHorasExtraQuerySchema,
     aprobarHoraExtraSchema,
+    aprobarVariasHoraExtraSchema,
     rechazarHoraExtraSchema,
     eventoManualSchema
 };

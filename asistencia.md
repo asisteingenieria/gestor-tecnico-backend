@@ -4718,3 +4718,27 @@ errores.
 
 **Despliegue:** backend y frontend, sin migración.
 
+## 93. Horas extra: "Aprobar todas" para el director (2026-11-27)
+
+**Pedido.** El director que aprueba horas extra no tiene que aprobarlas una por una.
+
+- **API:** `PUT /api/asistencia/horas-extra/aprobar-varias` (`canDirigirEquipo`), cuerpo `{ ids, comentario? }`
+  (`aprobarVariasHoraExtraSchema`). Va antes de `/:id/aprobar`.
+- **Se mandan los ids que el director tiene en pantalla**, no "todo lo pendiente": una solicitud que llega después de
+  abrir la bandeja no se aprueba sin verla. Máximo 300 por llamada.
+- `horaExtraService.aprobarVarias`: cada id pasa por `solicitudParaResolver` (la de otro director o ya resuelta se
+  **omite** y se informa en `omitidas`, sin tumbar las demás). Cada una se aprueba con la clasificación que calculó el
+  servidor (sin ajuste de tramos; una que no suma tiempo se omite para revisarla una por una). Todas en **una sola
+  transacción**, con el recálculo de la jornada de cada día (§88) y los avisos al jefe que la pidió y al empleado; los
+  avisos en vivo y `notificarCambioJornada` van después del commit. La aprobación individual y la masiva comparten
+  `aprobarEnConexion`. Responde `{ success, aprobadas, omitidas }`.
+- **Frontend** (`HorasExtra.jsx`): en "Por aprobar" con el filtro Pendientes y más de una solicitud aparece
+  "Aprobar todas (N)". Pide confirmación en la misma pantalla con el total de horas ("¿Aprobar las 5 solicitudes
+  (7 h 30 min) con la clasificación calculada?"). La confirmación se cierra al cambiar de pestaña o filtro. Las que
+  necesiten ajuste o rechazo se resuelven antes, una por una, con los botones de siempre.
+
+Verificado en local en el navegador con un escenario temporal (empleado1 como jefe de las fichas 9-12 y Marta,
+`9000000001`, como directora): 5 pendientes → "Aprobar todas" → 5 aprobadas de 90 min, 10 avisos (jefe y empleado);
+escenario revertido y solicitudes borradas. 508 tests.
+
+**Despliegue:** backend y frontend, sin migración. Backend primero.
